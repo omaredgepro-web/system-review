@@ -28,7 +28,7 @@ body.light-theme {
   --badge-pending-text: #2563eb;
   --badge-hold-text: #d97706;
 }
-
+ 
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
 body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px; direction: rtl; transition: background-color 0.3s, color 0.3s; }
 

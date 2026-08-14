@@ -25,6 +25,26 @@ const USERS_DB = {
   "علي": { password: "123", role: "reviewer", name: "علي" }
 };
 
+// ============ الوضع الداكن / الفاتح ============
+function applyThemeIcon() {
+  const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+  document.querySelectorAll('.theme-toggle-icon').forEach(el => {
+    el.innerText = theme === 'dark' ? '💡' : '🌙';
+  });
+  document.querySelectorAll('.theme-toggle-text').forEach(el => {
+    el.innerText = theme === 'dark' ? 'وضع فاتح' : 'وضع داكن';
+  });
+}
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('app_theme', next);
+  applyThemeIcon();
+}
+
 let supabaseClient;
 let currentUser = null;
 let currentPage = 1;
@@ -36,7 +56,8 @@ let selectedOrderNumbers = new Set();
 
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  
+  applyThemeIcon();
+
   const savedUser = localStorage.getItem('system_user');
   if (savedUser) {
     const userObj = JSON.parse(savedUser);
@@ -153,9 +174,7 @@ async function loadData() {
 
   try {
     let allFetched = [];
-    let from = 0;
-    let step = 1000;
-    let hasMore = true;
+    let from = 0, step = 1000, hasMore = true;
 
     while (hasMore) {
       const { data, error } = await supabaseClient.from(TABLE_NAME).select('*').range(from, from + step - 1);
@@ -165,9 +184,7 @@ async function loadData() {
         allFetched = allFetched.concat(data);
         from += step;
         if (data.length < step) hasMore = false;
-      } else {
-        hasMore = false;
-      }
+      } else { hasMore = false; }
     }
 
     if (allFetched.length === 0) {
@@ -204,19 +221,8 @@ function applyDateFiltering() {
   renderCurrentPage();
 }
 
-function onDateFilterChange() {
-  currentPage = 1;
-  selectedOrderNumbers.clear();
-  updateSelectedCount();
-  applyDateFiltering();
-}
-
-function resetDateToLatest() {
-  document.getElementById('date-filter').value = '';
-  selectedOrderNumbers.clear();
-  updateSelectedCount();
-  applyDateFiltering();
-}
+function onDateFilterChange() { currentPage = 1; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
+function resetDateToLatest() { document.getElementById('date-filter').value = ''; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
 
 function renderCurrentPage() {
   if (!window.allData) return;
@@ -299,11 +305,8 @@ function renderTable(orders) {
 }
 
 function toggleRowSelect(cb, orderNum) {
-  if (cb.checked) {
-    selectedOrderNumbers.add(orderNum);
-  } else {
-    selectedOrderNumbers.delete(orderNum);
-  }
+  if (cb.checked) { selectedOrderNumbers.add(orderNum); } 
+  else { selectedOrderNumbers.delete(orderNum); }
   updateSelectedCount();
 }
 
@@ -311,11 +314,8 @@ function toggleSelectAll(masterCb) {
   if (!window.currentFilteredData) return;
   window.currentFilteredData.forEach(o => {
     const orderNum = o.order_number || o.order_no || o['رقم الطلب'];
-    if (masterCb.checked) {
-      selectedOrderNumbers.add(orderNum);
-    } else {
-      selectedOrderNumbers.delete(orderNum);
-    }
+    if (masterCb.checked) { selectedOrderNumbers.add(orderNum); } 
+    else { selectedOrderNumbers.delete(orderNum); }
   });
   document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = masterCb.checked);
   updateSelectedCount();
@@ -327,10 +327,7 @@ function updateSelectedCount() {
 }
 
 async function executeBulkDelete() {
-  if (selectedOrderNumbers.size === 0) {
-    alert('برجاء تحديد طلب واحد على الأقل للحذف');
-    return;
-  }
+  if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
@@ -340,30 +337,21 @@ async function executeBulkDelete() {
 
   try {
     const { error } = await supabaseClient.from(TABLE_NAME).delete().in(matchColumn, matchValues);
-    if (error) {
-      alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message);
-    } else {
+    if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); } 
+    else {
       alert(`تم حذف ${selectedOrderNumbers.size} طلب بنجاح!`);
       window.masterData = window.masterData.filter(o => !selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
       selectedOrderNumbers.clear();
       updateSelectedCount();
       applyDateFiltering();
     }
-  } catch (err) {
-    alert('خطأ: ' + err.message);
-  }
+  } catch (err) { alert('خطأ: ' + err.message); }
 }
 
 async function executeBulkReassign() {
   const newReviewer = document.getElementById('bulk-reassign-select').value;
-  if (!newReviewer) {
-    alert('برجاء اختيار المراجع الجديد من القائمة');
-    return;
-  }
-  if (selectedOrderNumbers.size === 0) {
-    alert('برجاء تحديد طلب واحد على الأقل لنقله للمراجع');
-    return;
-  }
+  if (!newReviewer) { alert('برجاء اختيار المراجع الجديد من القائمة'); return; }
+  if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل لنقله للمراجع'); return; }
 
   const confirmChange = confirm(`هل أنت تأكد من نقل (${selectedOrderNumbers.size}) طلب إلى المراجع "${newReviewer}"؟`);
   if (!confirmChange) return;
@@ -378,9 +366,8 @@ async function executeBulkReassign() {
 
   try {
     const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).in(matchColumn, matchValues);
-    if (error) {
-      alert('حدث خطأ أثناء نقل الطلبات: ' + error.message);
-    } else {
+    if (error) { alert('حدث خطأ أثناء نقل الطلبات: ' + error.message); } 
+    else {
       alert(`تم تغيير المراجع لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newReviewer}"!`);
       targetOrders.forEach(o => o[reviewerColKey] = newReviewer);
       selectedOrderNumbers.clear();
@@ -388,16 +375,11 @@ async function executeBulkReassign() {
       renderReviewersStats(window.allData);
       renderCurrentPage();
     }
-  } catch (err) {
-    alert('خطأ: ' + err.message);
-  }
+  } catch (err) { alert('خطأ: ' + err.message); }
 }
 
 async function deleteSingleOrder(orderNum) {
-  if (!currentUser || currentUser.role !== 'admin') {
-    alert('هذا الإجراء متاح للأدمن فقط');
-    return;
-  }
+  if (!currentUser || currentUser.role !== 'admin') { alert('هذا الإجراء متاح للأدمن فقط'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
   if (!confirmDelete) return;
 
@@ -409,18 +391,15 @@ async function deleteSingleOrder(orderNum) {
 
   try {
     const { error } = await supabaseClient.from(TABLE_NAME).delete().eq(matchColumn, matchValue);
-    if (error) {
-      alert('حدث خطأ أثناء الحذف: ' + error.message);
-    } else {
+    if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); } 
+    else {
       alert('تم حذف الطلب بنجاح!');
       window.masterData = window.masterData.filter(o => String(o.order_number || o.order_no || o['رقم الطلب']) !== String(orderNum));
       selectedOrderNumbers.delete(orderNum);
       updateSelectedCount();
       applyDateFiltering();
     }
-  } catch (err) {
-    alert('خطأ: ' + err.message);
-  }
+  } catch (err) { alert('خطأ: ' + err.message); }
 }
 
 function handleFileSelect(event) {
@@ -459,8 +438,7 @@ function renderCsvPreview(data) {
 async function uploadCsvToSupabase() {
   if (parsedCsvData.length === 0) return;
   const btn = document.getElementById('btn-upload-supabase');
-  btn.innerText = 'جاري الرفع...';
-  btn.disabled = true;
+  btn.innerText = 'جاري الرفع...'; btn.disabled = true;
 
   try {
     const cleanData = parsedCsvData.map(row => {
@@ -471,19 +449,14 @@ async function uploadCsvToSupabase() {
     });
 
     const { error } = await supabaseClient.from(TABLE_NAME).upsert(cleanData);
-    if (error) {
-      alert('خطأ أثناء الرفع: ' + error.message);
-    } else {
+    if (error) { alert('خطأ أثناء الرفع: ' + error.message); } 
+    else {
       alert('تم الرفع وتوزيع الطلبات بنجاح!');
       await loadData();
       switchTab('dashboard');
     }
-  } catch (err) {
-    alert('خطأ: ' + err.message);
-  } finally {
-    btn.innerText = 'تأكيد وتوزيع الطلبات لـ Supabase';
-    btn.disabled = false;
-  }
+  } catch (err) { alert('خطأ: ' + err.message); } 
+  finally { btn.innerText = 'تأكيد وتوزيع الطلبات لـ Supabase'; btn.disabled = false; }
 }
 
 function openEditModal(orderNum) {
@@ -499,11 +472,7 @@ function openEditModal(orderNum) {
   toggleRejectionField();
 }
 
-function closeModal() {
-  document.getElementById('edit-modal').style.display = 'none';
-  selectedOrder = null;
-}
-
+function closeModal() { document.getElementById('edit-modal').style.display = 'none'; selectedOrder = null; }
 function toggleRejectionField() {
   const status = document.getElementById('modal-review-status').value;
   document.getElementById('rejection-reason-group').style.display = (status === 'مرفوض') ? 'block' : 'none';
@@ -520,8 +489,7 @@ async function saveOrderUpdate() {
   }
 
   const saveBtn = document.getElementById('btn-save-modal');
-  saveBtn.innerText = 'جاري الحفظ...';
-  saveBtn.disabled = true;
+  saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
 
   let matchColumn = selectedOrder.id !== undefined ? 'id' : (selectedOrder['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   let matchValue = selectedOrder[matchColumn];
@@ -536,21 +504,16 @@ async function saveOrderUpdate() {
 
   try {
     const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).eq(matchColumn, matchValue);
-    if (error) {
-      alert('فشل التحديث: ' + error.message);
-    } else {
+    if (error) alert('فشل التحديث: ' + error.message);
+    else {
       Object.assign(selectedOrder, updateData);
       updateKPIs(window.allData);
       renderReviewersStats(window.allData);
       renderCurrentPage();
       closeModal();
     }
-  } catch (err) {
-    alert('خطأ: ' + err.message);
-  } finally {
-    saveBtn.innerText = 'حفظ القرار';
-    saveBtn.disabled = false;
-  }
+  } catch (err) { alert('خطأ: ' + err.message); }
+  finally { saveBtn.innerText = 'حفظ القرار'; saveBtn.disabled = false; }
 }
 
 function updateKPIs(data) {
@@ -612,22 +575,8 @@ function updatePaginationControls(from, to) {
   document.getElementById('btn-next').disabled = (to >= totalRecordsCount);
 }
 
-function changePage(direction) {
-  currentPage += direction;
-  renderCurrentPage();
-}
+function changePage(direction) { currentPage += direction; renderCurrentPage(); }
 
-document.getElementById('search-input').addEventListener('input', () => {
-  currentPage = 1;
-  renderCurrentPage();
-});
-
-document.getElementById('status-filter').addEventListener('change', () => {
-  currentPage = 1;
-  renderCurrentPage();
-});
-
-document.getElementById('reviewer-filter').addEventListener('change', () => {
-  currentPage = 1;
-  renderCurrentPage();
-});
+document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderCurrentPage(); });
+document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
+document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });

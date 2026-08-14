@@ -15,7 +15,7 @@
   --badge-hold-bg: rgba(245, 158, 11, 0.2);
   --badge-hold-text: #fbbf24;
 }
-
+ 
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
 body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px; direction: rtl; }
 

@@ -3,43 +3,91 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>نظام مراجعة الطلبات المباشر</title>
+  <title>نظام مراجعة الطلبات المباشر - EDGE-PRO</title>
   
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
-   
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  
   <!-- ربط ملف التنسيقات CSS -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- 1. شاشة تسجيل الدخول -->
+  <!-- 1. شاشة تسجيل الدخول بالتصميم الجديد (Full Viewport Split) -->
   <div id="login-screen">
-    <div class="login-box">
-      <h2>تسجيل الدخول للنظام</h2>
-      <div class="form-group">
-        <label>اسم المستخدم</label>
-        <input type="text" id="login-username" class="form-control" placeholder="اكتب اسمك (مثال: عمر)">
+    
+    <!-- الجانب الأيسر (نموذج الدخول) -->
+    <div class="login-left-side">
+      <div class="dark-mode-pill">
+        🌙 وضع مظلم
       </div>
-      <div class="form-group">
-        <label>كلمة المرور</label>
-        <input type="password" id="login-password" class="form-control" placeholder="123">
+
+      <div class="login-form-wrapper">
+        <span class="system-sub-title">نظام إدارة ومراجعة طلبات التقنين</span>
+        <h1 class="welcome-heading">مرحباً بك مجدداً</h1>
+
+        <div class="form-group">
+          <label>اسم المستخدم</label>
+          <input type="text" id="login-username" class="form-control" placeholder="أدخل اسم المستخدم">
+        </div>
+
+        <div class="form-group">
+          <label>كلمة المرور</label>
+          <input type="password" id="login-password" class="form-control" placeholder="••••••••">
+        </div>
+
+        <div class="form-options">
+          <label class="remember-me">
+            <input type="checkbox" id="remember-me">
+            <span>تذكرني</span>
+          </label>
+        </div>
+
+        <button class="btn btn-login" onclick="handleLogin()">
+          🔐 تسجيل الدخول
+        </button>
+
+        <p id="login-error" class="login-error-msg"></p>
       </div>
-      <button class="btn btn-primary" onclick="handleLogin()">دخول</button>
-      <p id="login-error" style="color: #f87171; font-size: 12px; margin-top: 10px; display: none;"></p>
+
+      <div class="login-footer">
+        All rights reserved to Developer Omar Sayed 2026 ®
+      </div>
     </div>
+
+    <!-- الجانب الأيمن (الهوية البصرية واللوجو) -->
+    <div class="login-right-side">
+      <div class="brand-hero-content">
+        <!-- شعار EDGE-PRO السداسي -->
+        <div class="hexagon-logo">
+          <div class="hexagon-shape"></div>
+        </div>
+        
+        <h2 class="brand-name">EDGE-PRO</h2>
+        <span class="brand-subtext">For Information Systems</span>
+
+        <h3 class="hero-title">نظام مراجعة الطلبات</h3>
+        <p class="hero-desc">قم بإدارة ومراجعة طلبات التقنين بأعلى معايير الدقة السرعة</p>
+
+        <div class="status-badge">
+          <span class="status-dot"></span>
+          النظام يعمل | v2.0.0
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- 2. محتوى النظام الرئيسي -->
+  <!-- 2. محتوى النظام الرئيسي (Dashboard) -->
   <div id="app-content">
     <div class="header">
       <div class="header-title">
         <h1>نظام مراجعة الطلبات المباشر</h1>
         <p id="user-welcome-text">لوحة التحكم وإدارة المراجعة والطلبات</p>
       </div>
-      <button class="btn btn-danger" onclick="handleLogout()" style="padding: 6px 14px; font-size: 13px;">تسجيل خروج</button>
+      <button class="btn btn-danger" onclick="handleLogout()" style="padding: 8px 16px; font-size: 13px;">تسجيل خروج</button>
     </div>
 
     <div class="tabs-bar">

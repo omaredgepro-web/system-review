@@ -106,6 +106,7 @@ function setupUserSession(username, userInfo) {
   document.getElementById('select-all-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
 
   populateReviewerDropdowns();
   loadData();
@@ -583,6 +584,86 @@ function renderReviewersStats(data) {
       </div>
     `;
   });
+}
+
+// ============ تصدير Excel (للأدمن فقط) ============
+function exportTodayOrdersToExcel() {
+  if (!window.allData || window.allData.length === 0) {
+    alert('لا يوجد طلبات لتصديرها في التاريخ المحدد حاليًا.');
+    return;
+  }
+
+  const dateLabel = document.getElementById('date-filter').value || 'غير محدد';
+
+  const rows = window.allData.map(order => {
+    const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
+    const company = order.company || order['الشركة'] || '-';
+    const reviewer = order.reviewer || order['المراجع'] || '-';
+    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'جاري المراجعة';
+    const orderStatus = order.status || order['الحالة'] || '-';
+    const date = order.date || extractDateString(order) || '-';
+    const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
+
+    return {
+      'رقم الطلب': orderNum,
+      'الشركة': company,
+      'المراجع': reviewer,
+      'الحالة': orderStatus,
+      'المراجعة': reviewStatus,
+      'التاريخ': date,
+      'سبب الرفض': rejectionReason
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [
+    { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 30 }
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'طلبات اليوم');
+  XLSX.writeFile(workbook, `طلبات_${dateLabel}.xlsx`);
+}
+
+function exportReviewerStatsToExcel() {
+  if (!window.allData || window.allData.length === 0) {
+    alert('لا يوجد بيانات لتصدير إحصائيات المراجعين منها.');
+    return;
+  }
+
+  const dateLabel = document.getElementById('date-filter').value || 'غير محدد';
+
+  const stats = {};
+  window.allData.forEach(o => {
+    const name = o.reviewer || o['المراجع'];
+    if (!name) return;
+    const revStatus = o.review_status || o['حالة المراجعة'];
+    if (!stats[name]) stats[name] = { total: 0, accepted: 0, rejected: 0, pending: 0 };
+    stats[name].total++;
+    if (revStatus === 'مقبول') stats[name].accepted++;
+    else if (revStatus === 'مرفوض') stats[name].rejected++;
+    else stats[name].pending++;
+  });
+
+  const rows = Object.keys(stats).map(name => ({
+    'المراجع': name,
+    'إجمالي الطلبات': stats[name].total,
+    'مقبول': stats[name].accepted,
+    'مرفوض': stats[name].rejected,
+    'جاري المراجعة': stats[name].pending
+  }));
+
+  if (rows.length === 0) {
+    alert('لا يوجد مراجعين لتصدير إحصائياتهم.');
+    return;
+  }
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'إحصائيات المراجعين');
+  XLSX.writeFile(workbook, `إحصائيات_المراجعين_${dateLabel}.xlsx`);
 }
 
 function updatePaginationControls(from, to) {

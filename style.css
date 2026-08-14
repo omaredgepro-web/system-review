@@ -1,0 +1,380 @@
+/* ==================== GENERAL STYLES & RESET ==================== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Cairo', sans-serif;
+  background-color: #0f172a;
+  color: #f8fafc;
+  direction: rtl;
+  min-height: 100vh;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ==================== LOGIN SCREEN STYLES (EXACT DESIGN) ==================== */
+#login-screen {
+  display: flex;
+  min-height: 100vh;
+  width: 100vw;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  background-color: #0b0f19;
+}
+
+/* Panel 1: Form Section (Left) */
+.login-left-panel {
+  width: 32%;
+  min-width: 360px;
+  background-color: #0e1526;
+  padding: 40px 35px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-left: 1px solid #1e293b;
+}
+
+.theme-toggle-btn {
+  align-self: flex-start;
+  background: #182238;
+  border: 1px solid #2a3854;
+  color: #94a3b8;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.login-form-container {
+  margin: auto 0;
+}
+
+.login-sub-title {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.login-main-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 30px;
+}
+
+.form-group-custom {
+  margin-bottom: 20px;
+  text-align: right;
+}
+
+.form-group-custom label {
+  display: block;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.form-input-custom {
+  width: 100%;
+  background-color: #0b101d;
+  border: 1px solid #1e293b;
+  color: #ffffff;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-input-custom:focus {
+  border-color: #6366f1;
+}
+
+.remember-me-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 25px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.remember-me-container input[type="checkbox"] {
+  accent-color: #6366f1;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.btn-login-submit {
+  width: 100%;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s;
+}
+
+.btn-login-submit:hover {
+  background: linear-gradient(135deg, #4f46e5, #4338ca);
+}
+
+.login-error-msg {
+  color: #f87171;
+  font-size: 13px;
+  margin-top: 15px;
+  text-align: center;
+  display: none;
+}
+
+.login-footer-copy {
+  text-align: center;
+  font-size: 11px;
+  color: #475569;
+  letter-spacing: 0.5px;
+}
+
+/* Panel 2: Branding Section (Right) */
+.login-right-panel {
+  flex: 1;
+  background: radial-gradient(circle at center, #232258 0%, #0f1226 70%, #080a15 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 40px;
+}
+
+.brand-hexagon-icon {
+  width: 50px;
+  height: 50px;
+  margin-bottom: 15px;
+}
+
+.brand-title-main {
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 2px;
+}
+
+.brand-subtitle-sub {
+  font-size: 12px;
+  color: #818cf8;
+  margin-bottom: 35px;
+  letter-spacing: 0.5px;
+}
+
+.brand-section-heading {
+  font-size: 28px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 12px;
+}
+
+.brand-description-text {
+  font-size: 14px;
+  color: #94a3b8;
+  max-width: 380px;
+  line-height: 1.6;
+  margin-bottom: 35px;
+}
+
+.system-status-pill {
+  font-size: 12px;
+  color: #94a3b8;
+  background-color: rgba(15, 23, 42, 0.6);
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1px solid #1e293b;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot-green {
+  width: 8px;
+  height: 8px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #10b981;
+}
+
+/* ==================== MAIN DASHBOARD STYLES ==================== */
+.app-header {
+  background-color: #1e293b;
+  padding: 15px 30px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #334155;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.user-badge {
+  background-color: #334155;
+  padding: 4px 12px;
+  border-radius: 15px;
+  font-size: 13px;
+  color: #38bdf8;
+}
+
+.btn-logout {
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.app-content {
+  padding: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.card {
+  background-color: #1e293b;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 25px;
+  border: 1px solid #334155;
+}
+
+.card h3 {
+  margin-bottom: 15px;
+  font-size: 18px;
+  color: #f1f5f9;
+}
+
+/* Forms in Dashboard */
+.form-row {
+  display: flex;
+  gap: 15px;
+  align-items: flex-end;
+}
+
+.form-group {
+  flex: 1;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.form-group input, .form-group select {
+  width: 100%;
+  padding: 10px;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  color: #fff;
+  border-radius: 6px;
+  font-family: inherit;
+  outline: none;
+}
+
+.btn-primary {
+  background-color: #6366f1;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  font-family: inherit;
+  width: 100%;
+}
+
+.status-msg {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+/* Table Styles */
+.table-header-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.table-header-action input {
+  padding: 8px 14px;
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  color: white;
+  border-radius: 6px;
+  width: 250px;
+  font-family: inherit;
+}
+
+.table-responsive {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: right;
+}
+
+th, td {
+  padding: 12px 15px;
+  border-bottom: 1px solid #334155;
+}
+
+th {
+  background-color: #0f172a;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.badge-accepted {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.badge-rejected {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.text-center {
+  text-align: center;
+}

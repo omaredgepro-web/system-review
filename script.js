@@ -67,6 +67,7 @@ const certPageSize = 20;
 let certTotalRecordsCount = 0;
 let selectedCertOrder = null;
 let certDataLoaded = false;
+let selectedCertOrderNumbers = new Set();
 
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -715,7 +716,7 @@ function changePage(direction) { currentPage += direction; renderCurrentPage(); 
 
 // ============ تاب طباعة الشهادات (أدمن فقط) ============
 async function loadCertificatesData() {
-  document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="6" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*');
     if (error) throw error;
@@ -724,21 +725,24 @@ async function loadCertificatesData() {
     populateCertLayoutFilter();
     applyCertDateFiltering();
   } catch (err) {
-    document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="6" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
   }
 }
 
 function populateCertLayoutFilter() {
   const filterSelect = document.getElementById('cert-layout-filter');
   const modalSelect = document.getElementById('cert-modal-layout');
+  const bulkReassignSelect = document.getElementById('cert-bulk-reassign-select');
 
   filterSelect.innerHTML = `<option value="ALL">كل المسؤولين</option>`;
   modalSelect.innerHTML = '';
+  bulkReassignSelect.innerHTML = `<option value="">توزيع على المسؤول...</option>`;
 
   Object.keys(USERS_DB).forEach(key => {
     if (USERS_DB[key].role === 'admin') {
       filterSelect.innerHTML += `<option value="${key}">${key}</option>`;
       modalSelect.innerHTML += `<option value="${key}">${key}</option>`;
+      bulkReassignSelect.innerHTML += `<option value="${key}">${key}</option>`;
     }
   });
 }
@@ -769,8 +773,8 @@ function applyCertDateFiltering() {
   renderCertPage();
 }
 
-function onCertDateFilterChange() { certCurrentPage = 1; applyCertDateFiltering(); }
-function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; applyCertDateFiltering(); }
+function onCertDateFilterChange() { certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
+function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 
 function renderCertKpis(data) {
   const total = data.length;
@@ -815,7 +819,7 @@ function renderCertTable(orders) {
   tbody.innerHTML = '';
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
 
@@ -833,9 +837,13 @@ function renderCertTable(orders) {
     else if (status === 'محجوز') badgeClass = 'badge-hold';
     else if (status === 'خطأ جهة ولاية' || status === 'خطأ عنوان') badgeClass = 'badge-error';
 
+    const isChecked = selectedCertOrderNumbers.has(orderNum) ? 'checked' : '';
+
     tbody.innerHTML += `
       <tr>
+        <td style="text-align:center;"><input type="checkbox" class="cert-row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleCertRowSelect(this, '${orderNum}')"></td>
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openCertEditModal('${orderNum}')">تحديث</button></td>
+        <td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleCertOrder('${orderNum}')">🗑️ مسح</button></td>
         <td class="order-no-cell">${orderNum}</td>
         <td>${layout}</td>
         <td><span class="badge ${badgeClass}">${status}</span></td>
@@ -843,6 +851,12 @@ function renderCertTable(orders) {
         <td>${reason}</td>
       </tr>`;
   });
+
+  const selectAllCb = document.getElementById('cert-select-all-checkbox');
+  if (selectAllCb) {
+    const allCurrentChecked = orders.length > 0 && orders.every(o => selectedCertOrderNumbers.has(o.order_number));
+    selectAllCb.checked = allCurrentChecked;
+  }
 }
 
 function updateCertPaginationControls(from, to) {
@@ -859,6 +873,97 @@ function updateCertPaginationControls(from, to) {
 }
 
 function changeCertPage(direction) { certCurrentPage += direction; renderCertPage(); }
+
+// ============ التحديد الجماعي وتوزيع/حذف طلبات الشهادات ============
+function toggleCertRowSelect(cb, orderNum) {
+  if (cb.checked) { selectedCertOrderNumbers.add(orderNum); }
+  else { selectedCertOrderNumbers.delete(orderNum); }
+  updateCertSelectedCount();
+}
+
+function toggleCertSelectAll(masterCb) {
+  if (!window.certFilteredData) return;
+  window.certFilteredData.forEach(o => {
+    const orderNum = o.order_number;
+    if (masterCb.checked) { selectedCertOrderNumbers.add(orderNum); }
+    else { selectedCertOrderNumbers.delete(orderNum); }
+  });
+  document.querySelectorAll('.cert-row-checkbox').forEach(cb => cb.checked = masterCb.checked);
+  updateCertSelectedCount();
+}
+
+function updateCertSelectedCount() {
+  const countEl = document.getElementById('cert-selected-count');
+  if (countEl) countEl.innerText = selectedCertOrderNumbers.size;
+}
+
+async function executeCertBulkReassign() {
+  const newLayout = document.getElementById('cert-bulk-reassign-select').value;
+  if (!newLayout) { alert('برجاء اختيار المسؤول من القائمة'); return; }
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتوزيع'); return; }
+
+  const confirmChange = confirm(`هل أنت تأكد من توزيع (${selectedCertOrderNumbers.size}) طلب على المسؤول "${newLayout}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ Layout: newLayout }).in('id', matchValues);
+    if (error) { alert('حدث خطأ أثناء توزيع الطلبات: ' + error.message); }
+    else {
+      alert(`تم توزيع ${selectedCertOrderNumbers.size} طلب بنجاح على "${newLayout}"!`);
+      targetOrders.forEach(o => { o.Layout = newLayout; o.layout = newLayout; });
+      selectedCertOrderNumbers.clear();
+      updateCertSelectedCount();
+      applyCertDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+async function executeCertBulkDelete() {
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
+  const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedCertOrderNumbers.size}) طلب محدد نهائياً؟`);
+  if (!confirmDelete) return;
+
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).delete().in('id', matchValues);
+    if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); }
+    else {
+      alert(`تم حذف ${selectedCertOrderNumbers.size} طلب بنجاح!`);
+      certMasterData = certMasterData.filter(o => !selectedCertOrderNumbers.has(o.order_number));
+      selectedCertOrderNumbers.clear();
+      updateCertSelectedCount();
+      applyCertDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+async function deleteSingleCertOrder(orderNum) {
+  if (!currentUser || currentUser.role !== 'admin') { alert('هذا الإجراء متاح للأدمن فقط'); return; }
+  const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
+  if (!confirmDelete) return;
+
+  const targetOrder = certAllData.find(o => String(o.order_number) === String(orderNum));
+  if (!targetOrder) return;
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).delete().eq('id', targetOrder.id);
+    if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); }
+    else {
+      alert('تم حذف الطلب بنجاح!');
+      certMasterData = certMasterData.filter(o => String(o.order_number) !== String(orderNum));
+      selectedCertOrderNumbers.delete(orderNum);
+      updateCertSelectedCount();
+      applyCertDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
 
 function openCertEditModal(orderNum) {
   selectedCertOrder = certAllData.find(o => String(o.order_number) === String(orderNum));

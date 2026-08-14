@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-    
+  
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -58,6 +58,7 @@ let totalRecordsCount = 0;
 let selectedOrder = null;
 let parsedCsvData = [];
 let selectedOrderNumbers = new Set();
+let companyRatios = []; // [{ company: 'فيرتكس', percent: 50 }, ...]
 
 // ============ حالة تاب طباعة الشهادات ============
 let certMasterData = [];
@@ -72,6 +73,7 @@ let selectedCertOrderNumbers = new Set();
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   applyThemeIcon();
+  loadCompanyRatios();
 
   const savedUser = localStorage.getItem('system_user');
   if (savedUser) {
@@ -358,6 +360,182 @@ function toggleSelectAll(masterCb) {
 function updateSelectedCount() {
   const countEl = document.getElementById('selected-count');
   if (countEl) countEl.innerText = selectedOrderNumbers.size;
+}
+
+// تحديد أول N طلب "غير موزّع" (لسه معندوش مراجع) ضمن الفلتر الحالي، بدون التكرار على المحدد بالفعل
+function selectNextOrderBatch() {
+  const input = document.getElementById('bulk-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  if (!window.currentFilteredData || window.currentFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const useRatio = document.getElementById('use-company-ratio-checkbox').checked;
+
+  if (useRatio) {
+    selectNextOrderBatchByCompanyRatio(count);
+  } else {
+    selectNextOrderBatchSequential(count);
+  }
+
+  input.value = '';
+}
+
+function selectNextOrderBatchSequential(count) {
+  const unassigned = window.currentFilteredData.filter(o => {
+    const orderNum = o.order_number || o.order_no || o['رقم الطلب'];
+    const reviewer = o.reviewer || o['المراجع'] || '';
+    return !reviewer && !selectedOrderNumbers.has(orderNum);
+  });
+
+  if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد ضمن الفلتر الحالي'); return; }
+
+  const batch = unassigned.slice(0, count);
+  batch.forEach(o => selectedOrderNumbers.add(o.order_number || o.order_no || o['رقم الطلب']));
+
+  updateSelectedCount();
+  renderCurrentPage();
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح غير الموزّع ضمن الفلتر الحالي)`);
+  }
+}
+
+// تحديد N طلب "غير موزّع" مقسّمة حسب نسب الشركات المحفوظة (⚙️ نسب الشركات)
+// أي نسبة متبقية من الـ 100% بتتوزع تلقائيًا من باقي الشركات غير المذكورة في القائمة
+function selectNextOrderBatchByCompanyRatio(count) {
+  if (!companyRatios || companyRatios.length === 0) {
+    alert('لم يتم تحديد أي نسب شركات بعد. اضغط "⚙️ نسب الشركات" أولاً وحدد النسب.');
+    return;
+  }
+
+  const getOrderNum = o => o.order_number || o.order_no || o['رقم الطلب'];
+  const getCompany = o => o.company || o['الشركة'] || 'غير محدد';
+
+  // تجميع الطلبات غير الموزّعة/غير المحددة حسب الشركة، مع الحفاظ على ترتيبها الأصلي
+  const pools = {};
+  window.currentFilteredData.forEach(o => {
+    const reviewer = o.reviewer || o['المراجع'] || '';
+    if (reviewer || selectedOrderNumbers.has(getOrderNum(o))) return;
+    const company = getCompany(o);
+    if (!pools[company]) pools[company] = [];
+    pools[company].push(o);
+  });
+
+  const selectedNow = [];
+  const breakdown = {};
+  let totalSelected = 0;
+
+  // المرحلة 1: التوزيع حسب النسب المحددة لكل شركة
+  companyRatios.forEach(({ company, percent }) => {
+    if (totalSelected >= count) return;
+    const target = Math.round(count * percent / 100);
+    const remainingSlots = count - totalSelected;
+    const pool = pools[company] || [];
+    const takeCount = Math.min(target, remainingSlots, pool.length);
+    if (takeCount > 0) {
+      const taken = pool.splice(0, takeCount);
+      taken.forEach(o => selectedNow.push(o));
+      breakdown[company] = (breakdown[company] || 0) + takeCount;
+      totalSelected += takeCount;
+    }
+  });
+
+  // المرحلة 2: أي عدد ناقص (لنسب غير مكتملة لـ 100% أو نقص في مخزون شركة) بيتكمل من باقي الشركات بترتيبها الأصلي
+  if (totalSelected < count) {
+    const takenSet = new Set(selectedNow);
+    for (const o of window.currentFilteredData) {
+      if (totalSelected >= count) break;
+      const reviewer = o.reviewer || o['المراجع'] || '';
+      if (reviewer || selectedOrderNumbers.has(getOrderNum(o)) || takenSet.has(o)) continue;
+      selectedNow.push(o);
+      const company = getCompany(o);
+      breakdown[company] = (breakdown[company] || 0) + 1;
+      totalSelected++;
+    }
+  }
+
+  if (selectedNow.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد ضمن الفلتر الحالي'); return; }
+
+  selectedNow.forEach(o => selectedOrderNumbers.add(getOrderNum(o)));
+  updateSelectedCount();
+  renderCurrentPage();
+
+  const summaryLines = Object.entries(breakdown).map(([c, n]) => `• ${c}: ${n}`).join('\n');
+  let msg = `تم تحديد ${totalSelected} طلب حسب نسب الشركات:\n${summaryLines}`;
+  if (totalSelected < count) msg += `\n\n(العدد المطلوب كان ${count}، لكن الطلبات المتاحة غير الموزّعة أقل من كده ضمن الفلتر الحالي)`;
+  alert(msg);
+}
+
+function clearOrderSelection() {
+  selectedOrderNumbers.clear();
+  updateSelectedCount();
+  renderCurrentPage();
+}
+
+// ============ إدارة نسب توزيع الشركات ============
+function loadCompanyRatios() {
+  try {
+    const saved = localStorage.getItem('company_distribution_ratios');
+    companyRatios = saved ? JSON.parse(saved) : [];
+  } catch (e) { companyRatios = []; }
+}
+
+function openCompanyRatioModal() {
+  renderCompanyRatioRows();
+  document.getElementById('company-ratio-modal').style.display = 'flex';
+}
+
+function closeCompanyRatioModal() {
+  document.getElementById('company-ratio-modal').style.display = 'none';
+}
+
+function renderCompanyRatioRows() {
+  const container = document.getElementById('company-ratio-rows');
+  container.innerHTML = '';
+
+  const rows = companyRatios.length > 0 ? companyRatios : [{ company: '', percent: '' }];
+  rows.forEach(r => appendCompanyRatioRow(r.company, r.percent));
+}
+
+function appendCompanyRatioRow(company, percent) {
+  const container = document.getElementById('company-ratio-rows');
+  const row = document.createElement('div');
+  row.setAttribute('data-ratio-row', '');
+  row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:10px;';
+  row.innerHTML = `
+    <input type="text" class="form-control ratio-company-input" placeholder="اسم الشركة" value="${company || ''}" style="flex:2;">
+    <input type="number" class="form-control ratio-percent-input" placeholder="%" min="0" max="100" value="${percent !== undefined && percent !== '' ? percent : ''}" style="flex:1;">
+    <button type="button" class="btn-delete-row" onclick="this.closest('[data-ratio-row]').remove()">✕</button>
+  `;
+  container.appendChild(row);
+}
+
+function addCompanyRatioRow() {
+  appendCompanyRatioRow('', '');
+}
+
+function saveCompanyRatios() {
+  const rowEls = document.querySelectorAll('#company-ratio-rows [data-ratio-row]');
+  const newRatios = [];
+
+  rowEls.forEach(row => {
+    const company = row.querySelector('.ratio-company-input').value.trim();
+    const percent = parseFloat(row.querySelector('.ratio-percent-input').value);
+    if (company && !isNaN(percent) && percent > 0) {
+      newRatios.push({ company, percent });
+    }
+  });
+
+  const totalPercent = newRatios.reduce((sum, r) => sum + r.percent, 0);
+  if (totalPercent > 100) {
+    alert(`مجموع النسب حاليًا ${totalPercent}% وهو أكبر من 100%. برجاء تعديل النسب بحيث لا يتجاوز المجموع 100%.`);
+    return;
+  }
+
+  companyRatios = newRatios;
+  localStorage.setItem('company_distribution_ratios', JSON.stringify(companyRatios));
+  closeCompanyRatioModal();
 }
 
 async function executeBulkDelete() {
@@ -895,6 +1073,39 @@ function toggleCertSelectAll(masterCb) {
 function updateCertSelectedCount() {
   const countEl = document.getElementById('cert-selected-count');
   if (countEl) countEl.innerText = selectedCertOrderNumbers.size;
+}
+
+// تحديد أول N طلب "غير موزّع" (لسه معندوش مسؤول) ضمن الفلتر الحالي، بدون التكرار على المحدد بالفعل
+function selectNextCertBatch() {
+  const input = document.getElementById('cert-bulk-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  if (!window.certFilteredData || window.certFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const unassigned = window.certFilteredData.filter(o => {
+    const layout = o.Layout || o.layout || '';
+    return !layout && !selectedCertOrderNumbers.has(o.order_number);
+  });
+
+  if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد ضمن الفلتر الحالي'); return; }
+
+  const batch = unassigned.slice(0, count);
+  batch.forEach(o => selectedCertOrderNumbers.add(o.order_number));
+
+  updateCertSelectedCount();
+  renderCertPage();
+  input.value = '';
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح غير الموزّع ضمن الفلتر الحالي)`);
+  }
+}
+
+function clearCertSelection() {
+  selectedCertOrderNumbers.clear();
+  updateCertSelectedCount();
+  renderCertPage();
 }
 
 async function executeCertBulkReassign() {

@@ -3,920 +3,158 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>نظام مراجعة الطلبات المباشر</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <title>نظام مراجعة الطلبات - EDGE-PRO</title>
+  
+  <!-- خط Cairo من Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   
-  <style>
-    :root {
-      --bg-dark: #0b0f19;
-      --card-bg: #151c2c;
-      --card-border: #1e293b;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent-purple: #6366f1;
-      --accent-purple-hover: #4f46e5;
-      --badge-accept-bg: rgba(16, 185, 129, 0.2);
-      --badge-accept-text: #34d399;
-      --badge-reject-bg: rgba(239, 68, 68, 0.2);
-      --badge-reject-text: #f87171;
-      --badge-pending-bg: rgba(59, 130, 246, 0.2);
-      --badge-pending-text: #60a5fa;
-      --badge-hold-bg: rgba(245, 158, 11, 0.2);
-      --badge-hold-text: #fbbf24;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
-    body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px; direction: rtl; }
-
-    /* Login Screen */
-    #login-screen { display: flex; justify-content: center; align-items: center; min-height: 80vh; }
-    .login-box { background: var(--card-bg); border: 1px solid var(--card-border); padding: 35px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; }
-    .login-box h2 { margin-bottom: 20px; font-weight: 800; }
-    .form-group { margin-bottom: 16px; text-align: right; }
-    .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
-    .form-control { width: 100%; background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 10px; border-radius: 8px; font-size: 14px; outline: none; }
-    
-    #app-content { display: none; }
-
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .header-title h1 { font-size: 24px; font-weight: 800; }
-    .header-title p { font-size: 13px; color: var(--text-muted); }
-
-    .tabs-bar { display: flex; gap: 10px; margin-bottom: 25px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; }
-    .tab-btn { padding: 10px 20px; background: transparent; border: none; color: var(--text-muted); font-weight: 700; font-size: 15px; cursor: pointer; border-radius: 8px; transition: all 0.2s; }
-    .tab-btn.active { background-color: var(--accent-purple); color: #fff; }
-
-    .btn { padding: 8px 18px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
-    .btn-primary { background-color: var(--accent-purple); color: white; width: 100%; justify-content: center; }
-    .btn-primary:hover { background-color: var(--accent-purple-hover); }
-    .btn-secondary { background-color: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border); }
-    .btn-danger { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .btn-danger:hover { background-color: rgba(239, 68, 68, 0.4); }
-
-    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
-    .kpi-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; text-align: center; }
-    .kpi-title { font-size: 14px; color: var(--text-muted); margin-bottom: 10px; }
-    .kpi-value { font-size: 32px; font-weight: 800; }
-
-    /* تحسين الهيكل وإخفاء/إظهار السايدبار */
-    .dashboard-layout { position: relative; width: 100%; }
-
-    .sidebar-drawer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 320px;
-      height: 100%;
-      z-index: 99;
-      background-color: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: -5px 0 25px rgba(0, 0, 0, 0.5);
-      display: none; /* مخفي افتراضياً لتوفير المساحة */
-      max-height: 80vh;
-      overflow-y: auto;
-    }
-
-    .sidebar-drawer.active { display: block; }
-
-    .reviewer-stat { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--card-border); }
-    .reviewer-stat:last-child { border-bottom: none; }
-    .reviewer-info .name { font-weight: 700; font-size: 14px; }
-    .reviewer-info .total { font-size: 12px; color: var(--text-muted); }
-    .reviewer-counts { font-size: 12px; text-align: left; }
-    .count-accepted { color: var(--badge-accept-text); }
-    .count-rejected { color: var(--badge-reject-text); }
-
-    .main-content { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; width: 100%; }
-    .table-container { overflow-x: auto; position: relative; width: 100%; max-width: 100%; }
-
-    .table-filters { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
-    .search-input, .filter-select, .date-input { background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; font-size: 14px; outline: none; }
-    .search-input { width: 200px; }
-
-    /* شريط تحكم الأدمن للعمليات الجماعية */
-    .admin-bulk-actions { display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent-purple); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; align-items: center; justify-content: space-between; gap: 10px; }
-
-    table { width: 100%; border-collapse: collapse; white-space: nowrap; }
-    th { text-align: right; color: var(--text-muted); font-size: 13px; padding: 12px 16px; border-bottom: 1px solid var(--card-border); background-color: var(--card-bg); }
-    td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--card-border); vertical-align: middle; }
-
-    /* تثبيت الأعمدة الخاصة بالإجراءات لتسهيل الضغط عليها دون الحاجة لـ Scroll */
-    .sticky-action-col {
-      position: sticky;
-      left: 0;
-      background-color: var(--card-bg);
-      z-index: 10;
-      border-right: 1px solid var(--card-border);
-    }
-
-    .order-no-cell { direction: ltr; text-align: right; font-family: monospace, 'Cairo', sans-serif; font-weight: 600; letter-spacing: 0.5px; }
-
-    .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-    .badge-accepted { background: var(--badge-accept-bg); color: var(--badge-accept-text); }
-    .badge-rejected { background: var(--badge-reject-bg); color: var(--badge-reject-text); }
-    .badge-pending { background: var(--badge-pending-bg); color: var(--badge-pending-text); }
-    .badge-hold { background: var(--badge-hold-bg); color: var(--badge-hold-text); }
-
-    .btn-open { background-color: var(--accent-purple); color: white; padding: 5px 14px; font-size: 12px; border-radius: 6px; cursor: pointer; border: none; }
-    .btn-delete-row { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 5px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; }
-    .btn-delete-row:hover { background-color: rgba(239, 68, 68, 0.4); }
-
-    .pagination-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--card-border); }
-    .pagination-info { font-size: 13px; color: var(--text-muted); }
-    .pagination-buttons { display: flex; gap: 8px; }
-    .page-btn { padding: 6px 12px; background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 6px; cursor: pointer; font-size: 13px; }
-    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    .admin-container { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 25px; }
-    .upload-box { border: 2px dashed var(--card-border); padding: 30px; text-align: center; border-radius: 12px; background: var(--bg-dark); margin-bottom: 20px; }
-    .file-input { display: none; }
-
-    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
-    .modal { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; width: 450px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .modal-header h3 { font-size: 18px; }
-    .close-btn { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
-    textarea.form-control { resize: vertical; min-height: 90px; }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-
-    input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-purple); }
-  </style>
+  <!-- مكتبة Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- ملف التصميم المنفصل -->
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- 1. شاشة تسجيل الدخول -->
+  <!-- ==================== 1. شاشة تسجيل الدخول ==================== -->
   <div id="login-screen">
-    <div class="login-box">
-      <h2>تسجيل الدخول للنظام</h2>
-      <div class="form-group">
-        <label>اسم المستخدم</label>
-        <input type="text" id="login-username" class="form-control" placeholder="اكتب اسمك (مثال: عمر)">
+    
+    <!-- الجانب الأيسر: النموذج -->
+    <div class="login-left-panel">
+      <button class="theme-toggle-btn" type="button">وضع مظلم 🌙</button>
+
+      <div class="login-form-container">
+        <div class="login-sub-title">نظام إدارة ومراجعة طلبات التقنين</div>
+        <h2 class="login-main-title">مرحباً بك مجدداً</h2>
+
+        <form id="login-form" onsubmit="handleLogin(event)">
+          <div class="form-group-custom">
+            <label for="login-username">اسم المستخدم</label>
+            <input type="text" id="login-username" class="form-input-custom" placeholder="أدخل اسم المستخدم" required autocomplete="username">
+          </div>
+
+          <div class="form-group-custom">
+            <label for="login-password">كلمة المرور</label>
+            <input type="password" id="login-password" class="form-input-custom" placeholder="••••••••" required autocomplete="current-password">
+          </div>
+
+          <div class="remember-me-container">
+            <input type="checkbox" id="remember-me">
+            <label for="remember-me">تذكرني</label>
+          </div>
+
+          <button type="submit" class="btn-login-submit">
+            🔒 تسجيل الدخول
+          </button>
+        </form>
+
+        <p id="login-error" class="login-error-msg"></p>
       </div>
-      <div class="form-group">
-        <label>كلمة المرور</label>
-        <input type="password" id="login-password" class="form-control" placeholder="123">
+
+      <div class="login-footer-copy">
+        All rights reserved to Developer Omar Sayed 2026 ®
       </div>
-      <button class="btn btn-primary" onclick="handleLogin()">دخول</button>
-      <p id="login-error" style="color: #f87171; font-size: 12px; margin-top: 10px; display: none;"></p>
     </div>
+
+    <!-- الجانب الأيمن: الهوية والشعار -->
+    <div class="login-right-panel">
+      <!-- شعار السداسي -->
+      <svg class="brand-hexagon-icon" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"></path>
+      </svg>
+      
+      <div class="brand-title-main">EDGE-PRO</div>
+      <div class="brand-subtitle-sub">For Information Systems</div>
+
+      <h1 class="brand-section-heading">نظام مراجعة الطلبات</h1>
+      <p class="brand-description-text">
+        قم بإدارة ومراجعة طلبات التقنين<br>
+        بأعلى معايير الدقة والسرعة
+      </p>
+
+      <div class="system-status-pill">
+        <span class="status-dot-green"></span>
+        <span>النظام يعمل | v2.0.0</span>
+      </div>
+    </div>
+
   </div>
 
-  <!-- 2. محتوى النظام الرئيسي -->
-  <div id="app-content">
-    <div class="header">
-      <div class="header-title">
-        <h1>نظام مراجعة الطلبات المباشر</h1>
-        <p id="user-welcome-text">لوحة التحكم وإدارة المراجعة والطلبات</p>
+  <!-- ==================== 2. الواجهة الرئيسية للتطبيق ==================== -->
+  <div id="main-app" class="hidden">
+    
+    <!-- الشريط العلوي (Header) -->
+    <header class="app-header">
+      <div class="header-right">
+        <h2>نظام مراجعة الطلبات المباشر</h2>
+        <span class="user-badge" id="current-user-display">المراجع: --</span>
       </div>
-      <button class="btn btn-danger" onclick="handleLogout()" style="padding: 6px 14px; font-size: 13px;">تسجيل خروج</button>
-    </div>
+      <button class="btn-logout" onclick="handleLogout()">تسجيل الخروج 🚪</button>
+    </header>
 
-    <div class="tabs-bar">
-      <button class="tab-btn active" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
-      <button class="tab-btn" id="admin-tab-btn" style="display: none;" onclick="switchTab('admin')">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
-    </div>
-
-    <!-- TAB 1: Dashboard View -->
-    <div id="tab-dashboard">
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-title">إجمالي الطلبات (للتاريخ المحدد)</div>
-          <div class="kpi-value" id="stat-total">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">جاري المراجعة</div>
-          <div class="kpi-value" id="stat-pending">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">مقبول</div>
-          <div class="kpi-value" style="color: var(--badge-accept-text)" id="stat-accepted">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">مرفوض</div>
-          <div class="kpi-value" style="color: var(--badge-reject-text)" id="stat-rejected">0</div>
-        </div>
-      </div>
-
-      <div class="dashboard-layout">
-        
-        <!-- القائمة الجانبية لإحصائيات المراجعين (تظهر وتختفي) -->
-        <div class="sidebar-drawer" id="reviewer-sidebar">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3 style="font-size: 16px;">إحصائيات المراجعين</h3>
-            <button onclick="toggleSidebar()" style="background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer;">✕</button>
-          </div>
-          <div id="reviewers-list"><p style="font-size: 12px; color: var(--text-muted);">جاري التحميل...</p></div>
-        </div>
-
-        <div class="main-content">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <button class="btn btn-secondary" onclick="toggleSidebar()">📊 إحصائيات المراجعين</button>
-              <span id="active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
+    <!-- محتوى Dashboard -->
+    <main class="app-content">
+      
+      <!-- إدخال الطلب الجديد -->
+      <section class="card input-card">
+        <h3>إضافة / مراجعة طلب جديد</h3>
+        <form id="order-form" onsubmit="submitOrder(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="order-id">رقم الطلب</label>
+              <input type="text" id="order-id" placeholder="أدخل رقم الطلب" required>
             </div>
-            <h3 style="font-size: 16px;">قائمة الطلبات</h3>
-          </div>
-          
-          <div class="table-filters">
-            <input type="text" id="search-input" class="search-input" placeholder="ابحث برقم الطلب...">
-            
-            <label style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
-            <select id="reviewer-filter" class="filter-select">
-              <option value="ALL">كل المراجعين</option>
-            </select>
 
-            <label style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
-            <input type="date" id="date-filter" class="date-input" onchange="onDateFilterChange()">
-            <button class="btn btn-secondary" onclick="resetDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
-
-            <select id="status-filter" class="filter-select">
-              <option value="ALL">كل الحالات</option>
-              <option value="مقبول">مقبول</option>
-              <option value="مرفوض">مرفوض</option>
-              <option value="معلق">معلق</option>
-            </select>
-          </div>
-
-          <!-- شريط الإجراءات الجماعية للأدمن -->
-          <div id="admin-bulk-bar" class="admin-bulk-actions">
-            <div>
-              <span style="font-weight: 700; font-size: 13px;">تم تحديد: <span id="selected-count">0</span> طلب</span>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center;">
-              <select id="bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
-                <option value="">تغيير المراجع إلى...</option>
+            <div class="form-group">
+              <label for="order-status">حالة الطلب</label>
+              <select id="order-status" required>
+                <option value="">اختر الحالة</option>
+                <option value="مقبول">مقبول</option>
+                <option value="مرفوض">مرفوض</option>
               </select>
-              <button class="btn btn-secondary" onclick="executeBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التغيير</button>
-              <button class="btn btn-danger" onclick="executeBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
+            </div>
+
+            <div class="form-group btn-group">
+              <button type="submit" class="btn-primary" id="btn-save">حفظ الطلب 💾</button>
             </div>
           </div>
+        </form>
+        <p id="order-msg" class="status-msg"></p>
+      </section>
 
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr id="table-header-row">
-                  <th id="select-all-header" style="display: none; width: 40px; text-align: center;">
-                    <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)">
-                  </th>
-                  <th class="sticky-action-col">إجراء</th>
-                  <th id="admin-action-header" class="sticky-action-col" style="display: none;">حذف</th>
-                  <th>رقم الطلب</th>
-                  <th>الشركة</th>
-                  <th>المراجع</th>
-                  <th>الحالة</th>
-                  <th>المراجعة</th>
-                  <th>التاريخ</th>
-                  <th>سبب الرفض</th>
-                </tr>
-              </thead>
-              <tbody id="orders-tbody">
-                <tr><td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="pagination-bar">
-            <div class="pagination-info" id="pagination-info">عرض الصفوف...</div>
-            <div class="pagination-buttons">
-              <button class="page-btn" id="btn-prev" onclick="changePage(-1)" disabled>السابق</button>
-              <span id="page-num" style="font-size: 13px; align-self: center;">صفحة 1</span>
-              <button class="page-btn" id="btn-next" onclick="changePage(1)">التالي</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 2: Admin Distribution View -->
-    <div id="tab-admin" style="display: none;">
-      <div class="admin-container">
-        <h2 style="font-size: 20px; margin-bottom: 10px;">لوحة الأدمن: رفع وتوزيع الطلبات على المراجعين</h2>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">قم برفع ملف CSV يحتوي على الأعمدة للتوزيع المباشر لـ Supabase.</p>
-
-        <div class="upload-box">
-          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف CSV هنا أو اضغط للاختيار</p>
-          <input type="file" id="csv-file-input" class="file-input" accept=".csv" onchange="handleFileSelect(event)">
-          <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف CSV</button>
-          <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
+      <!-- جدول الطلبات والبحث -->
+      <section class="card table-card">
+        <div class="table-header-action">
+          <h3>سجل الطلبات المراجعة</h3>
+          <input type="text" id="search-input" oninput="filterOrders()" placeholder="🔍 بحث برقم الطلب أو المراجع...">
         </div>
 
-        <div id="csv-preview-area" style="display: none;">
-          <h3 style="margin-bottom: 10px; font-size: 16px;">معاينة البيانات المراد توزيعها/رفعها (<span id="csv-count">0</span> طلب)</h3>
-          <div style="max-height: 250px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--card-border); border-radius: 8px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>رقم الطلب</th>
-                  <th>الشركة</th>
-                  <th>المراجع المخصص</th>
-                  <th>التاريخ</th>
-                </tr>
-              </thead>
-              <tbody id="csv-preview-tbody"></tbody>
-            </table>
-          </div>
-          <button class="btn btn-primary" id="btn-upload-supabase" onclick="uploadCsvToSupabase()" style="width: auto;">تأكيد وتوزيع الطلبات لـ Supabase</button>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>رقم الطلب</th>
+                <th>الحالة</th>
+                <th>المراجع</th>
+                <th>التاريخ والوقت</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table-body">
+              <tr>
+                <td colspan="5" class="text-center">جاري تحميل البيانات...</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </div>
-    </div>
+      </section>
+
+    </main>
   </div>
 
-  <!-- Modal المراجعة -->
-  <div class="modal-overlay" id="edit-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>اتخاذ قرار بشأن الطلب</h3>
-        <button class="close-btn" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="form-group">
-        <label>رقم الطلب</label>
-        <input type="text" id="modal-order-no" class="form-control" disabled>
-      </div>
-      <div class="form-group">
-        <label>قرار المراجعة</label>
-        <select id="modal-review-status" class="filter-select form-control" onchange="toggleRejectionField()">
-          <option value="مقبول">مقبول</option>
-          <option value="مرفوض">مرفوض</option>
-          <option value="معلق">معلق</option>
-        </select>
-      </div>
-      <div class="form-group" id="rejection-reason-group">
-        <label>سبب الرفض <span style="color: #f87171;">*</span></label>
-        <textarea id="modal-rejection-reason" class="form-control" placeholder="اكتب سبب الرفض هنا..."></textarea>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
-        <button class="btn btn-primary" id="btn-save-modal" onclick="saveOrderUpdate()" style="width: auto;">حفظ القرار</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducGVqenV4d3FmdHhnZmNzaWNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzU3ODYsImV4cCI6MjEwMjIxMTc4Nn0.4nrBcwRm4W51EX8_QtGvTrkwLFVjtiomPXyDU0N1mTQ';
-    const TABLE_NAME = 'system_review1';
-
-    const USERS_DB = {
-      "عمر": { password: "123", role: "admin", name: "عمر" },
-      "موندي": { password: "123", role: "admin", name: "موندي" },
-      "مؤمن": { password: "123", role: "admin", name: "مؤمن" },
-      "ابو هيبة": { password: "123", role: "admin", name: "ابو هيبة" },
-      "دينا": { password: "123", role: "admin", name: "دينا" },
-      "سرحان": { password: "123", role: "admin", name: "سرحان" },
-      "روان": { password: "123", role: "admin", name: "روان" },
-      
-      "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
-      "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
-      "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
-      "نيره": { password: "123", role: "reviewer", name: "نيره" },
-      "مريم": { password: "123", role: "reviewer", name: "مريم" },
-      "ايمان": { password: "123", role: "reviewer", name: "ايمان" },
-      "ايه": { password: "123", role: "reviewer", name: "ايه" },
-      "رحمه": { password: "123", role: "reviewer", name: "رحمه" },
-      "زبادي": { password: "123", role: "reviewer", name: "زبادي" },
-      "عمرو": { password: "123", role: "reviewer", name: "عمرو" },
-      "كريم": { password: "123", role: "reviewer", name: "كريم" },
-      "علي": { password: "123", role: "reviewer", name: "علي" }
-    };
-
-    let supabaseClient;
-    let currentUser = null;
-    let currentPage = 1;
-    const pageSize = 20;
-    let totalRecordsCount = 0;
-    let selectedOrder = null;
-    let parsedCsvData = [];
-    let selectedOrderNumbers = new Set();
-
-    window.addEventListener('DOMContentLoaded', () => {
-      supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      
-      const savedUser = localStorage.getItem('system_user');
-      if (savedUser) {
-        const userObj = JSON.parse(savedUser);
-        setupUserSession(userObj.username, userObj);
-      }
-    });
-
-    function toggleSidebar() {
-      const sidebar = document.getElementById('reviewer-sidebar');
-      sidebar.classList.toggle('active');
-    }
-
-    function handleLogin() {
-      const username = document.getElementById('login-username').value.trim();
-      const password = document.getElementById('login-password').value.trim();
-      const errEl = document.getElementById('login-error');
-
-      errEl.style.display = 'none';
-
-      if (!username || !password) {
-        errEl.innerText = 'يرجى كتابة اسم المستخدم وكلمة المرور';
-        errEl.style.display = 'block';
-        return;
-      }
-
-      const user = USERS_DB[username];
-
-      if (user && user.password === password) {
-        localStorage.setItem('system_user', JSON.stringify({ username, ...user }));
-        setupUserSession(username, user);
-      } else {
-        errEl.innerText = 'اسم المستخدم أو كلمة المرور غير صحيحة';
-        errEl.style.display = 'block';
-      }
-    }
-
-    function setupUserSession(username, userInfo) {
-      currentUser = { username, ...userInfo };
-      
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app-content').style.display = 'block';
-      document.getElementById('user-welcome-text').innerText = `مرحباً بك: ${userInfo.name} (${userInfo.role === 'admin' ? 'أدمن' : 'مراجع'})`;
-
-      const isAdmin = userInfo.role === 'admin';
-      document.getElementById('admin-tab-btn').style.display = isAdmin ? 'block' : 'none';
-      document.getElementById('select-all-header').style.display = isAdmin ? 'table-cell' : 'none';
-      document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
-      document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
-
-      populateReviewerDropdowns();
-      loadData();
-    }
-
-    function populateReviewerDropdowns() {
-      const filterSelect = document.getElementById('reviewer-filter');
-      const reassignSelect = document.getElementById('bulk-reassign-select');
-
-      filterSelect.innerHTML = `<option value="ALL">كل المراجعين</option>`;
-      reassignSelect.innerHTML = `<option value="">تغيير المراجع إلى...</option>`;
-
-      Object.keys(USERS_DB).forEach(key => {
-        if (USERS_DB[key].role === 'reviewer') {
-          filterSelect.innerHTML += `<option value="${key}">${key}</option>`;
-          reassignSelect.innerHTML += `<option value="${key}">${key}</option>`;
-        }
-      });
-    }
-
-    function handleLogout() {
-      localStorage.removeItem('system_user');
-      location.reload();
-    }
-
-    function switchTab(tabName) {
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      if (tabName === 'dashboard') {
-        document.querySelectorAll('.tab-btn')[0].classList.add('active');
-        document.getElementById('tab-dashboard').style.display = 'block';
-        document.getElementById('tab-admin').style.display = 'none';
-      } else {
-        document.querySelectorAll('.tab-btn')[1].classList.add('active');
-        document.getElementById('tab-dashboard').style.display = 'none';
-        document.getElementById('tab-admin').style.display = 'block';
-      }
-    }
-
-    function parseToIsoDate(dateStr) {
-      if (!dateStr) return '';
-      const strVal = String(dateStr).trim();
-
-      if (strVal.includes('/')) {
-        const parts = strVal.split(' ')[0].split('/');
-        if (parts.length === 3) {
-          let month = parseInt(parts[0], 10);
-          let day = parseInt(parts[1], 10);
-          let year = parseInt(parts[2], 10);
-          if (year < 100) year += 2000;
-          return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        }
-      }
-
-      const cleanStr = strVal.split(' ')[0];
-      if (/^\d{4}-\d{2}-\d{2}$/.test(cleanStr)) return cleanStr;
-      return '';
-    }
-
-    function extractDateString(item) {
-      return parseToIsoDate(item.date || item.created_at || item['التاريخ'] || item['تاريخ الطلب'] || '');
-    }
-
-    async function loadData() {
-      const tbody = document.getElementById('orders-tbody');
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري جلب البيانات من Supabase...</td></tr>`;
-
-      try {
-        let allFetched = [];
-        let from = 0, step = 1000, hasMore = true;
-
-        while (hasMore) {
-          const { data, error } = await supabaseClient.from(TABLE_NAME).select('*').range(from, from + step - 1);
-          if (error) throw error;
-
-          if (data && data.length > 0) {
-            allFetched = allFetched.concat(data);
-            from += step;
-            if (data.length < step) hasMore = false;
-          } else { hasMore = false; }
-        }
-
-        if (allFetched.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد بيانات متاحة</td></tr>`;
-          return;
-        }
-
-        window.masterData = allFetched;
-        applyDateFiltering();
-
-      } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
-      }
-    }
-
-    function applyDateFiltering() {
-      if (!window.masterData || window.masterData.length === 0) return;
-
-      const dateInput = document.getElementById('date-filter').value;
-      let targetDate = dateInput;
-
-      if (!targetDate) {
-        const dates = window.masterData.map(extractDateString).filter(Boolean).sort().reverse();
-        targetDate = dates[0] || '';
-        if (targetDate) document.getElementById('date-filter').value = targetDate;
-      }
-
-      window.allData = window.masterData.filter(item => extractDateString(item) === targetDate);
-      document.getElementById('active-date-label').innerText = `يعرض طلبات تاريخ: ${targetDate}`;
-
-      totalRecordsCount = window.allData.length;
-      updateKPIs(window.allData);
-      renderReviewersStats(window.allData);
-      renderCurrentPage();
-    }
-
-    function onDateFilterChange() { currentPage = 1; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
-    function resetDateToLatest() { document.getElementById('date-filter').value = ''; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
-
-    function renderCurrentPage() {
-      if (!window.allData) return;
-
-      const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
-      const statusValue = document.getElementById('status-filter').value;
-      const reviewerValue = document.getElementById('reviewer-filter').value;
-
-      let filtered = window.allData.filter(item => {
-        const orderNum = String(item.order_number || item.order_no || item['رقم الطلب'] || '').toLowerCase();
-        const matchesSearch = !searchValue || orderNum.includes(searchValue);
-        const reviewStatus = item.review_status || item['حالة المراجعة'] || '';
-        const matchesStatus = (statusValue === 'ALL') || (reviewStatus === statusValue);
-        
-        const reviewer = item.reviewer || item['المراجع'] || '';
-        const matchesReviewer = (reviewerValue === 'ALL') || (reviewer === reviewerValue);
-
-        return matchesSearch && matchesStatus && matchesReviewer;
-      });
-
-      totalRecordsCount = filtered.length;
-      const from = (currentPage - 1) * pageSize;
-      const to = from + pageSize;
-
-      window.currentFilteredData = filtered;
-      renderTable(filtered.slice(from, to));
-      updatePaginationControls(from + 1, Math.min(to, totalRecordsCount));
-    }
-
-    function renderTable(orders) {
-      const tbody = document.getElementById('orders-tbody');
-      tbody.innerHTML = '';
-
-      if (orders.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
-        return;
-      }
-
-      const isAdmin = currentUser && currentUser.role === 'admin';
-
-      orders.forEach((order) => {
-        const formattedDate = order.date || extractDateString(order) || '-';
-        const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
-        const company = order.company || order['الشركة'] || '-';
-        const reviewer = order.reviewer || order['المراجع'] || '-';
-        const status = order.status || order['الحالة'] || '-';
-        const reviewStatus = order.review_status || order['حالة المراجعة'] || 'جاري المراجعة';
-        const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
-
-        let reviewBadge = 'badge-pending';
-        if (reviewStatus === 'مقبول') reviewBadge = 'badge-accepted';
-        if (reviewStatus === 'مرفوض') reviewBadge = 'badge-rejected';
-        if (reviewStatus === 'معلق') reviewBadge = 'badge-hold';
-
-        const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
-        const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
-        const adminCellHtml = isAdmin ? `<td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button></td>` : '';
-
-        tbody.innerHTML += `
-          <tr>
-            ${checkboxHtml}
-            <td class="sticky-action-col"><button class="btn btn-open" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
-            ${adminCellHtml}
-            <td class="order-no-cell">${orderNum}</td>
-            <td>${company}</td>
-            <td>${reviewer}</td>
-            <td><span class="badge badge-pending">${status}</span></td>
-            <td><span class="badge ${reviewBadge}">${reviewStatus}</span></td>
-            <td>${formattedDate}</td>
-            <td>${rejectionReason}</td>
-          </tr>
-        `;
-      });
-
-      const selectAllCb = document.getElementById('select-all-checkbox');
-      if (selectAllCb) {
-        const allCurrentChecked = orders.length > 0 && orders.every(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
-        selectAllCb.checked = allCurrentChecked;
-      }
-    }
-
-    function toggleRowSelect(cb, orderNum) {
-      if (cb.checked) { selectedOrderNumbers.add(orderNum); } 
-      else { selectedOrderNumbers.delete(orderNum); }
-      updateSelectedCount();
-    }
-
-    function toggleSelectAll(masterCb) {
-      if (!window.currentFilteredData) return;
-      window.currentFilteredData.forEach(o => {
-        const orderNum = o.order_number || o.order_no || o['رقم الطلب'];
-        if (masterCb.checked) { selectedOrderNumbers.add(orderNum); } 
-        else { selectedOrderNumbers.delete(orderNum); }
-      });
-      document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = masterCb.checked);
-      updateSelectedCount();
-    }
-
-    function updateSelectedCount() {
-      const countEl = document.getElementById('selected-count');
-      if (countEl) countEl.innerText = selectedOrderNumbers.size;
-    }
-
-    async function executeBulkDelete() {
-      if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
-      const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
-      if (!confirmDelete) return;
-
-      const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
-      const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
-      const matchValues = targetOrders.map(o => o[matchColumn]);
-
-      try {
-        const { error } = await supabaseClient.from(TABLE_NAME).delete().in(matchColumn, matchValues);
-        if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); } 
-        else {
-          alert(`تم حذف ${selectedOrderNumbers.size} طلب بنجاح!`);
-          window.masterData = window.masterData.filter(o => !selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
-          selectedOrderNumbers.clear();
-          updateSelectedCount();
-          applyDateFiltering();
-        }
-      } catch (err) { alert('خطأ: ' + err.message); }
-    }
-
-    async function executeBulkReassign() {
-      const newReviewer = document.getElementById('bulk-reassign-select').value;
-      if (!newReviewer) { alert('برجاء اختيار المراجع الجديد من القائمة'); return; }
-      if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل لنقله للمراجع'); return; }
-
-      const confirmChange = confirm(`هل أنت تأكد من نقل (${selectedOrderNumbers.size}) طلب إلى المراجع "${newReviewer}"؟`);
-      if (!confirmChange) return;
-
-      const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
-      const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
-      const matchValues = targetOrders.map(o => o[matchColumn]);
-
-      const reviewerColKey = ('reviewer' in targetOrders[0]) ? 'reviewer' : 'المراجع';
-      const updateData = {};
-      updateData[reviewerColKey] = newReviewer;
-
-      try {
-        const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).in(matchColumn, matchValues);
-        if (error) { alert('حدث خطأ أثناء نقل الطلبات: ' + error.message); } 
-        else {
-          alert(`تم تغيير المراجع لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newReviewer}"!`);
-          targetOrders.forEach(o => o[reviewerColKey] = newReviewer);
-          selectedOrderNumbers.clear();
-          updateSelectedCount();
-          renderReviewersStats(window.allData);
-          renderCurrentPage();
-        }
-      } catch (err) { alert('خطأ: ' + err.message); }
-    }
-
-    async function deleteSingleOrder(orderNum) {
-      if (!currentUser || currentUser.role !== 'admin') { alert('هذا الإجراء متاح للأدمن فقط'); return; }
-      const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
-      if (!confirmDelete) return;
-
-      const targetOrder = window.allData.find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
-      if (!targetOrder) return;
-
-      let matchColumn = targetOrder.id !== undefined ? 'id' : (targetOrder['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
-      let matchValue = targetOrder[matchColumn];
-
-      try {
-        const { error } = await supabaseClient.from(TABLE_NAME).delete().eq(matchColumn, matchValue);
-        if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); } 
-        else {
-          alert('تم حذف الطلب بنجاح!');
-          window.masterData = window.masterData.filter(o => String(o.order_number || o.order_no || o['رقم الطلب']) !== String(orderNum));
-          selectedOrderNumbers.delete(orderNum);
-          updateSelectedCount();
-          applyDateFiltering();
-        }
-      } catch (err) { alert('خطأ: ' + err.message); }
-    }
-
-    function handleFileSelect(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      document.getElementById('file-name-display').innerText = `تم اختيار الملف: ${file.name}`;
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: function(results) {
-          parsedCsvData = results.data;
-          renderCsvPreview(parsedCsvData);
-        }
-      });
-    }
-
-    function renderCsvPreview(data) {
-      const tbody = document.getElementById('csv-preview-tbody');
-      tbody.innerHTML = '';
-      document.getElementById('csv-count').innerText = data.length;
-      document.getElementById('csv-preview-area').style.display = 'block';
-
-      data.slice(0, 10).forEach(row => {
-        tbody.innerHTML += `
-          <tr>
-            <td>${row.order_number || row['رقم الطلب'] || '-'}</td>
-            <td>${row.company || row['الشركة'] || '-'}</td>
-            <td>${row.reviewer || row['المراجع'] || '-'}</td>
-            <td>${row.date || row['التاريخ'] || '-'}</td>
-          </tr>
-        `;
-      });
-    }
-
-    async function uploadCsvToSupabase() {
-      if (parsedCsvData.length === 0) return;
-      const btn = document.getElementById('btn-upload-supabase');
-      btn.innerText = 'جاري الرفع...'; btn.disabled = true;
-
-      try {
-        const cleanData = parsedCsvData.map(row => {
-          const newRow = { ...row };
-          if (newRow.id === "" || newRow.id === undefined || newRow.id === null) delete newRow.id;
-          Object.keys(newRow).forEach(key => { if (newRow[key] === "") delete newRow[key]; });
-          return newRow;
-        });
-
-        const { error } = await supabaseClient.from(TABLE_NAME).upsert(cleanData);
-        if (error) { alert('خطأ أثناء الرفع: ' + error.message); } 
-        else {
-          alert('تم الرفع وتوزيع الطلبات بنجاح!');
-          await loadData();
-          switchTab('dashboard');
-        }
-      } catch (err) { alert('خطأ: ' + err.message); } 
-      finally { btn.innerText = 'تأكيد وتوزيع الطلبات لـ Supabase'; btn.disabled = false; }
-    }
-
-    function openEditModal(orderNum) {
-      selectedOrder = window.allData.find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
-      if (!selectedOrder) return;
-
-      document.getElementById('modal-order-no').value = orderNum;
-      const currentStatus = selectedOrder.review_status || selectedOrder['حالة المراجعة'] || 'مقبول';
-      document.getElementById('modal-review-status').value = ['مقبول', 'مرفوض', 'معلق'].includes(currentStatus) ? currentStatus : 'مقبول';
-      document.getElementById('modal-rejection-reason').value = selectedOrder.rejection_reason || selectedOrder.reason || selectedOrder['سبب الرفض'] || '';
-
-      document.getElementById('edit-modal').style.display = 'flex';
-      toggleRejectionField();
-    }
-
-    function closeModal() { document.getElementById('edit-modal').style.display = 'none'; selectedOrder = null; }
-    function toggleRejectionField() {
-      const status = document.getElementById('modal-review-status').value;
-      document.getElementById('rejection-reason-group').style.display = (status === 'مرفوض') ? 'block' : 'none';
-    }
-
-    async function saveOrderUpdate() {
-      if (!selectedOrder) return;
-      const newReviewStatus = document.getElementById('modal-review-status').value;
-      const newRejectionReason = document.getElementById('modal-rejection-reason').value.trim();
-
-      if (newReviewStatus === 'مرفوض' && !newRejectionReason) {
-        alert('يرجى كتابة سبب الرفض');
-        return;
-      }
-
-      const saveBtn = document.getElementById('btn-save-modal');
-      saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
-
-      let matchColumn = selectedOrder.id !== undefined ? 'id' : (selectedOrder['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
-      let matchValue = selectedOrder[matchColumn];
-
-      const updateData = {};
-      const finalReason = (newReviewStatus === 'مرفوض') ? newRejectionReason : '-';
-
-      if ('review_status' in selectedOrder) updateData.review_status = newReviewStatus;
-      if ('حالة المراجعة' in selectedOrder) updateData['حالة المراجعة'] = newReviewStatus;
-      if ('rejection_reason' in selectedOrder) updateData.rejection_reason = finalReason;
-      if ('سبب الرفض' in selectedOrder) updateData['سبب الرفض'] = finalReason;
-
-      try {
-        const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).eq(matchColumn, matchValue);
-        if (error) alert('فشل التحديث: ' + error.message);
-        else {
-          Object.assign(selectedOrder, updateData);
-          updateKPIs(window.allData);
-          renderReviewersStats(window.allData);
-          renderCurrentPage();
-          closeModal();
-        }
-      } catch (err) { alert('خطأ: ' + err.message); }
-      finally { saveBtn.innerText = 'حفظ القرار'; saveBtn.disabled = false; }
-    }
-
-    function updateKPIs(data) {
-      document.getElementById('stat-total').innerText = data.length.toLocaleString('ar-EG');
-      const accepted = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مقبول').length;
-      const rejected = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مرفوض').length;
-      document.getElementById('stat-accepted').innerText = accepted.toLocaleString('ar-EG');
-      document.getElementById('stat-rejected').innerText = rejected.toLocaleString('ar-EG');
-      document.getElementById('stat-pending').innerText = (data.length - (accepted + rejected)).toLocaleString('ar-EG');
-    }
-
-    function renderReviewersStats(data) {
-      const stats = {};
-      data.forEach(o => {
-        const name = o.reviewer || o['المراجع'];
-        if (!name) return;
-        const revStatus = o.review_status || o['حالة المراجعة'];
-        if (!stats[name]) stats[name] = { total: 0, accepted: 0, rejected: 0 };
-        stats[name].total++;
-        if (revStatus === 'مقبول') stats[name].accepted++;
-        if (revStatus === 'مرفوض') stats[name].rejected++;
-      });
-
-      const container = document.getElementById('reviewers-list');
-      container.innerHTML = '';
-      const keys = Object.keys(stats);
-      if (keys.length === 0) {
-        container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد مراجعين</p>';
-        return;
-      }
-
-      keys.forEach(name => {
-        const item = stats[name];
-        container.innerHTML += `
-          <div class="reviewer-stat">
-            <div class="reviewer-info">
-              <div class="name">${name}</div>
-              <div class="total">${item.total} طلب</div>
-            </div>
-            <div class="reviewer-counts">
-              <div class="count-accepted">مقبول: ${item.accepted}</div>
-              <div class="count-rejected">مرفوض: ${item.rejected}</div>
-            </div>
-          </div>
-        `;
-      });
-    }
-
-    function updatePaginationControls(from, to) {
-      document.getElementById('page-num').innerText = `صفحة ${currentPage}`;
-      if (totalRecordsCount === 0) {
-        document.getElementById('pagination-info').innerText = '0 من 0';
-        document.getElementById('btn-prev').disabled = true;
-        document.getElementById('btn-next').disabled = true;
-        return;
-      }
-      document.getElementById('pagination-info').innerText = `عرض ${from} إلى ${to} من أصل ${totalRecordsCount.toLocaleString('ar-EG')}`;
-      document.getElementById('btn-prev').disabled = (currentPage === 1);
-      document.getElementById('btn-next').disabled = (to >= totalRecordsCount);
-    }
-
-    function changePage(direction) { currentPage += direction; renderCurrentPage(); }
-
-    document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderCurrentPage(); });
-    document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
-    document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
-  </script>
+  <!-- ملف السكريبت المنفصل -->
+  <script src="script.js"></script>
 </body>
 </html>

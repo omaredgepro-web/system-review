@@ -37,12 +37,36 @@ let selectedOrderNumbers = new Set();
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   
+  // استرجاع الثيم المحفوظ
+  const savedTheme = localStorage.getItem('system_theme');
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-theme');
+    updateThemePillText(true);
+  }
+
   const savedUser = localStorage.getItem('system_user');
   if (savedUser) {
     const userObj = JSON.parse(savedUser);
     setupUserSession(userObj.username, userObj);
   }
 });
+
+/* =========================================================
+   دالة التبديل بين الوضع الفاتح والمظلم (Light / Dark Mode)
+   ========================================================= */
+function toggleTheme() {
+  document.body.classList.toggle('light-theme');
+  const isLight = document.body.classList.contains('light-theme');
+  localStorage.setItem('system_theme', isLight ? 'light' : 'dark');
+  updateThemePillText(isLight);
+}
+
+function updateThemePillText(isLight) {
+  const pill = document.querySelector('.dark-mode-pill');
+  if (pill) {
+    pill.innerText = isLight ? '☀️ وضع فاتح' : '🌙 وضع مظلم';
+  }
+}
 
 function toggleSidebar() {
   const sidebar = document.getElementById('reviewer-sidebar');
@@ -258,12 +282,12 @@ function renderTable(orders) {
 
     const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
-    const adminCellHtml = isAdmin ? `<td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button></td>` : '';
+    const adminCellHtml = isAdmin ? `<td class="sticky-action-col"><button class="btn-table-delete" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button></td>` : '';
 
     tbody.innerHTML += `
       <tr>
         ${checkboxHtml}
-        <td class="sticky-action-col"><button class="btn btn-open" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
+        <td class="sticky-action-col"><button class="btn-table-action" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
         ${adminCellHtml}
         <td class="order-no-cell">${orderNum}</td>
         <td>${company}</td>

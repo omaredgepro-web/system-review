@@ -127,7 +127,7 @@
         <div class="main-content">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <button class="btn btn-secondary" onclick="toggleSidebar()">📊 إحصائيات المراجعين</button>
+              <button class="btn btn-secondary" id="sidebar-toggle-btn" onclick="toggleSidebar()">📊 إحصائيات المراجعين</button>
               <span id="active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
             </div>
             <h3 style="font-size: 16px;">قائمة الطلبات</h3>
@@ -136,7 +136,7 @@
           <div class="table-filters">
             <input type="text" id="search-input" class="search-input" placeholder="ابحث برقم الطلب...">
             
-            <label style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
+            <label id="reviewer-filter-label" style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
             <select id="reviewer-filter" class="filter-select">
               <option value="ALL">كل المراجعين</option>
             </select>

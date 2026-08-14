@@ -12,10 +12,11 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
-   
+
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   
   <!-- ربط ملف التنسيقات CSS -->
@@ -126,9 +127,13 @@
 
         <div class="main-content">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" id="sidebar-toggle-btn" onclick="toggleSidebar()">📊 إحصائيات المراجعين</button>
               <span id="active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
+              <div id="admin-export-actions" style="display: none; align-items: center; gap: 10px;">
+                <button class="btn btn-secondary" onclick="exportTodayOrdersToExcel()">📥 تصدير طلبات اليوم (Excel)</button>
+                <button class="btn btn-secondary" onclick="exportReviewerStatsToExcel()">📈 تصدير إحصائيات المراجعين (Excel)</button>
+              </div>
             </div>
             <h3 style="font-size: 16px;">قائمة الطلبات</h3>
           </div>

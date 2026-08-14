@@ -295,11 +295,29 @@
           </select>
         </div>
 
+        <!-- شريط الإجراءات الجماعية لتاب الشهادات (توزيع وحذف) -->
+        <div id="cert-bulk-bar" class="admin-bulk-actions" style="display: flex;">
+          <div>
+            <span style="font-weight: 700; font-size: 13px;">تم تحديد: <span id="cert-selected-count">0</span> طلب</span>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <select id="cert-bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
+              <option value="">توزيع على المسؤول...</option>
+            </select>
+            <button class="btn btn-secondary" onclick="executeCertBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التوزيع</button>
+            <button class="btn btn-danger" onclick="executeCertBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
+          </div>
+        </div>
+
         <div class="table-container">
           <table>
             <thead>
               <tr>
+                <th style="width: 40px; text-align: center;">
+                  <input type="checkbox" id="cert-select-all-checkbox" onchange="toggleCertSelectAll(this)">
+                </th>
                 <th class="sticky-action-col">إجراء</th>
+                <th class="sticky-action-col">حذف</th>
                 <th>رقم الطلب</th>
                 <th>المسؤول</th>
                 <th>الحالة</th>
@@ -308,7 +326,7 @@
               </tr>
             </thead>
             <tbody id="cert-tbody">
-              <tr><td colspan="6" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+              <tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
             </tbody>
           </table>
         </div>

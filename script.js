@@ -37,11 +37,13 @@ let selectedOrderNumbers = new Set();
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   
-  // استرجاع الثيم المحفوظ
+  // استرجاع وضع الإضاءة المحفوظ
   const savedTheme = localStorage.getItem('system_theme');
   if (savedTheme === 'light') {
     document.body.classList.add('light-theme');
     updateThemePillText(true);
+  } else {
+    updateThemePillText(false);
   }
 
   const savedUser = localStorage.getItem('system_user');
@@ -51,9 +53,9 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-/* =========================================================
-   دالة التبديل بين الوضع الفاتح والمظلم (Light / Dark Mode)
-   ========================================================= */
+/* ==========================================
+   دالة التبديل بين الوضع المظلم والفاتح
+   ========================================== */
 function toggleTheme() {
   document.body.classList.toggle('light-theme');
   const isLight = document.body.classList.contains('light-theme');
@@ -70,7 +72,7 @@ function updateThemePillText(isLight) {
 
 function toggleSidebar() {
   const sidebar = document.getElementById('reviewer-sidebar');
-  sidebar.classList.toggle('active');
+  if (sidebar) sidebar.classList.toggle('active');
 }
 
 function handleLogin() {
@@ -282,12 +284,12 @@ function renderTable(orders) {
 
     const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
-    const adminCellHtml = isAdmin ? `<td class="sticky-action-col"><button class="btn-table-delete" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button></td>` : '';
+    const adminCellHtml = isAdmin ? `<td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button></td>` : '';
 
     tbody.innerHTML += `
       <tr>
         ${checkboxHtml}
-        <td class="sticky-action-col"><button class="btn-table-action" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
+        <td class="sticky-action-col"><button class="btn btn-open" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
         ${adminCellHtml}
         <td class="order-no-cell">${orderNum}</td>
         <td>${company}</td>
@@ -551,14 +553,14 @@ function renderReviewersStats(data) {
   keys.forEach(name => {
     const item = stats[name];
     container.innerHTML += `
-      <div class="reviewer-stat">
-        <div class="reviewer-info">
-          <div class="name">${name}</div>
-          <div class="total">${item.total} طلب</div>
+      <div class="reviewer-card">
+        <div class="reviewer-header">
+          <span class="name">${name}</span>
+          <span class="total-badge">${item.total} طلب</span>
         </div>
         <div class="reviewer-counts">
-          <div class="count-accepted">مقبول: ${item.accepted}</div>
-          <div class="count-rejected">مرفوض: ${item.rejected}</div>
+          <span class="count-accepted">مقبول: ${item.accepted}</span>
+          <span class="count-rejected">مرفوض: ${item.rejected}</span>
         </div>
       </div>
     `;

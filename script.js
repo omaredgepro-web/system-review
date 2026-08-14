@@ -207,12 +207,28 @@ function applyDateFiltering() {
   let targetDate = dateInput;
 
   if (!targetDate) {
-    const dates = window.masterData.map(extractDateString).filter(Boolean).sort().reverse();
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    const sourceForDates = isAdminUser
+      ? window.masterData
+      : window.masterData.filter(item => {
+          const reviewerName = item.reviewer || item['المراجع'] || '';
+          return reviewerName === currentUser.username || reviewerName === currentUser.name;
+        });
+    const dates = sourceForDates.map(extractDateString).filter(Boolean).sort().reverse();
     targetDate = dates[0] || '';
     if (targetDate) document.getElementById('date-filter').value = targetDate;
   }
 
   window.allData = window.masterData.filter(item => extractDateString(item) === targetDate);
+
+  // تقييد الصلاحيات: المراجع (غير الأدمن) يشوف طلباته هو فقط
+  if (currentUser && currentUser.role !== 'admin') {
+    window.allData = window.allData.filter(item => {
+      const reviewerName = item.reviewer || item['المراجع'] || '';
+      return reviewerName === currentUser.username || reviewerName === currentUser.name;
+    });
+  }
+
   document.getElementById('active-date-label').innerText = `يعرض طلبات تاريخ: ${targetDate}`;
 
   totalRecordsCount = window.allData.length;

@@ -15,7 +15,7 @@
   --badge-hold-bg: rgba(245, 158, 11, 0.2);
   --badge-hold-text: #fbbf24;
 }
-
+ 
 /* دعم الوضع الفاتح Light Mode */
 body.light-theme {
   --bg-dark: #f1f5f9;

@@ -2,6 +2,11 @@ const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducGVqenV4d3FmdHhnZmNzaWNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzU3ODYsImV4cCI6MjEwMjIxMTc4Nn0.4nrBcwRm4W51EX8_QtGvTrkwLFVjtiomPXyDU0N1mTQ';
 const TABLE_NAME = 'system_review1';
 
+// ⚠️ عدّل اسم الجدول ده لو مختلف عندك في Supabase (استنتجته من اسم ملف الـ CSV اللي بعتهولي)
+const CERT_TABLE_NAME = 'Layout';
+const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
+const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
+
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -53,6 +58,15 @@ let totalRecordsCount = 0;
 let selectedOrder = null;
 let parsedCsvData = [];
 let selectedOrderNumbers = new Set();
+
+// ============ حالة تاب طباعة الشهادات ============
+let certMasterData = [];
+let certAllData = [];
+let certCurrentPage = 1;
+const certPageSize = 20;
+let certTotalRecordsCount = 0;
+let selectedCertOrder = null;
+let certDataLoaded = false;
 
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -107,6 +121,7 @@ function setupUserSession(username, userInfo) {
   document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
+  document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
 
   populateReviewerDropdowns();
   loadData();
@@ -134,14 +149,20 @@ function handleLogout() {
 
 function switchTab(tabName) {
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  document.getElementById('tab-dashboard').style.display = 'none';
+  document.getElementById('tab-admin').style.display = 'none';
+  document.getElementById('tab-certificates').style.display = 'none';
+
   if (tabName === 'dashboard') {
-    document.querySelectorAll('.tab-btn')[0].classList.add('active');
+    document.getElementById('dashboard-tab-btn').classList.add('active');
     document.getElementById('tab-dashboard').style.display = 'block';
-    document.getElementById('tab-admin').style.display = 'none';
-  } else {
-    document.querySelectorAll('.tab-btn')[1].classList.add('active');
-    document.getElementById('tab-dashboard').style.display = 'none';
+  } else if (tabName === 'admin') {
+    document.getElementById('admin-tab-btn').classList.add('active');
     document.getElementById('tab-admin').style.display = 'block';
+  } else if (tabName === 'certificates') {
+    document.getElementById('certificates-tab-btn').classList.add('active');
+    document.getElementById('tab-certificates').style.display = 'block';
+    if (!certDataLoaded) loadCertificatesData();
   }
 }
 
@@ -691,6 +712,218 @@ function updatePaginationControls(from, to) {
 }
 
 function changePage(direction) { currentPage += direction; renderCurrentPage(); }
+
+// ============ تاب طباعة الشهادات (أدمن فقط) ============
+async function loadCertificatesData() {
+  document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="6" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  try {
+    const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*');
+    if (error) throw error;
+    certMasterData = data || [];
+    certDataLoaded = true;
+    populateCertLayoutFilter();
+    applyCertDateFiltering();
+  } catch (err) {
+    document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="6" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+  }
+}
+
+function populateCertLayoutFilter() {
+  const filterSelect = document.getElementById('cert-layout-filter');
+  const modalSelect = document.getElementById('cert-modal-layout');
+
+  filterSelect.innerHTML = `<option value="ALL">كل المسؤولين</option>`;
+  modalSelect.innerHTML = '';
+
+  Object.keys(USERS_DB).forEach(key => {
+    if (USERS_DB[key].role === 'admin') {
+      filterSelect.innerHTML += `<option value="${key}">${key}</option>`;
+      modalSelect.innerHTML += `<option value="${key}">${key}</option>`;
+    }
+  });
+}
+
+function applyCertDateFiltering() {
+  if (!certMasterData || certMasterData.length === 0) {
+    certAllData = [];
+    renderCertKpis([]);
+    renderCertPage();
+    document.getElementById('cert-active-date-label').innerText = 'لا يوجد بيانات';
+    return;
+  }
+
+  const dateInput = document.getElementById('cert-date-filter').value;
+  let targetDate = dateInput;
+
+  if (!targetDate) {
+    const dates = certMasterData.map(extractDateString).filter(Boolean).sort().reverse();
+    targetDate = dates[0] || '';
+    if (targetDate) document.getElementById('cert-date-filter').value = targetDate;
+  }
+
+  certAllData = certMasterData.filter(item => extractDateString(item) === targetDate);
+  document.getElementById('cert-active-date-label').innerText = `يعرض شهادات تاريخ: ${targetDate}`;
+
+  certTotalRecordsCount = certAllData.length;
+  renderCertKpis(certAllData);
+  renderCertPage();
+}
+
+function onCertDateFilterChange() { certCurrentPage = 1; applyCertDateFiltering(); }
+function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; applyCertDateFiltering(); }
+
+function renderCertKpis(data) {
+  const total = data.length;
+  const printed = data.filter(o => (o.status || '') === 'تم الطباعة').length;
+  const rejected = data.filter(o => (o.status || '') === 'مرفوض').length;
+  const pending = data.filter(o => (o.status || '') === 'معلق').length;
+
+  document.getElementById('cert-stat-total').innerText = total;
+  document.getElementById('cert-stat-printed').innerText = printed;
+  document.getElementById('cert-stat-rejected').innerText = rejected;
+  document.getElementById('cert-stat-pending').innerText = pending;
+}
+
+function renderCertPage() {
+  if (!certAllData) return;
+
+  const searchValue = document.getElementById('cert-search-input').value.trim().toLowerCase();
+  const statusValue = document.getElementById('cert-status-filter').value;
+  const layoutValue = document.getElementById('cert-layout-filter').value;
+
+  let filtered = certAllData.filter(item => {
+    const orderNum = String(item.order_number || '').toLowerCase();
+    const matchesSearch = !searchValue || orderNum.includes(searchValue);
+    const status = item.status || '';
+    const matchesStatus = (statusValue === 'ALL') || (status === statusValue);
+    const layout = item.Layout || item.layout || '';
+    const matchesLayout = (layoutValue === 'ALL') || (layout === layoutValue);
+    return matchesSearch && matchesStatus && matchesLayout;
+  });
+
+  certTotalRecordsCount = filtered.length;
+  const from = (certCurrentPage - 1) * certPageSize;
+  const to = from + certPageSize;
+
+  window.certFilteredData = filtered;
+  renderCertTable(filtered.slice(from, to));
+  updateCertPaginationControls(from + 1, Math.min(to, certTotalRecordsCount));
+}
+
+function renderCertTable(orders) {
+  const tbody = document.getElementById('cert-tbody');
+  tbody.innerHTML = '';
+
+  if (orders.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    return;
+  }
+
+  orders.forEach(order => {
+    const orderNum = order.order_number || '-';
+    const layout = order.Layout || order.layout || '-';
+    const status = order.status || '-';
+    const date = order.date || extractDateString(order) || '-';
+    const reason = order.reason || '-';
+
+    let badgeClass = 'badge-pending';
+    if (status === 'تم الطباعة') badgeClass = 'badge-accepted';
+    else if (status === 'تم إعادة الطباعة') badgeClass = 'badge-reprint';
+    else if (status === 'مرفوض') badgeClass = 'badge-rejected';
+    else if (status === 'محجوز') badgeClass = 'badge-hold';
+    else if (status === 'خطأ جهة ولاية' || status === 'خطأ عنوان') badgeClass = 'badge-error';
+
+    tbody.innerHTML += `
+      <tr>
+        <td class="sticky-action-col"><button class="btn btn-open" onclick="openCertEditModal('${orderNum}')">تحديث</button></td>
+        <td class="order-no-cell">${orderNum}</td>
+        <td>${layout}</td>
+        <td><span class="badge ${badgeClass}">${status}</span></td>
+        <td>${date}</td>
+        <td>${reason}</td>
+      </tr>`;
+  });
+}
+
+function updateCertPaginationControls(from, to) {
+  if (certTotalRecordsCount === 0) {
+    document.getElementById('cert-pagination-info').innerText = 'لا توجد نتائج';
+    document.getElementById('cert-btn-prev').disabled = true;
+    document.getElementById('cert-btn-next').disabled = true;
+    return;
+  }
+  document.getElementById('cert-pagination-info').innerText = `عرض ${from} إلى ${to} من أصل ${certTotalRecordsCount.toLocaleString('ar-EG')}`;
+  document.getElementById('cert-page-num').innerText = `صفحة ${certCurrentPage}`;
+  document.getElementById('cert-btn-prev').disabled = (certCurrentPage === 1);
+  document.getElementById('cert-btn-next').disabled = (to >= certTotalRecordsCount);
+}
+
+function changeCertPage(direction) { certCurrentPage += direction; renderCertPage(); }
+
+function openCertEditModal(orderNum) {
+  selectedCertOrder = certAllData.find(o => String(o.order_number) === String(orderNum));
+  if (!selectedCertOrder) return;
+
+  document.getElementById('cert-modal-order-no').value = orderNum;
+  document.getElementById('cert-modal-status').value = CERT_STATUSES.includes(selectedCertOrder.status) ? selectedCertOrder.status : 'معلق';
+  document.getElementById('cert-modal-layout').value = selectedCertOrder.Layout || selectedCertOrder.layout || '';
+  document.getElementById('cert-modal-reason').value = selectedCertOrder.reason && selectedCertOrder.reason !== '-' ? selectedCertOrder.reason : '';
+  toggleCertReasonField();
+  document.getElementById('cert-edit-modal').style.display = 'flex';
+}
+
+function closeCertModal() {
+  document.getElementById('cert-edit-modal').style.display = 'none';
+  selectedCertOrder = null;
+}
+
+function toggleCertReasonField() {
+  const status = document.getElementById('cert-modal-status').value;
+  document.getElementById('cert-reason-group').style.display = CERT_REASON_REQUIRED_STATUSES.includes(status) ? 'block' : 'none';
+}
+
+async function saveCertUpdate() {
+  if (!selectedCertOrder) return;
+
+  const newStatus = document.getElementById('cert-modal-status').value;
+  const newLayout = document.getElementById('cert-modal-layout').value;
+  const newReason = document.getElementById('cert-modal-reason').value.trim();
+
+  if (CERT_REASON_REQUIRED_STATUSES.includes(newStatus) && !newReason) {
+    alert('برجاء كتابة السبب.');
+    return;
+  }
+
+  const saveBtn = document.getElementById('cert-btn-save-modal');
+  saveBtn.innerText = 'جاري الحفظ...';
+  saveBtn.disabled = true;
+
+  const updateData = {
+    status: newStatus,
+    Layout: newLayout,
+    reason: CERT_REASON_REQUIRED_STATUSES.includes(newStatus) ? newReason : '-'
+  };
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).eq('id', selectedCertOrder.id);
+    if (error) {
+      alert('فشل التحديث: ' + error.message);
+    } else {
+      Object.assign(selectedCertOrder, updateData);
+      applyCertDateFiltering();
+      closeCertModal();
+    }
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+
+  saveBtn.innerText = 'حفظ';
+  saveBtn.disabled = false;
+}
+
+document.getElementById('cert-search-input').addEventListener('input', () => { certCurrentPage = 1; renderCertPage(); });
+document.getElementById('cert-status-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
+document.getElementById('cert-layout-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 
 document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });

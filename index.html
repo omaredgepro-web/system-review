@@ -3,86 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>نظام مراجعة الطلبات المباشر - EDGE-PRO</title>
+  <title>نظام مراجعة الطلبات المباشر</title>
   
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   
   <!-- ربط ملف التنسيقات CSS -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-   
-  <!-- 1. شاشة تسجيل الدخول بالتصميم الجديد (Full Viewport Split) -->
+
+  <!-- 1. شاشة تسجيل الدخول -->
   <div id="login-screen">
-    
-    <!-- الجانب الأيسر (نموذج الدخول) -->
-    <div class="login-left-side">
-      <div class="dark-mode-pill">
-        🌙 وضع مظلم
+    <div class="login-box">
+      <h2>تسجيل الدخول للنظام</h2>
+      <div class="form-group">
+        <label for="login-username">اسم المستخدم</label>
+        <input type="text" id="login-username" class="form-control" placeholder="اكتب اسمك (مثال: عمر)">
       </div>
-
-      <div class="login-form-wrapper">
-        <span class="system-sub-title">نظام إدارة ومراجعة طلبات التقنين</span>
-        <h1 class="welcome-heading">مرحباً بك مجدداً</h1>
-
-        <div class="form-group">
-          <label>اسم المستخدم</label>
-          <input type="text" id="login-username" class="form-control" placeholder="أدخل اسم المستخدم">
-        </div>
-
-        <div class="form-group">
-          <label>كلمة المرور</label>
-          <input type="password" id="login-password" class="form-control" placeholder="••••••••">
-        </div>
-
-        <div class="form-options">
-          <label class="remember-me">
-            <input type="checkbox" id="remember-me">
-            <span>تذكرني</span>
-          </label>
-        </div>
-
-        <button class="btn btn-login" onclick="handleLogin()">
-          🔐 تسجيل الدخول
-        </button>
-
-        <p id="login-error" class="login-error-msg"></p>
+      <div class="form-group">
+        <label for="login-password">كلمة المرور</label>
+        <input type="password" id="login-password" class="form-control" placeholder="123">
       </div>
-
-      <div class="login-footer">
-        All rights reserved to Developer Omar Sayed 2026 ®
-      </div>
+      <button class="btn btn-primary" onclick="handleLogin()">دخول</button>
+      <p id="login-error" style="color: #f87171; font-size: 12px; margin-top: 10px; display: none;"></p>
     </div>
-
-    <!-- الجانب الأيمن (الهوية البصرية واللوجو) -->
-    <div class="login-right-side">
-      <div class="brand-hero-content">
-        <!-- شعار EDGE-PRO السداسي -->
-        <div class="hexagon-logo">
-          <div class="hexagon-shape"></div>
-        </div>
-        
-        <h2 class="brand-name">EDGE-PRO</h2>
-        <span class="brand-subtext">For Information Systems</span>
-
-        <h3 class="hero-title">نظام مراجعة الطلبات</h3>
-        <p class="hero-desc">قم بإدارة ومراجعة طلبات التقنين بأعلى معايير الدقة السرعة</p>
-
-        <div class="status-badge">
-          <span class="status-dot"></span>
-          النظام يعمل | v2.0.0
-        </div>
-      </div>
-    </div>
-
   </div>
 
-  <!-- 2. محتوى النظام الرئيسي (Dashboard) -->
+  <!-- 2. محتوى النظام الرئيسي -->
   <div id="app-content">
-   <h1>نظام مراجعة الطلبات المباشر</h1>
+    <div class="header">
+      <div class="header-title">
+        <h1>نظام مراجعة الطلبات المباشر</h1>
+        <p id="user-welcome-text">لوحة التحكم وإدارة المراجعة والطلبات</p>
+      </div>
+      <button class="btn btn-danger" onclick="handleLogout()" style="padding: 6px 14px; font-size: 13px;">تسجيل خروج</button>
+    </div>
+
     <div class="tabs-bar">
       <button class="tab-btn active" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
       <button class="tab-btn" id="admin-tab-btn" style="display: none;" onclick="switchTab('admin')">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
@@ -101,11 +60,11 @@
         </div>
         <div class="kpi-card">
           <div class="kpi-title">مقبول</div>
-          <div class="kpi-value" style="color: var(--badge-accept-text)" id="stat-accepted">0</div>
+          <div class="kpi-value" style="color: var(--badge-accept-text);" id="stat-accepted">0</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-title">مرفوض</div>
-          <div class="kpi-value" style="color: var(--badge-reject-text)" id="stat-rejected">0</div>
+          <div class="kpi-value" style="color: var(--badge-reject-text);" id="stat-rejected">0</div>
         </div>
       </div>
 
@@ -117,7 +76,9 @@
             <h3 style="font-size: 16px;">إحصائيات المراجعين</h3>
             <button onclick="toggleSidebar()" style="background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer;">✕</button>
           </div>
-          <div id="reviewers-list"><p style="font-size: 12px; color: var(--text-muted);">جاري التحميل...</p></div>
+          <div id="reviewers-list">
+            <p style="font-size: 12px; color: var(--text-muted);">جاري التحميل...</p>
+          </div>
         </div>
 
         <div class="main-content">
@@ -132,12 +93,12 @@
           <div class="table-filters">
             <input type="text" id="search-input" class="search-input" placeholder="ابحث برقم الطلب...">
             
-            <label style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
+            <label for="reviewer-filter" style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
             <select id="reviewer-filter" class="filter-select">
               <option value="ALL">كل المراجعين</option>
             </select>
 
-            <label style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
+            <label for="date-filter" style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
             <input type="date" id="date-filter" class="date-input" onchange="onDateFilterChange()">
             <button class="btn btn-secondary" onclick="resetDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
 
@@ -182,7 +143,9 @@
                 </tr>
               </thead>
               <tbody id="orders-tbody">
-                <tr><td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+                <tr>
+                  <td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -241,11 +204,11 @@
         <button class="close-btn" onclick="closeModal()">&times;</button>
       </div>
       <div class="form-group">
-        <label>رقم الطلب</label>
+        <label for="modal-order-no">رقم الطلب</label>
         <input type="text" id="modal-order-no" class="form-control" disabled>
       </div>
       <div class="form-group">
-        <label>قرار المراجعة</label>
+        <label for="modal-review-status">قرار المراجعة</label>
         <select id="modal-review-status" class="filter-select form-control" onchange="toggleRejectionField()">
           <option value="مقبول">مقبول</option>
           <option value="مرفوض">مرفوض</option>
@@ -253,7 +216,7 @@
         </select>
       </div>
       <div class="form-group" id="rejection-reason-group">
-        <label>سبب الرفض <span style="color: #f87171;">*</span></label>
+        <label for="modal-rejection-reason">سبب الرفض <span style="color: #f87171;">*</span></label>
         <textarea id="modal-rejection-reason" class="form-control" placeholder="اكتب سبب الرفض هنا..."></textarea>
       </div>
       <div class="modal-actions">

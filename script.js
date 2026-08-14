@@ -217,8 +217,19 @@ function applyDateFiltering() {
   document.getElementById('active-date-label').innerText = `يعرض طلبات تاريخ: ${targetDate}`;
 
   totalRecordsCount = window.allData.length;
-  updateKPIs(window.allData);
-  renderReviewersStats(window.allData);
+  updateKPIs(window.allData); // الحالة العامة (KPIs) دايمًا بتعكس كل الطلبات، حتى للمراجع
+
+  // البيانات اللي فعليًا بتتعرض في الجدول والإحصائيات: المراجع (غير الأدمن) يشوف طلباته هو بس
+  if (currentUser && currentUser.role !== 'admin') {
+    window.visibleData = window.allData.filter(item => {
+      const reviewerName = item.reviewer || item['المراجع'] || '';
+      return reviewerName === currentUser.username || reviewerName === currentUser.name;
+    });
+  } else {
+    window.visibleData = window.allData;
+  }
+
+  renderReviewersStats(window.visibleData);
   renderCurrentPage();
 }
 
@@ -226,13 +237,13 @@ function onDateFilterChange() { currentPage = 1; selectedOrderNumbers.clear(); u
 function resetDateToLatest() { document.getElementById('date-filter').value = ''; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
 
 function renderCurrentPage() {
-  if (!window.allData) return;
+  if (!window.visibleData) return;
 
   const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
   const statusValue = document.getElementById('status-filter').value;
   const reviewerValue = document.getElementById('reviewer-filter').value;
 
-  let filtered = window.allData.filter(item => {
+  let filtered = window.visibleData.filter(item => {
     const orderNum = String(item.order_number || item.order_no || item['رقم الطلب'] || '').toLowerCase();
     const matchesSearch = !searchValue || orderNum.includes(searchValue);
     const reviewStatus = item.review_status || item['حالة المراجعة'] || '';
@@ -532,7 +543,7 @@ async function saveOrderUpdate() {
     else {
       Object.assign(selectedOrder, updateData);
       updateKPIs(window.allData);
-      renderReviewersStats(window.allData);
+      renderReviewersStats(window.visibleData);
       renderCurrentPage();
       closeModal();
     }

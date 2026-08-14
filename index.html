@@ -12,7 +12,7 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
- 
+
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -89,8 +89,9 @@
     </div>
 
     <div class="tabs-bar">
-      <button class="tab-btn active" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
+      <button class="tab-btn active" id="dashboard-tab-btn" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
       <button class="tab-btn" id="admin-tab-btn" style="display: none;" onclick="switchTab('admin')">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
+      <button class="tab-btn" id="certificates-tab-btn" style="display: none;" onclick="switchTab('certificates')">🖨️ طباعة الشهادات</button>
     </div>
 
     <!-- TAB 1: Dashboard View -->
@@ -240,6 +241,88 @@
         </div>
       </div>
     </div>
+
+    <!-- TAB 3: طباعة الشهادات (أدمن فقط) -->
+    <div id="tab-certificates" style="display: none;">
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-title">إجمالي الحالات (للتاريخ المحدد)</div>
+          <div class="kpi-value" id="cert-stat-total">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">تم الطباعة</div>
+          <div class="kpi-value" style="color: var(--badge-accept-text)" id="cert-stat-printed">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">مرفوض</div>
+          <div class="kpi-value" style="color: var(--badge-reject-text)" id="cert-stat-rejected">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">معلق</div>
+          <div class="kpi-value" style="color: var(--badge-pending-text)" id="cert-stat-pending">0</div>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span id="cert-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
+          </div>
+          <h3 style="font-size: 16px;">قائمة حالات الشهادات</h3>
+        </div>
+
+        <div class="table-filters">
+          <input type="text" id="cert-search-input" class="search-input" placeholder="ابحث برقم الطلب...">
+
+          <label style="font-size: 13px; color: var(--text-muted);">المسؤول:</label>
+          <select id="cert-layout-filter" class="filter-select">
+            <option value="ALL">كل المسؤولين</option>
+          </select>
+
+          <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
+          <input type="date" id="cert-date-filter" class="date-input" onchange="onCertDateFilterChange()">
+          <button class="btn btn-secondary" onclick="resetCertDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+
+          <select id="cert-status-filter" class="filter-select">
+            <option value="ALL">كل الحالات</option>
+            <option value="تم الطباعة">تم الطباعة</option>
+            <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
+            <option value="مرفوض">مرفوض</option>
+            <option value="محجوز">محجوز</option>
+            <option value="خطأ جهة ولاية">خطأ جهة ولاية</option>
+            <option value="خطأ عنوان">خطأ عنوان</option>
+            <option value="معلق">معلق</option>
+          </select>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th class="sticky-action-col">إجراء</th>
+                <th>رقم الطلب</th>
+                <th>المسؤول</th>
+                <th>الحالة</th>
+                <th>التاريخ</th>
+                <th>السبب</th>
+              </tr>
+            </thead>
+            <tbody id="cert-tbody">
+              <tr><td colspan="6" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination-bar">
+          <div class="pagination-info" id="cert-pagination-info">عرض الصفوف...</div>
+          <div class="pagination-buttons">
+            <button class="page-btn" id="cert-btn-prev" onclick="changeCertPage(-1)" disabled>السابق</button>
+            <span id="cert-page-num" style="font-size: 13px; align-self: center;">صفحة 1</span>
+            <button class="page-btn" id="cert-btn-next" onclick="changeCertPage(1)">التالي</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Modal المراجعة -->
@@ -272,7 +355,45 @@
     </div>
   </div>
 
+  <!-- Modal تحديث حالة الشهادة -->
+  <div class="modal-overlay" id="cert-edit-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>تحديث حالة الشهادة</h3>
+        <button class="close-btn" onclick="closeCertModal()">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>رقم الطلب</label>
+        <input type="text" id="cert-modal-order-no" class="form-control" disabled>
+      </div>
+      <div class="form-group">
+        <label>المسؤول</label>
+        <select id="cert-modal-layout" class="filter-select form-control"></select>
+      </div>
+      <div class="form-group">
+        <label>الحالة</label>
+        <select id="cert-modal-status" class="filter-select form-control" onchange="toggleCertReasonField()">
+          <option value="تم الطباعة">تم الطباعة</option>
+          <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
+          <option value="مرفوض">مرفوض</option>
+          <option value="محجوز">محجوز</option>
+          <option value="خطأ جهة ولاية">خطأ جهة ولاية</option>
+          <option value="خطأ عنوان">خطأ عنوان</option>
+          <option value="معلق">معلق</option>
+        </select>
+      </div>
+      <div class="form-group" id="cert-reason-group">
+        <label>السبب <span style="color: #f87171;">*</span></label>
+        <textarea id="cert-modal-reason" class="form-control" placeholder="اكتب السبب هنا..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCertModal()">إلغاء</button>
+        <button class="btn btn-primary" id="cert-btn-save-modal" onclick="saveCertUpdate()" style="width: auto;">حفظ</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js"></script>
+  <script src="script.js?v=20260815"></script>
 </body>
 </html>

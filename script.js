@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducGVqenV4d3FmdHhnZmNzaWNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzU3ODYsImV4cCI6MjEwMjIxMTc4Nn0.4nrBcwRm4W51EX8_QtGvTrkwLFVjtiomPXyDU0N1mTQ';
 const TABLE_NAME = 'system_review1';
-  
+
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -10,7 +10,7 @@ const USERS_DB = {
   "دينا": { password: "123", role: "admin", name: "دينا" },
   "سرحان": { password: "123", role: "admin", name: "سرحان" },
   "روان": { password: "123", role: "admin", name: "روان" },
-   
+  
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -207,28 +207,12 @@ function applyDateFiltering() {
   let targetDate = dateInput;
 
   if (!targetDate) {
-    const isAdminUser = currentUser && currentUser.role === 'admin';
-    const sourceForDates = isAdminUser
-      ? window.masterData
-      : window.masterData.filter(item => {
-          const reviewerName = item.reviewer || item['المراجع'] || '';
-          return reviewerName === currentUser.username || reviewerName === currentUser.name;
-        });
-    const dates = sourceForDates.map(extractDateString).filter(Boolean).sort().reverse();
+    const dates = window.masterData.map(extractDateString).filter(Boolean).sort().reverse();
     targetDate = dates[0] || '';
     if (targetDate) document.getElementById('date-filter').value = targetDate;
   }
 
   window.allData = window.masterData.filter(item => extractDateString(item) === targetDate);
-
-  // تقييد الصلاحيات: المراجع (غير الأدمن) يشوف طلباته هو فقط
-  if (currentUser && currentUser.role !== 'admin') {
-    window.allData = window.allData.filter(item => {
-      const reviewerName = item.reviewer || item['المراجع'] || '';
-      return reviewerName === currentUser.username || reviewerName === currentUser.name;
-    });
-  }
-
   document.getElementById('active-date-label').innerText = `يعرض طلبات تاريخ: ${targetDate}`;
 
   totalRecordsCount = window.allData.length;
@@ -479,6 +463,17 @@ function openEditModal(orderNum) {
   selectedOrder = window.allData.find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
   if (!selectedOrder) return;
 
+  // تقييد الصلاحيات: المراجع (غير الأدمن) يقدر ياخد إجراء بس على طلباته هو
+  if (currentUser && currentUser.role !== 'admin') {
+    const reviewerName = selectedOrder.reviewer || selectedOrder['المراجع'] || '';
+    const isOwnOrder = (reviewerName === currentUser.username || reviewerName === currentUser.name);
+    if (!isOwnOrder) {
+      alert('غير مسموح لك بمراجعة هذا الطلب، لأنه غير مخصص لك.');
+      selectedOrder = null;
+      return;
+    }
+  }
+
   document.getElementById('modal-order-no').value = orderNum;
   const currentStatus = selectedOrder.review_status || selectedOrder['حالة المراجعة'] || 'مقبول';
   document.getElementById('modal-review-status').value = ['مقبول', 'مرفوض', 'معلق'].includes(currentStatus) ? currentStatus : 'مقبول';
@@ -496,6 +491,18 @@ function toggleRejectionField() {
 
 async function saveOrderUpdate() {
   if (!selectedOrder) return;
+
+  // تقييد الصلاحيات: تأكيد إضافي إن المراجع مش بيحفظ قرار على طلب مش بتاعه
+  if (currentUser && currentUser.role !== 'admin') {
+    const reviewerName = selectedOrder.reviewer || selectedOrder['المراجع'] || '';
+    const isOwnOrder = (reviewerName === currentUser.username || reviewerName === currentUser.name);
+    if (!isOwnOrder) {
+      alert('غير مسموح لك بحفظ قرار على هذا الطلب، لأنه غير مخصص لك.');
+      closeModal();
+      return;
+    }
+  }
+
   const newReviewStatus = document.getElementById('modal-review-status').value;
   const newRejectionReason = document.getElementById('modal-rejection-reason').value.trim();
 

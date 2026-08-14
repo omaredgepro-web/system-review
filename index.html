@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>نظام مراجعة الطلبات المباشر</title>
- 
+
   <!-- تفعيل الوضع الداكن/الفاتح المحفوظ قبل ظهور الصفحة لتفادي وميض الشاشة -->
   <script>
     (function () {
@@ -12,13 +12,13 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
- 
+
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
-   
+  
   <!-- ربط ملف التنسيقات CSS -->
   <link rel="stylesheet" href="style.css">
 </head>
@@ -160,9 +160,17 @@
           </div>
 
           <!-- شريط الإجراءات الجماعية للأدمن -->
-          <div id="admin-bulk-bar" class="admin-bulk-actions">
-            <div>
-              <span style="font-weight: 700; font-size: 13px;">تم تحديد: <span id="selected-count">0</span> طلب</span>
+          <div id="admin-bulk-bar" class="admin-bulk-actions" style="flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="selected-count">0</span> طلب</span>
+              <input type="number" id="bulk-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap;">
+                <input type="checkbox" id="use-company-ratio-checkbox" style="width: 14px; height: 14px;">
+                توزيع حسب نسب الشركات
+              </label>
+              <button class="btn btn-secondary" onclick="selectNextOrderBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (غير موزّع)</button>
+              <button class="btn btn-secondary" onclick="clearOrderSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
+              <button class="btn btn-secondary" onclick="openCompanyRatioModal()" style="padding: 4px 10px; font-size: 12px;">⚙️ نسب الشركات</button>
             </div>
             <div style="display: flex; gap: 10px; align-items: center;">
               <select id="bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
@@ -295,10 +303,13 @@
           </select>
         </div>
 
-        <!-- شريط الإجراءات الجماعية لتاب الشهادات (توزيع وحذف) -->
-        <div id="cert-bulk-bar" class="admin-bulk-actions" style="display: flex;">
-          <div>
-            <span style="font-weight: 700; font-size: 13px;">تم تحديد: <span id="cert-selected-count">0</span> طلب</span>
+        <!-- شريط الإجراءات الجماعية لتاب الشهادات (تحديد بالعدد + توزيع + حذف) -->
+        <div id="cert-bulk-bar" class="admin-bulk-actions" style="display: flex; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="cert-selected-count">0</span> طلب</span>
+            <input type="number" id="cert-bulk-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
+            <button class="btn btn-secondary" onclick="selectNextCertBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (غير موزّع)</button>
+            <button class="btn btn-secondary" onclick="clearCertSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
           </div>
           <div style="display: flex; gap: 10px; align-items: center;">
             <select id="cert-bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
@@ -407,6 +418,26 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeCertModal()">إلغاء</button>
         <button class="btn btn-primary" id="cert-btn-save-modal" onclick="saveCertUpdate()" style="width: auto;">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal نسب توزيع الشركات (للتوزيع التلقائي على المراجعين) -->
+  <div class="modal-overlay" id="company-ratio-modal">
+    <div class="modal" style="width: 480px;">
+      <div class="modal-header">
+        <h3>نسب توزيع الشركات</h3>
+        <button class="close-btn" onclick="closeCompanyRatioModal()">&times;</button>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px; line-height: 1.7;">
+        حدد نسبة كل شركة من إجمالي أي دفعة توزيع (مثال: فيرتكس 50%، الكريم 20%، رؤية 12%).
+        أي نسبة متبقية من الـ 100% هتتوزع تلقائيًا من باقي الشركات غير المذكورة.
+      </p>
+      <div id="company-ratio-rows"></div>
+      <button type="button" class="btn btn-secondary" onclick="addCompanyRatioRow()" style="width: auto; margin-bottom: 15px;">+ إضافة شركة</button>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCompanyRatioModal()">إلغاء</button>
+        <button class="btn btn-primary" onclick="saveCompanyRatios()" style="width: auto;">حفظ النسب</button>
       </div>
     </div>
   </div>

@@ -90,7 +90,7 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 .logo-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-purple); box-shadow: 0 0 10px var(--accent-purple); }
 
 /* ⬇️ حط الكود هنا */
-.brand-logo-img { width: 90px; height: 90px; object-fit: contain; margin-bottom: 20px; }
+.brand-logo-img { width: 232px; height: 80px; object-fit: contain; margin-bottom: 20px; }
 
 .brand-name { font-size: 26px; font-weight: 800; letter-spacing: 1px; color: #f8fafc; margin-bottom: 6px; direction: ltr; }
 

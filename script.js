@@ -37,13 +37,11 @@ let selectedOrderNumbers = new Set();
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   
-  // استرجاع وضع الإضاءة المحفوظ
+  // استرجاع الثيم المحفوظ
   const savedTheme = localStorage.getItem('system_theme');
   if (savedTheme === 'light') {
     document.body.classList.add('light-theme');
     updateThemePillText(true);
-  } else {
-    updateThemePillText(false);
   }
 
   const savedUser = localStorage.getItem('system_user');
@@ -53,9 +51,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-/* ==========================================
-   دالة التبديل بين الوضع المظلم والفاتح
-   ========================================== */
+/* دالة التبديل بين Dark / Light Mode */
 function toggleTheme() {
   document.body.classList.toggle('light-theme');
   const isLight = document.body.classList.contains('light-theme');
@@ -72,7 +68,7 @@ function updateThemePillText(isLight) {
 
 function toggleSidebar() {
   const sidebar = document.getElementById('reviewer-sidebar');
-  if (sidebar) sidebar.classList.toggle('active');
+  sidebar.classList.toggle('active');
 }
 
 function handleLogin() {
@@ -553,14 +549,14 @@ function renderReviewersStats(data) {
   keys.forEach(name => {
     const item = stats[name];
     container.innerHTML += `
-      <div class="reviewer-card">
-        <div class="reviewer-header">
-          <span class="name">${name}</span>
-          <span class="total-badge">${item.total} طلب</span>
+      <div class="reviewer-stat">
+        <div class="reviewer-info">
+          <div class="name">${name}</div>
+          <div class="total">${item.total} طلب</div>
         </div>
         <div class="reviewer-counts">
-          <span class="count-accepted">مقبول: ${item.accepted}</span>
-          <span class="count-rejected">مرفوض: ${item.rejected}</span>
+          <div class="count-accepted">مقبول: ${item.accepted}</div>
+          <div class="count-rejected">مرفوض: ${item.rejected}</div>
         </div>
       </div>
     `;

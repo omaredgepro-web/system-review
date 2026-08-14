@@ -1,181 +1,135 @@
-// ==================== 1. تهيئة SUPABASE ====================
-const SUPABASE_URL = "https://gnpejzuxwqftxgfcsics.supabase.co"; // استبدل برابط مشروعك
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducGVqenV4d3FmdHhnZmNzaWNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzU3ODYsImV4cCI6MjEwMjIxMTc4Nn0.4nrBcwRm4W51EX8_QtGvTrkwLFVjtiomPXyDU0N1mTQ";         // استبدل بـ Anon Key
-
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// متغيرات النظام الحالية
-let currentUser = null;
-let allOrdersData = [];
-
-// ==================== 2. عند تحميل الصفحة ====================
-document.addEventListener("DOMContentLoaded", () => {
-  const savedUser = localStorage.getItem("system_user");
-  if (savedUser) {
-    currentUser = savedUser;
-    showMainApp();
-  }
-});
-
-// ==================== 3. وظائف تسجيل الدخول والخروج ====================
-async function handleLogin(event) {
-  event.preventDefault();
-  
-  const usernameInput = document.getElementById("login-username").value.trim();
-  const passwordInput = document.getElementById("login-password").value.trim();
-  const errorElement = document.getElementById("login-error");
-
-  errorElement.style.display = "none";
-
-  if (!usernameInput || !passwordInput) {
-    showLoginError("يرجى إدخال اسم المستخدم وكلمة المرور.");
-    return;
-  }
-
-  try {
-    // الاستعلام من جدول المستخدمين users في Supabase
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("username", usernameInput)
-      .eq("password", passwordInput)
-      .single();
-
-    if (error || !data) {
-      showLoginError("اسم المستخدم أو كلمة المرور غير صحيحة!");
-      return;
-    }
-
-    // تسجيل الدخول بنجاح
-    currentUser = data.username;
-    
-    // حفظ الجلسة إذا تم اختيار "تذكرني"
-    if (document.getElementById("remember-me").checked) {
-      localStorage.setItem("system_user", currentUser);
-    }
-
-    showMainApp();
-
-  } catch (err) {
-    console.error("Login Error:", err);
-    showLoginError("حدث خطأ أثناء الاتصال بالقاعدة.");
-  }
+:root {
+  --bg-dark: #0b0f19;
+  --card-bg: #151c2c;
+  --card-border: #1e293b;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --accent-purple: #6366f1;
+  --accent-purple-hover: #4f46e5;
+  --badge-accept-bg: rgba(16, 185, 129, 0.2);
+  --badge-accept-text: #34d399;
+  --badge-reject-bg: rgba(239, 68, 68, 0.2);
+  --badge-reject-text: #f87171;
+  --badge-pending-bg: rgba(59, 130, 246, 0.2);
+  --badge-pending-text: #60a5fa;
+  --badge-hold-bg: rgba(245, 158, 11, 0.2);
+  --badge-hold-text: #fbbf24;
 }
 
-function showLoginError(msg) {
-  const errorElement = document.getElementById("login-error");
-  errorElement.textContent = msg;
-  errorElement.style.display = "block";
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
+body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px; direction: rtl; }
+
+/* Login Screen */
+#login-screen { display: flex; justify-content: center; align-items: center; min-height: 80vh; }
+.login-box { background: var(--card-bg); border: 1px solid var(--card-border); padding: 35px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; }
+.login-box h2 { margin-bottom: 20px; font-weight: 800; }
+.form-group { margin-bottom: 16px; text-align: right; }
+.form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+.form-control { width: 100%; background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 10px; border-radius: 8px; font-size: 14px; outline: none; }
+
+#app-content { display: none; }
+
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.header-title h1 { font-size: 24px; font-weight: 800; }
+.header-title p { font-size: 13px; color: var(--text-muted); }
+
+.tabs-bar { display: flex; gap: 10px; margin-bottom: 25px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; }
+.tab-btn { padding: 10px 20px; background: transparent; border: none; color: var(--text-muted); font-weight: 700; font-size: 15px; cursor: pointer; border-radius: 8px; transition: all 0.2s; }
+.tab-btn.active { background-color: var(--accent-purple); color: #fff; }
+
+.btn { padding: 8px 18px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background-color: var(--accent-purple); color: white; width: 100%; justify-content: center; }
+.btn-primary:hover { background-color: var(--accent-purple-hover); }
+.btn-secondary { background-color: var(--card-bg); color: var(--text-main); border: 1px solid var(--card-border); }
+.btn-danger { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+.btn-danger:hover { background-color: rgba(239, 68, 68, 0.4); }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
+.kpi-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; text-align: center; }
+.kpi-title { font-size: 14px; color: var(--text-muted); margin-bottom: 10px; }
+.kpi-value { font-size: 32px; font-weight: 800; }
+
+/* الدرج الجانبي لإحصائيات المراجعين */
+.dashboard-layout { position: relative; width: 100%; }
+
+.sidebar-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 320px;
+  height: 100%;
+  z-index: 99;
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: -5px 0 25px rgba(0, 0, 0, 0.5);
+  display: none;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
-function handleLogout() {
-  localStorage.removeItem("system_user");
-  currentUser = null;
-  document.getElementById("main-app").classList.add("hidden");
-  document.getElementById("login-screen").classList.remove("hidden");
+.sidebar-drawer.active { display: block; }
+
+.reviewer-stat { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--card-border); }
+.reviewer-stat:last-child { border-bottom: none; }
+.reviewer-info .name { font-weight: 700; font-size: 14px; }
+.reviewer-info .total { font-size: 12px; color: var(--text-muted); }
+.reviewer-counts { font-size: 12px; text-align: left; }
+.count-accepted { color: var(--badge-accept-text); }
+.count-rejected { color: var(--badge-reject-text); }
+
+.main-content { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; width: 100%; }
+.table-container { overflow-x: auto; position: relative; width: 100%; max-width: 100%; }
+
+.table-filters { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+.search-input, .filter-select, .date-input { background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; font-size: 14px; outline: none; }
+.search-input { width: 200px; }
+
+/* شريط تحكم الأدمن للعمليات الجماعية */
+.admin-bulk-actions { display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent-purple); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; align-items: center; justify-content: space-between; gap: 10px; }
+
+table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+th { text-align: right; color: var(--text-muted); font-size: 13px; padding: 12px 16px; border-bottom: 1px solid var(--card-border); background-color: var(--card-bg); }
+td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--card-border); vertical-align: middle; }
+
+/* تثبيت أعمدة الإجراءات Sticky Column */
+.sticky-action-col {
+  position: sticky;
+  left: 0;
+  background-color: var(--card-bg);
+  z-index: 10;
+  border-right: 1px solid var(--card-border);
 }
 
-function showMainApp() {
-  document.getElementById("login-screen").classList.add("hidden");
-  document.getElementById("main-app").classList.remove("hidden");
-  document.getElementById("current-user-display").textContent = `المراجع: ${currentUser}`;
-  fetchOrders();
-}
+.order-no-cell { direction: ltr; text-align: right; font-family: monospace, 'Cairo', sans-serif; font-weight: 600; letter-spacing: 0.5px; }
 
-// ==================== 4. إدراج وحفظ الطلبات ====================
-async function submitOrder(event) {
-  event.preventDefault();
+.badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.badge-accepted { background: var(--badge-accept-bg); color: var(--badge-accept-text); }
+.badge-rejected { background: var(--badge-reject-bg); color: var(--badge-reject-text); }
+.badge-pending { background: var(--badge-pending-bg); color: var(--badge-pending-text); }
+.badge-hold { background: var(--badge-hold-bg); color: var(--badge-hold-text); }
 
-  const orderId = document.getElementById("order-id").value.trim();
-  const orderStatus = document.getElementById("order-status").value;
-  const msgElement = document.getElementById("order-msg");
+.btn-open { background-color: var(--accent-purple); color: white; padding: 5px 14px; font-size: 12px; border-radius: 6px; cursor: pointer; border: none; }
+.btn-delete-row { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 5px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; }
+.btn-delete-row:hover { background-color: rgba(239, 68, 68, 0.4); }
 
-  if (!orderId || !orderStatus) return;
+.pagination-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--card-border); }
+.pagination-info { font-size: 13px; color: var(--text-muted); }
+.pagination-buttons { display: flex; gap: 8px; }
+.page-btn { padding: 6px 12px; background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); border-radius: 6px; cursor: pointer; font-size: 13px; }
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  msgElement.textContent = "جاري الحفظ...";
-  msgElement.style.color = "#94a3b8";
+.admin-container { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 25px; }
+.upload-box { border: 2px dashed var(--card-border); padding: 30px; text-align: center; border-radius: 12px; background: var(--bg-dark); margin-bottom: 20px; }
+.file-input { display: none; }
 
-  try {
-    const { data, error } = await supabase
-      .from("orders")
-      .insert([
-        {
-          order_id: orderId,
-          status: orderStatus,
-          reviewer: currentUser,
-          created_at: new Date()
-        }
-      ]);
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
+.modal { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; width: 450px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header h3 { font-size: 18px; }
+.close-btn { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+textarea.form-control { resize: vertical; min-height: 90px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
-    if (error) throw error;
-
-    msgElement.textContent = "✅ تم حفظ الطلب بنجاح!";
-    msgElement.style.color = "#34d399";
-    document.getElementById("order-form").reset();
-    
-    // إعادة جلب البيانات لتحديث الجدول
-    fetchOrders();
-
-  } catch (err) {
-    console.error("Insert Error:", err);
-    msgElement.textContent = "❌ حدث خطأ، قد يكون رقم الطلب مسجلاً من قبل.";
-    msgElement.style.color = "#f87171";
-  }
-}
-
-// ==================== 5. جلب وعرض البيانات في الجدول ====================
-async function fetchOrders() {
-  const tbody = document.getElementById("orders-table-body");
-
-  try {
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) throw error;
-
-    allOrdersData = data || [];
-    renderTable(allOrdersData);
-
-  } catch (err) {
-    console.error("Fetch Error:", err);
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center" style="color: #f87171;">حدث خطأ أثناء تحميل البيانات.</td></tr>`;
-  }
-}
-
-function renderTable(data) {
-  const tbody = document.getElementById("orders-table-body");
-  
-  if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center">لا توجد طلبات مسجلة حتى الآن.</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = data.map((item, index) => {
-    const statusClass = item.status === "مقبول" ? "badge-accepted" : "badge-rejected";
-    const formattedDate = new Date(item.created_at).toLocaleString("ar-EG");
-
-    return `
-      <tr>
-        <td>${index + 1}</td>
-        <td><strong>${item.order_id}</strong></td>
-        <td><span class="${statusClass}">${item.status}</span></td>
-        <td>${item.reviewer}</td>
-        <td>${formattedDate}</td>
-      </tr>
-    `;
-  }).join("");
-}
-
-// ==================== 6. التصفية والبحث في الجدول ====================
-function filterOrders() {
-  const query = document.getElementById("search-input").value.toLowerCase().trim();
-  
-  const filtered = allOrdersData.filter(order => 
-    order.order_id.toString().toLowerCase().includes(query) ||
-    order.reviewer.toLowerCase().includes(query)
-  );
-
-  renderTable(filtered);
-}
+input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-purple); }

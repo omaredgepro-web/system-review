@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-    
+  
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -132,13 +132,20 @@ function populateReviewerDropdowns() {
   const filterSelect = document.getElementById('reviewer-filter');
   const reassignSelect = document.getElementById('bulk-reassign-select');
 
-  filterSelect.innerHTML = `<option value="ALL">كل المراجعين</option>`;
+  filterSelect.innerHTML = `<option value="ALL">كل المراجعين</option><option value="UNASSIGNED">⛔ غير موزّع</option>`;
   reassignSelect.innerHTML = `<option value="">تغيير المراجع إلى...</option>`;
 
+  // بيشمل المراجعين والأدمن كمان، لإمكانية توزيع الطلبات على الأدمن برضو لو احتاج الأمر
   Object.keys(USERS_DB).forEach(key => {
     if (USERS_DB[key].role === 'reviewer') {
       filterSelect.innerHTML += `<option value="${key}">${key}</option>`;
       reassignSelect.innerHTML += `<option value="${key}">${key}</option>`;
+    }
+  });
+  Object.keys(USERS_DB).forEach(key => {
+    if (USERS_DB[key].role === 'admin') {
+      filterSelect.innerHTML += `<option value="${key}">${key} (أدمن)</option>`;
+      reassignSelect.innerHTML += `<option value="${key}">${key} (أدمن)</option>`;
     }
   });
 }
@@ -272,7 +279,7 @@ function renderCurrentPage() {
     const matchesStatus = (statusValue === 'ALL') || (reviewStatus === statusValue);
     
     const reviewer = item.reviewer || item['المراجع'] || '';
-    const matchesReviewer = (reviewerValue === 'ALL') || (reviewer === reviewerValue);
+    const matchesReviewer = (reviewerValue === 'ALL') || (reviewerValue === 'UNASSIGNED' ? !reviewer : (reviewer === reviewerValue));
 
     return matchesSearch && matchesStatus && matchesReviewer;
   });
@@ -1014,6 +1021,51 @@ function clearCertSelection() {
   selectedCertOrderNumbers.clear();
   updateCertSelectedCount();
   renderCertPage();
+}
+
+// تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع أو لا) — مفيد لو أنت
+// فلترت بالفعل على اسمك في "المسؤول" وعايز تصدّر أرقام طلباتك على دفعات (مثلاً 100 في كل مرة)
+function selectNextCertFromFiltered() {
+  const input = document.getElementById('cert-export-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  if (!window.certFilteredData || window.certFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const unselected = window.certFilteredData.filter(o => !selectedCertOrderNumbers.has(o.order_number));
+
+  if (unselected.length === 0) { alert('كل الطلبات المطابقة للفلتر الحالي متحددة بالفعل'); return; }
+
+  const batch = unselected.slice(0, count);
+  batch.forEach(o => selectedCertOrderNumbers.add(o.order_number));
+
+  updateCertSelectedCount();
+  renderCertPage();
+  input.value = '';
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح ضمن الفلتر الحالي)`);
+  }
+}
+
+// تصدير أرقام الطلبات المحددة فقط (بدون باقي الأعمدة) لملف Excel
+function exportSelectedCertOrderNumbers() {
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
+
+  const orderNumbers = Array.from(selectedCertOrderNumbers);
+  const rows = orderNumbers.map(num => ({ 'رقم الطلب': num }));
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 28 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام الطلبات');
+
+  const layoutFilterValue = document.getElementById('cert-layout-filter').value;
+  const nameLabel = (layoutFilterValue && layoutFilterValue !== 'ALL' && layoutFilterValue !== 'UNASSIGNED') ? `_${layoutFilterValue}` : '';
+  const dateLabel = document.getElementById('cert-date-filter').value || 'غير محدد';
+
+  XLSX.writeFile(workbook, `ارقام_الطلبات${nameLabel}_${dateLabel}.xlsx`);
 }
 
 async function executeCertBulkReassign() {

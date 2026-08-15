@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-      
+  
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -1069,8 +1069,11 @@ function applyCertDateFiltering() {
     if (targetDate) document.getElementById('cert-date-filter').value = targetDate;
   }
 
-  certAllData = certMasterData.filter(item => extractDateString(item) === targetDate);
-  document.getElementById('cert-active-date-label').innerText = `يعرض شهادات تاريخ: ${targetDate}`;
+  certAllData = certMasterData.filter(item => {
+    const d = extractDateString(item);
+    return d === targetDate || !d;
+  });
+  document.getElementById('cert-active-date-label').innerText = `يعرض شهادات تاريخ: ${targetDate} (+ الطلبات بدون تاريخ)`;
 
   certTotalRecordsCount = certAllData.length;
   renderCertKpis(certAllData);
@@ -1103,7 +1106,7 @@ function renderCertPage() {
     const orderNum = String(item.order_number || '').toLowerCase();
     const matchesSearch = !searchValue || orderNum.includes(searchValue);
     const status = item.status || '';
-    const matchesStatus = (statusValue === 'ALL') || (status === statusValue);
+    const matchesStatus = (statusValue === 'ALL') || (statusValue === 'UNPRINTED' ? !status : (status === statusValue));
     const layout = item.Layout || item.layout || '';
     const matchesLayout = (layoutValue === 'ALL') || (layoutValue === 'UNASSIGNED' ? !layout : (layout === layoutValue));
     return matchesSearch && matchesStatus && matchesLayout;
@@ -1129,17 +1132,23 @@ function renderCertTable(orders) {
 
   orders.forEach(order => {
     const orderNum = order.order_number || '-';
-    const layout = order.Layout || order.layout || '-';
-    const status = order.status || '-';
-    const date = order.date || extractDateString(order) || '-';
+    const rawLayout = order.Layout || order.layout || '';
+    const layout = rawLayout || 'غير موزعة';
+    const rawStatus = order.status || '';
+    const status = rawStatus || 'لم يتم الطباعة';
+    const rawDate = order.date || extractDateString(order) || '';
+    const date = rawDate || 'غير محدد';
     const reason = order.reason || '-';
 
-    let badgeClass = 'badge-pending';
+    let badgeClass = 'badge-unreviewed';
     if (status === 'تم الطباعة') badgeClass = 'badge-accepted';
     else if (status === 'تم إعادة الطباعة') badgeClass = 'badge-reprint';
     else if (status === 'مرفوض') badgeClass = 'badge-rejected';
     else if (status === 'محجوز') badgeClass = 'badge-hold';
     else if (status === 'خطأ جهة ولاية' || status === 'خطأ عنوان') badgeClass = 'badge-error';
+
+    const layoutClass = rawLayout ? '' : 'style="color: var(--text-muted);"';
+    const dateClass = rawDate ? '' : 'style="color: var(--text-muted);"';
 
     const isChecked = selectedCertOrderNumbers.has(orderNum) ? 'checked' : '';
 
@@ -1149,9 +1158,9 @@ function renderCertTable(orders) {
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openCertEditModal('${orderNum}')">تحديث</button></td>
         <td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleCertOrder('${orderNum}')">🗑️ مسح</button></td>
         <td class="order-no-cell">${orderNum}</td>
-        <td>${layout}</td>
+        <td ${layoutClass}>${layout}</td>
         <td><span class="badge ${badgeClass}">${status}</span></td>
-        <td>${date}</td>
+        <td ${dateClass}>${date}</td>
         <td>${reason}</td>
       </tr>`;
   });
@@ -1352,6 +1361,7 @@ function openCertEditModal(orderNum) {
   if (!selectedCertOrder) return;
 
   document.getElementById('cert-modal-order-no').value = orderNum;
+  document.getElementById('cert-modal-date').value = extractDateString(selectedCertOrder) || '';
   document.getElementById('cert-modal-status').value = CERT_STATUSES.includes(selectedCertOrder.status) ? selectedCertOrder.status : 'معلق';
   document.getElementById('cert-modal-layout').value = selectedCertOrder.Layout || selectedCertOrder.layout || '';
   document.getElementById('cert-modal-reason').value = selectedCertOrder.reason && selectedCertOrder.reason !== '-' ? selectedCertOrder.reason : '';
@@ -1375,6 +1385,7 @@ async function saveCertUpdate() {
   const newStatus = document.getElementById('cert-modal-status').value;
   const newLayout = document.getElementById('cert-modal-layout').value;
   const newReason = document.getElementById('cert-modal-reason').value.trim();
+  const newDate = document.getElementById('cert-modal-date').value;
 
   if (CERT_REASON_REQUIRED_STATUSES.includes(newStatus) && !newReason) {
     alert('برجاء كتابة السبب.');
@@ -1388,7 +1399,8 @@ async function saveCertUpdate() {
   const updateData = {
     status: newStatus,
     Layout: newLayout,
-    reason: CERT_REASON_REQUIRED_STATUSES.includes(newStatus) ? newReason : '-'
+    reason: CERT_REASON_REQUIRED_STATUSES.includes(newStatus) ? newReason : '-',
+    date: newDate || null
   };
 
   try {

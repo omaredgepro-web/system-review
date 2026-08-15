@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-   
+  
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -82,6 +82,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function toggleSidebar() {
   const sidebar = document.getElementById('reviewer-sidebar');
+  document.getElementById('company-sidebar').classList.remove('active');
+  sidebar.classList.toggle('active');
+}
+
+function toggleCompanySidebar() {
+  const sidebar = document.getElementById('company-sidebar');
+  document.getElementById('reviewer-sidebar').classList.remove('active');
   sidebar.classList.toggle('active');
 }
 
@@ -259,6 +266,7 @@ function applyDateFiltering() {
   }
 
   renderReviewersStats(window.visibleData);
+  renderCompanyStats(window.allData);
   renderCurrentPage();
 }
 
@@ -310,10 +318,10 @@ function renderTable(orders) {
     const company = order.company || order['الشركة'] || '-';
     const reviewer = order.reviewer || order['المراجع'] || '-';
     const status = order.status || order['الحالة'] || '-';
-    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'جاري المراجعة';
+    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
     const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
 
-    let reviewBadge = 'badge-pending';
+    let reviewBadge = 'badge-unreviewed';
     if (reviewStatus === 'مقبول') reviewBadge = 'badge-accepted';
     if (reviewStatus === 'مرفوض') reviewBadge = 'badge-rejected';
     if (reviewStatus === 'معلق') reviewBadge = 'badge-hold';
@@ -560,6 +568,116 @@ function renderCsvPreview(data) {
       </tr>
     `;
   });
+
+  populateCsvDistUsersList();
+  document.getElementById('csv-dist-summary').innerHTML = '';
+}
+
+// قائمة كل المستخدمين (مراجعين + أدمن) بمربعات اختيار للمشاركة في التوزيع المتوازن
+function populateCsvDistUsersList() {
+  const container = document.getElementById('csv-dist-users-list');
+  container.innerHTML = '';
+
+  Object.keys(USERS_DB).forEach(key => {
+    const roleLabel = USERS_DB[key].role === 'admin' ? ' (أدمن)' : '';
+    container.innerHTML += `
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
+        <input type="checkbox" class="csv-dist-user-checkbox" value="${key}" checked>
+        ${key}${roleLabel}
+      </label>
+    `;
+  });
+}
+
+function selectAllCsvDistUsers(checked) {
+  document.querySelectorAll('.csv-dist-user-checkbox').forEach(cb => { cb.checked = checked; });
+}
+
+// توزيع متوازن: كل الطلبات بيتم خلطها بالتبادل بين الشركات أولاً (عشان كل مراجع ياخد خليط من كل الشركات)،
+// بعدين بتتوزع بالتساوي (Round-robin) على المراجعين المختارين، مع وقف عند التارجت لو محدد.
+function runBalancedCsvDistribution() {
+  if (!parsedCsvData || parsedCsvData.length === 0) {
+    alert('برجاء رفع ملف CSV أولاً.');
+    return;
+  }
+
+  const selectedUsers = Array.from(document.querySelectorAll('.csv-dist-user-checkbox:checked')).map(cb => cb.value);
+  if (selectedUsers.length === 0) {
+    alert('برجاء اختيار مراجع واحد على الأقل للتوزيع.');
+    return;
+  }
+
+  const targetInput = document.getElementById('csv-dist-target-input');
+  const targetPerPerson = parseInt(targetInput.value, 10) || 0; // 0 = بدون تارجت، توزيع متساوي بس
+
+  const getCompany = row => row.company || row['الشركة'] || 'غير محدد';
+  const pools = {};
+  const poolOrder = [];
+  parsedCsvData.forEach(row => {
+    const company = getCompany(row);
+    if (!pools[company]) { pools[company] = []; poolOrder.push(company); }
+    pools[company].push(row);
+  });
+
+  // تشبيك الطلبات بالتبادل بين الشركات (Round-robin) عشان يبقى فيه خليط متوازن قبل التوزيع على الأشخاص
+  const interleaved = [];
+  let stillHasMore = true;
+  while (stillHasMore) {
+    stillHasMore = false;
+    for (const company of poolOrder) {
+      if (pools[company].length > 0) {
+        interleaved.push(pools[company].shift());
+        stillHasMore = true;
+      }
+    }
+  }
+
+  const reviewerColKey = (interleaved[0] && 'المراجع' in interleaved[0]) ? 'المراجع' : 'reviewer';
+  const counts = {};
+  selectedUsers.forEach(u => counts[u] = 0);
+
+  let userIndex = 0;
+  let assignedCount = 0;
+
+  for (const row of interleaved) {
+    if (targetPerPerson > 0 && selectedUsers.every(u => counts[u] >= targetPerPerson)) break;
+
+    let attempts = 0;
+    while (targetPerPerson > 0 && counts[selectedUsers[userIndex]] >= targetPerPerson && attempts < selectedUsers.length) {
+      userIndex = (userIndex + 1) % selectedUsers.length;
+      attempts++;
+    }
+    if (targetPerPerson > 0 && attempts >= selectedUsers.length) break;
+
+    const user = selectedUsers[userIndex];
+    row[reviewerColKey] = user;
+    counts[user]++;
+    assignedCount++;
+    userIndex = (userIndex + 1) % selectedUsers.length;
+  }
+
+  renderCsvPreview(parsedCsvData);
+  renderCsvDistSummary(counts, parsedCsvData.length - assignedCount);
+}
+
+function renderCsvDistSummary(counts, leftoverCount) {
+  const container = document.getElementById('csv-dist-summary');
+  const rows = Object.keys(counts).map(name => `
+    <div class="reviewer-stat">
+      <div class="reviewer-info"><div class="name">${name}</div></div>
+      <div class="reviewer-counts"><div class="count-accepted">${counts[name]} طلب</div></div>
+    </div>
+  `).join('');
+
+  const leftoverHtml = leftoverCount > 0
+    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لم يتم توزيعه، لأن كل المراجعين المختارين وصلوا للعدد المستهدف. زوّد التارجت أو اختار مراجعين إضافيين.</p>`
+    : '';
+
+  container.innerHTML = `
+    <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-muted);">ملخص التوزيع:</h4>
+    ${rows}
+    ${leftoverHtml}
+  `;
 }
 
 async function uploadCsvToSupabase() {
@@ -672,6 +790,7 @@ function updateKPIs(data) {
   const rejected = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مرفوض').length;
   document.getElementById('stat-accepted').innerText = accepted.toLocaleString('ar-EG');
   document.getElementById('stat-rejected').innerText = rejected.toLocaleString('ar-EG');
+  document.getElementById('stat-reviewed').innerText = (accepted + rejected).toLocaleString('ar-EG');
   document.getElementById('stat-pending').innerText = (data.length - (accepted + rejected)).toLocaleString('ar-EG');
 }
 
@@ -712,6 +831,43 @@ function renderReviewersStats(data) {
   });
 }
 
+function renderCompanyStats(data) {
+  const stats = {};
+  data.forEach(o => {
+    const name = o.company || o['الشركة'];
+    if (!name) return;
+    const revStatus = o.review_status || o['حالة المراجعة'];
+    if (!stats[name]) stats[name] = { total: 0, accepted: 0, rejected: 0 };
+    stats[name].total++;
+    if (revStatus === 'مقبول') stats[name].accepted++;
+    if (revStatus === 'مرفوض') stats[name].rejected++;
+  });
+
+  const container = document.getElementById('companies-list');
+  container.innerHTML = '';
+  const keys = Object.keys(stats).sort((a, b) => stats[b].total - stats[a].total);
+  if (keys.length === 0) {
+    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد شركات</p>';
+    return;
+  }
+
+  keys.forEach(name => {
+    const item = stats[name];
+    container.innerHTML += `
+      <div class="reviewer-stat">
+        <div class="reviewer-info">
+          <div class="name">${name}</div>
+          <div class="total">${item.total} طلب</div>
+        </div>
+        <div class="reviewer-counts">
+          <div class="count-accepted">مقبول: ${item.accepted}</div>
+          <div class="count-rejected">مرفوض: ${item.rejected}</div>
+        </div>
+      </div>
+    `;
+  });
+}
+
 // ============ تصدير Excel (للأدمن فقط) ============
 function exportTodayOrdersToExcel() {
   if (!window.allData || window.allData.length === 0) {
@@ -725,7 +881,7 @@ function exportTodayOrdersToExcel() {
     const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
     const company = order.company || order['الشركة'] || '-';
     const reviewer = order.reviewer || order['المراجع'] || '-';
-    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'جاري المراجعة';
+    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
     const orderStatus = order.status || order['الحالة'] || '-';
     const date = order.date || extractDateString(order) || '-';
     const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
@@ -776,7 +932,7 @@ function exportReviewerStatsToExcel() {
     'إجمالي الطلبات': stats[name].total,
     'مقبول': stats[name].accepted,
     'مرفوض': stats[name].rejected,
-    'جاري المراجعة': stats[name].pending
+    'لم يتم المراجعة': stats[name].pending
   }));
 
   if (rows.length === 0) {
@@ -790,6 +946,49 @@ function exportReviewerStatsToExcel() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'إحصائيات المراجعين');
   XLSX.writeFile(workbook, `إحصائيات_المراجعين_${dateLabel}.xlsx`);
+}
+
+function exportCompanyStatsToExcel() {
+  if (!window.allData || window.allData.length === 0) {
+    alert('لا يوجد بيانات لتصدير إحصائيات الشركات منها.');
+    return;
+  }
+
+  const dateLabel = document.getElementById('date-filter').value || 'غير محدد';
+
+  const stats = {};
+  window.allData.forEach(o => {
+    const name = o.company || o['الشركة'];
+    if (!name) return;
+    const revStatus = o.review_status || o['حالة المراجعة'];
+    if (!stats[name]) stats[name] = { total: 0, accepted: 0, rejected: 0, pending: 0 };
+    stats[name].total++;
+    if (revStatus === 'مقبول') stats[name].accepted++;
+    else if (revStatus === 'مرفوض') stats[name].rejected++;
+    else stats[name].pending++;
+  });
+
+  const rows = Object.keys(stats)
+    .sort((a, b) => stats[b].total - stats[a].total)
+    .map(name => ({
+      'الشركة': name,
+      'إجمالي الطلبات': stats[name].total,
+      'مقبول': stats[name].accepted,
+      'مرفوض': stats[name].rejected,
+      'لم يتم المراجعة': stats[name].pending
+    }));
+
+  if (rows.length === 0) {
+    alert('لا يوجد شركات لتصدير إحصائياتها.');
+    return;
+  }
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 26 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'إحصائيات الشركات');
+  XLSX.writeFile(workbook, `إحصائيات_الشركات_${dateLabel}.xlsx`);
 }
 
 function updatePaginationControls(from, to) {
@@ -811,9 +1010,21 @@ function changePage(direction) { currentPage += direction; renderCurrentPage(); 
 async function loadCertificatesData() {
   document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
-    const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*');
-    if (error) throw error;
-    certMasterData = data || [];
+    let allFetched = [];
+    let from = 0, step = 1000, hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').range(from, from + step - 1);
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        allFetched = allFetched.concat(data);
+        from += step;
+        if (data.length < step) hasMore = false;
+      } else { hasMore = false; }
+    }
+
+    certMasterData = allFetched;
     certDataLoaded = true;
     populateCertLayoutFilter();
     applyCertDateFiltering();
@@ -1195,6 +1406,32 @@ async function saveCertUpdate() {
 
   saveBtn.innerText = 'حفظ';
   saveBtn.disabled = false;
+}
+
+// تنزيل أرقام الطلبات الغير موزعة (Layout فاضي) في التاريخ المحدد حاليًا - عمود واحد بس
+function exportUnassignedCertOrders() {
+  if (!certAllData || certAllData.length === 0) {
+    alert('لا يوجد بيانات لتصديرها في التاريخ المحدد حاليًا.');
+    return;
+  }
+
+  const unassigned = certAllData.filter(o => !(o.Layout || o.layout));
+
+  if (unassigned.length === 0) {
+    alert('لا توجد طلبات غير موزّعة في التاريخ المحدد حاليًا.');
+    return;
+  }
+
+  const rows = unassigned.map(o => ({ 'رقم الطلب': o.order_number || '-' }));
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 28 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'غير موزع');
+
+  const dateLabel = document.getElementById('cert-date-filter').value || 'غير محدد';
+  XLSX.writeFile(workbook, `طلبات_غير_موزعة_${dateLabel}.xlsx`);
 }
 
 document.getElementById('cert-search-input').addEventListener('input', () => { certCurrentPage = 1; renderCertPage(); });

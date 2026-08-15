@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>نظام مراجعة الطلبات المباشر</title>
-  
+
   <!-- تفعيل الوضع الداكن/الفاتح المحفوظ قبل ظهور الصفحة لتفادي وميض الشاشة -->
   <script>
     (function () {
@@ -325,6 +325,7 @@
 
           <select id="cert-status-filter" class="filter-select">
             <option value="ALL">كل الحالات</option>
+            <option value="UNPRINTED">⛔ لم يتم الطباعة</option>
             <option value="تم الطباعة">تم الطباعة</option>
             <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
             <option value="مرفوض">مرفوض</option>
@@ -434,6 +435,10 @@
         <input type="text" id="cert-modal-order-no" class="form-control" disabled>
       </div>
       <div class="form-group">
+        <label>التاريخ</label>
+        <input type="date" id="cert-modal-date" class="form-control">
+      </div>
+      <div class="form-group">
         <label>المسؤول</label>
         <select id="cert-modal-layout" class="filter-select form-control"></select>
       </div>
@@ -461,6 +466,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260815c"></script>
+  <script src="script.js?v=20260815d"></script>
 </body>
 </html>

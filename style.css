@@ -222,6 +222,7 @@ td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--card-bo
 .badge-rejected { background: var(--badge-reject-bg); color: var(--badge-reject-text); }
 .badge-pending { background: var(--badge-pending-bg); color: var(--badge-pending-text); }
 .badge-hold { background: var(--badge-hold-bg); color: var(--badge-hold-text); }
+.badge-unreviewed { background: rgba(234, 179, 8, 0.16); color: #eab308; }
 .badge-reprint { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
 .badge-error { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
 

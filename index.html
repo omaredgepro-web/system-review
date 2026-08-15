@@ -313,6 +313,12 @@
             <button class="btn btn-secondary" onclick="executeCertBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التوزيع</button>
             <button class="btn btn-danger" onclick="executeCertBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
           </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; border-top: 1px dashed var(--card-border); padding-top: 12px; margin-top: 2px;">
+            <span style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">تصدير أرقام الطلبات فقط:</span>
+            <input type="number" id="cert-export-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
+            <button class="btn btn-secondary" onclick="selectNextCertFromFiltered()" style="padding: 4px 10px; font-size: 12px;">تحديد الأول من النتائج الحالية</button>
+            <button class="btn btn-secondary" onclick="exportSelectedCertOrderNumbers()" style="padding: 4px 10px; font-size: 12px;">📥 تصدير أرقام الطلبات المحددة (Excel)</button>
+          </div>
         </div>
 
         <div class="table-container">

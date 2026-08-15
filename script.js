@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-   
+  
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -1306,6 +1306,31 @@ async function executeCertBulkReassign() {
     else {
       alert(`تم توزيع ${selectedCertOrderNumbers.size} طلب بنجاح على "${newLayout}"!`);
       targetOrders.forEach(o => { o.Layout = newLayout; o.layout = newLayout; });
+      selectedCertOrderNumbers.clear();
+      updateCertSelectedCount();
+      applyCertDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+async function executeCertBulkDateUpdate() {
+  const newDate = document.getElementById('cert-bulk-date-input').value;
+  if (!newDate) { alert('برجاء اختيار التاريخ أولاً'); return; }
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedCertOrderNumbers.size}) طلب إلى "${newDate}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ date: newDate }).in('id', matchValues);
+    if (error) { alert('حدث خطأ أثناء تحديث التاريخ: ' + error.message); }
+    else {
+      alert(`تم تحديث تاريخ ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newDate}"!`);
+      targetOrders.forEach(o => { o.date = newDate; });
       selectedCertOrderNumbers.clear();
       updateCertSelectedCount();
       applyCertDateFiltering();

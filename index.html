@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>نظام مراجعة الطلبات المباشر</title>
-  
+
   <!-- تفعيل الوضع الداكن/الفاتح المحفوظ قبل ظهور الصفحة لتفادي وميض الشاشة -->
   <script>
     (function () {
@@ -12,7 +12,7 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
-    
+
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -344,11 +344,13 @@
             <button class="btn btn-secondary" onclick="selectNextCertBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (غير موزّع)</button>
             <button class="btn btn-secondary" onclick="clearCertSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
           </div>
-          <div style="display: flex; gap: 10px; align-items: center;">
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
             <select id="cert-bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
               <option value="">توزيع على المسؤول...</option>
             </select>
             <button class="btn btn-secondary" onclick="executeCertBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التوزيع</button>
+            <input type="date" id="cert-bulk-date-input" class="date-input" style="padding: 4px 8px; font-size: 12px;">
+            <button class="btn btn-secondary" onclick="executeCertBulkDateUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق التاريخ</button>
             <button class="btn btn-danger" onclick="executeCertBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
           </div>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; border-top: 1px dashed var(--card-border); padding-top: 12px; margin-top: 2px;">
@@ -466,6 +468,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260815d"></script>
+  <script src="script.js?v=20260816"></script>
 </body>
 </html>

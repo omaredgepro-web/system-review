@@ -322,7 +322,7 @@ function renderTable(orders) {
     const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
     const company = order.company || order['الشركة'] || '-';
     const reviewer = order.reviewer || order['المراجع'] || '-';
-    const status = order.status || order['الحالة'] || '-';
+    const progressStatus = order.status || order['الحالة'] || '-';
     const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
     const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
 
@@ -343,7 +343,7 @@ function renderTable(orders) {
         <td class="order-no-cell">${orderNum}</td>
         <td>${company}</td>
         <td>${reviewer}</td>
-        <td><span class="badge badge-pending">${status}</span></td>
+        <td><span class="badge badge-pending">${progressStatus}</span></td>
         <td><span class="badge ${reviewBadge}">${reviewStatus}</span></td>
         <td>${formattedDate}</td>
         <td>${rejectionReason}</td>
@@ -641,8 +641,8 @@ function normalizeUploadedRows(rows) {
     company: ['الشركة', 'company'],
     reviewer: ['المراجع', 'reviewer'],
     date: ['التاريخ', 'تاريخ الطلب', 'date'],
-    status: ['الحالة', 'status'],
-    review_status: ['حالة المراجعة', 'المراجعة', 'review_status', 'review status'],
+    status: ['حالة المراجعة', 'الحالة', 'status'],
+    review_status: ['المراجعة', 'حالة الطلب', 'review_status', 'review status'],
     rejection_reason: ['سبب الرفض', 'rejection_reason', 'reason']
   };
 
@@ -985,7 +985,7 @@ function updateKPIs(data) {
   document.getElementById('stat-total').innerText = data.length.toLocaleString('ar-EG');
   const accepted = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مقبول').length;
   const rejected = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مرفوض').length;
-  // "لم يتم المراجعة" بيتحسب بنفس منطق الفلتر بالظبط: القيمة الفعلية للـ review_status لازم تساوي "لم يتم المراجعة"
+  // "لم يتم المراجعة" بيتحسب بنفس منطق الفلتر بالظبط: القيمة الفعلية للحالة لازم تساوي "لم يتم المراجعة"
   // (أو تكون فاضية، لأن الفاضي بيتحول لنفس النص ده افتراضيًا) — عشان ميختلطش مع حالة "معلق" اللي هي حالة تانية منفصلة.
   const pending = data.filter(o => (o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة') === 'لم يتم المراجعة').length;
 
@@ -1082,8 +1082,8 @@ function exportTodayOrdersToExcel() {
     const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
     const company = order.company || order['الشركة'] || '-';
     const reviewer = order.reviewer || order['المراجع'] || '-';
+    const progressStatus = order.status || order['الحالة'] || '-';
     const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
-    const orderStatus = order.status || order['الحالة'] || '-';
     const date = order.date || extractDateString(order) || '-';
     const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
 
@@ -1091,7 +1091,7 @@ function exportTodayOrdersToExcel() {
       'رقم الطلب': orderNum,
       'الشركة': company,
       'المراجع': reviewer,
-      'الحالة': orderStatus,
+      'حالة المراجعة': progressStatus,
       'المراجعة': reviewStatus,
       'التاريخ': date,
       'سبب الرفض': rejectionReason
@@ -1100,7 +1100,7 @@ function exportTodayOrdersToExcel() {
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
   worksheet['!cols'] = [
-    { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 30 }
+    { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 30 }
   ];
 
   const workbook = XLSX.utils.book_new();

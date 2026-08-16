@@ -204,7 +204,7 @@
                   <th>رقم الطلب</th>
                   <th>الشركة</th>
                   <th>المراجع</th>
-                  <th>حالة المراجعة</th>
+                  <th>الحالة</th>
                   <th>المراجعة</th>
                   <th>التاريخ</th>
                   <th>سبب الرفض</th>
@@ -235,9 +235,11 @@
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">قم برفع ملف CSV يحتوي على الأعمدة للتوزيع المباشر لـ Supabase.</p>
 
         <div class="upload-box" id="upload-box" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
-          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف CSV أو Excel (xlsx) هنا أو اضغط للاختيار</p>
-          <input type="file" id="csv-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleFileSelect(event)">
-          <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف CSV أو Excel</button>
+          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف أو أكتر (CSV أو Excel) هنا أو اضغط للاختيار</p>
+          <p style="margin-bottom: 15px; font-size: 12px; color: var(--text-muted);">تقدر تختار/تسحب أكتر من ملف مرة واحدة، أو ترفع ملف تاني بعد كده وهيتضاف على اللي قبله من غير ما يمسحه.</p>
+          <input type="file" id="csv-file-input" class="file-input" accept=".csv,.xlsx,.xls" multiple onchange="handleFileSelect(event)">
+          <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف أو أكتر (CSV أو Excel)</button>
+          <button class="btn btn-danger" onclick="resetCsvUploadData()" style="margin-right: 8px;">🗑️ مسح الكل والبدء من جديد</button>
           <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
         </div>
 

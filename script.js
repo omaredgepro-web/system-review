@@ -8,15 +8,14 @@ const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
     
 const USERS_DB = {
-  "عمر": { password: "Umar123", role: "admin", name: "عمر" },
-  "موندي": { password: "A555555a", role: "admin", name: "موندي" },
-  "مؤمن": { password: "momen666", role: "admin", name: "مؤمن" },
-  "ابو هيبة": { password: "aboheiba123", role: "admin", name: "ابو هيبة" },
-  "دينا": { password: "dina123", role: "admin", name: "دينا" },
-  "سرحان": { password: "007", role: "admin", name: "سرحان" },
-  "روان": { password: "rawan123", role: "admin", name: "روان" },
-      "سارة": { password: "sara123", role: "admin", name: "سارة" },
-
+  "عمر": { password: "123", role: "admin", name: "عمر" },
+  "موندي": { password: "123", role: "admin", name: "موندي" },
+  "مؤمن": { password: "123", role: "admin", name: "مؤمن" },
+  "ابو هيبة": { password: "123", role: "admin", name: "ابو هيبة" },
+  "دينا": { password: "123", role: "admin", name: "دينا" },
+  "سرحان": { password: "123", role: "admin", name: "سرحان" },
+  "روان": { password: "123", role: "admin", name: "روان" },
+   "سارة": { password: "sara123", role: "admin", name: "سارة" },
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -721,6 +720,7 @@ function runBalancedCsvDistribution() {
 
     const user = selectedUsers[userIndex];
     row[reviewerColKey] = user;
+    row.reviewer = user; // نتأكد إن العمود القياسي "reviewer" اتحدّث دايمًا (هو اللي بيتبعت فعليًا لـ Supabase)
     counts[user]++;
     assignedCount++;
     userIndex = (userIndex + 1) % selectedUsers.length;
@@ -750,6 +750,11 @@ function renderCsvDistSummary(counts, leftoverCount) {
   `;
 }
 
+// الأعمدة الفعلية الموجودة في جدول system_review1 على Supabase.
+// أي عمود تاني (زي أسماء الأعمدة العربية الأصلية من ملف الإكسيل "الشركة"، "رقم الطلب"...)
+// بيتشال قبل الرفع عشان محتترفضش العملية بسبب "column not found in schema cache".
+const ALLOWED_ORDER_COLUMNS = ['id', 'order_number', 'company', 'reviewer', 'date', 'status', 'review_status', 'rejection_reason'];
+
 async function uploadCsvToSupabase() {
   if (parsedCsvData.length === 0) return;
   const btn = document.getElementById('btn-upload-supabase');
@@ -757,9 +762,11 @@ async function uploadCsvToSupabase() {
 
   try {
     const cleanData = parsedCsvData.map(row => {
-      const newRow = { ...row };
+      const newRow = {};
+      ALLOWED_ORDER_COLUMNS.forEach(key => {
+        if (row[key] !== undefined && row[key] !== '') newRow[key] = row[key];
+      });
       if (newRow.id === "" || newRow.id === undefined || newRow.id === null) delete newRow.id;
-      Object.keys(newRow).forEach(key => { if (newRow[key] === "") delete newRow[key]; });
       return newRow;
     });
 

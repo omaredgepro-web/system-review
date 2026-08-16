@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-      
+    
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -15,8 +15,8 @@ const USERS_DB = {
   "دينا": { password: "123", role: "admin", name: "دينا" },
   "سرحان": { password: "123", role: "admin", name: "سرحان" },
   "روان": { password: "123", role: "admin", name: "روان" },
-    "سارة": { password: "sara123", role: "admin", name: "سارة" },
-   
+    "سارة": { password: "123", role: "admin", name: "سارة" },
+
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -467,6 +467,31 @@ function clearOrderSelection() {
   renderCurrentPage();
 }
 
+// تقسيم أي مصفوفة كبيرة لدفعات أصغر
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
+
+// بينفذ حذف/تعديل جماعي على Supabase على دفعات (بدل ما يبعت آلاف الـ IDs في رابط واحد ويترفض بـ "Bad Request").
+// action: 'delete' أو 'update'. updateData مطلوبة بس لما action = 'update'.
+async function runBatchedSupabaseAction(tableName, matchColumn, matchValues, action, updateData) {
+  const BATCH_SIZE = 150;
+  const batches = chunkArray(matchValues, BATCH_SIZE);
+
+  for (const batch of batches) {
+    const query = action === 'delete'
+      ? supabaseClient.from(tableName).delete().in(matchColumn, batch)
+      : supabaseClient.from(tableName).update(updateData).in(matchColumn, batch);
+
+    const { error } = await query;
+    if (error) return error; // نوقف على أول خطأ ونرجّعه
+  }
+
+  return null; // كل الدفعات نجحت
+}
+
 async function executeBulkDelete() {
   if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
@@ -477,7 +502,7 @@ async function executeBulkDelete() {
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
   try {
-    const { error } = await supabaseClient.from(TABLE_NAME).delete().in(matchColumn, matchValues);
+    const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'delete');
     if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); } 
     else {
       alert(`تم حذف ${selectedOrderNumbers.size} طلب بنجاح!`);
@@ -506,7 +531,7 @@ async function executeBulkReassign() {
   updateData[reviewerColKey] = newReviewer;
 
   try {
-    const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).in(matchColumn, matchValues);
+    const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'update', updateData);
     if (error) { alert('حدث خطأ أثناء نقل الطلبات: ' + error.message); } 
     else {
       alert(`تم تغيير المراجع لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newReviewer}"!`);
@@ -642,8 +667,8 @@ function normalizeUploadedRows(rows) {
     company: ['الشركة', 'company'],
     reviewer: ['المراجع', 'reviewer'],
     date: ['التاريخ', 'تاريخ الطلب', 'date'],
-    status: ['حالة المراجعة', 'الحالة', 'status'],
-    review_status: ['المراجعة', 'حالة الطلب', 'review_status', 'review status'],
+    status: ['الحالة', 'status'],
+    review_status: ['حالة المراجعة', 'المراجعة', 'review_status', 'review status'],
     rejection_reason: ['سبب الرفض', 'rejection_reason', 'reason']
   };
 
@@ -720,8 +745,11 @@ function renderCsvPreview(data) {
 }
 
 // اسم الشركة لأي صف مرفوع، بغض النظر عن اسم العمود بالظبط (عربي أو إنجليزي)
+// اسم الشركة لأي صف مرفوع، بغض النظر عن اسم العمود بالظبط (عربي أو إنجليزي)، مع إزالة أي مسافات زيادة
+// في البداية/النهاية عشان "شركة X" و"شركة X " (بمسافة زيادة) ميتحسبوش شركتين مختلفتين بالغلط.
 function getCsvRowCompany(row) {
-  return row.company || row['الشركة'] || 'غير محدد';
+  const raw = row.company || row['الشركة'] || 'غير محدد';
+  return String(raw).trim();
 }
 
 // لوحة الشركات الموجودة في الملف المرفوع، مع عدد طلبات كل شركة وزرار حذف لشيلها بالكامل من الملف
@@ -745,10 +773,21 @@ function renderCsvCompaniesPanel(data) {
   order.forEach(company => {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background: var(--card-bg); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 8px;';
-    row.innerHTML = `
-      <span style="font-size: 13px; font-weight: 600;">${company} <span style="color: var(--text-muted); font-weight: 400;">(${counts[company]} طلب)</span></span>
-      <button type="button" class="btn-delete-row" onclick="deleteCompanyFromCsv(${JSON.stringify(company)})">🗑️ حذف</button>
-    `;
+
+    const label = document.createElement('span');
+    label.style.cssText = 'font-size: 13px; font-weight: 600;';
+    label.textContent = `${company} (${counts[company]} طلب)`;
+
+    // بنستخدم addEventListener بدل onclick="..." هنا عشان أسماء بعض الشركات ممكن تحتوي على علامات تنصيص
+    // أو رموز خاصة كانت بتكسر الـ HTML attribute وتمنع الزرار من الشغل خالص.
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn-delete-row';
+    deleteBtn.innerText = '🗑️ حذف';
+    deleteBtn.addEventListener('click', () => deleteCompanyFromCsv(company));
+
+    row.appendChild(label);
+    row.appendChild(deleteBtn);
     container.appendChild(row);
   });
 }
@@ -1503,7 +1542,7 @@ async function executeCertBulkReassign() {
   const matchValues = targetOrders.map(o => o.id);
 
   try {
-    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ Layout: newLayout }).in('id', matchValues);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'update', { Layout: newLayout });
     if (error) { alert('حدث خطأ أثناء توزيع الطلبات: ' + error.message); }
     else {
       alert(`تم توزيع ${selectedCertOrderNumbers.size} طلب بنجاح على "${newLayout}"!`);
@@ -1528,7 +1567,7 @@ async function executeCertBulkDateUpdate() {
   const matchValues = targetOrders.map(o => o.id);
 
   try {
-    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ date: newDate }).in('id', matchValues);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'update', { date: newDate });
     if (error) { alert('حدث خطأ أثناء تحديث التاريخ: ' + error.message); }
     else {
       alert(`تم تحديث تاريخ ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newDate}"!`);
@@ -1563,7 +1602,7 @@ async function executeCertBulkStatusUpdate() {
   const updateData = { status: newStatus, reason: reason };
 
   try {
-    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).in('id', matchValues);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'update', updateData);
     if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); }
     else {
       alert(`تم تغيير حالة ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
@@ -1585,7 +1624,7 @@ async function executeCertBulkDelete() {
   const matchValues = targetOrders.map(o => o.id);
 
   try {
-    const { error } = await supabaseClient.from(CERT_TABLE_NAME).delete().in('id', matchValues);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'delete');
     if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); }
     else {
       alert(`تم حذف ${selectedCertOrderNumbers.size} طلب بنجاح!`);

@@ -183,11 +183,13 @@
               <button class="btn btn-secondary" onclick="selectNextOrderBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (تلقائي حسب نسب الشركات)</button>
               <button class="btn btn-secondary" onclick="clearOrderSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
             </div>
-            <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
               <select id="bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
                 <option value="">تغيير المراجع إلى...</option>
               </select>
               <button class="btn btn-secondary" onclick="executeBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التغيير</button>
+              <input type="date" id="bulk-date-input" class="date-input" style="padding: 4px 8px; font-size: 12px;">
+              <button class="btn btn-secondary" onclick="executeBulkDateUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق التاريخ</button>
               <button class="btn btn-danger" onclick="executeBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
             </div>
           </div>
@@ -241,6 +243,12 @@
           <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف أو أكتر (CSV أو Excel)</button>
           <button class="btn btn-danger" onclick="resetCsvUploadData()" style="margin-right: 8px;">🗑️ مسح الكل والبدء من جديد</button>
           <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
+        </div>
+
+        <!-- إجمالي عدد الطلبات المرفوعة، ظاهر بشكل واضح فور اختيار/إفلات أي ملف -->
+        <div id="csv-total-banner" class="kpi-card" style="display: none; margin-bottom: 20px; text-align: center;">
+          <div class="kpi-title">إجمالي عدد الطلبات في الملف/الملفات المرفوعة</div>
+          <div class="kpi-value" id="csv-total-banner-count" style="color: var(--accent-purple);">0</div>
         </div>
 
         <div id="csv-preview-area" style="display: none;">

@@ -15,7 +15,7 @@ const USERS_DB = {
   "دينا": { password: "dina123", role: "admin", name: "دينا" },
   "سرحان": { password: "007", role: "admin", name: "سرحان" },
   "روان": { password: "rawan123", role: "admin", name: "روان" },
-      "ساره": { password: "sara123", role: "admin", name: "روان" },
+      "سارة": { password: "sara123", role: "admin", name: "سارة" },
 
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },

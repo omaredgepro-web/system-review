@@ -15,7 +15,7 @@
   --badge-hold-bg: rgba(245, 158, 11, 0.2);
   --badge-hold-text: #fbbf24;
 }
- 
+  
 /* الوضع الفاتح - يتم تفعيله عبر data-theme="light" على وسم html */
 :root[data-theme="light"] {
   --bg-dark: #eef1f7;

@@ -15,7 +15,8 @@ const USERS_DB = {
   "دينا": { password: "123", role: "admin", name: "دينا" },
   "سرحان": { password: "123", role: "admin", name: "سرحان" },
   "روان": { password: "123", role: "admin", name: "روان" },
-   "سارة": { password: "sara123", role: "admin", name: "سارة" },
+     "سارة": { password: "sara123", role: "admin", name: "سارة" },
+
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -29,7 +30,7 @@ const USERS_DB = {
   "كريم": { password: "123", role: "reviewer", name: "كريم" },
   "علي": { password: "123", role: "reviewer", name: "علي" }
 };
- 
+
 // ============ الوضع الداكن / الفاتح ============
 function applyThemeIcon() {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -545,7 +546,11 @@ async function deleteSingleOrder(orderNum) {
 function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
+  processUploadedFile(file);
+}
 
+// بتتنادى سواء الملف اتختار بالزرار أو اتسحب وأفلت (Drag & Drop) على منطقة الرفع
+function processUploadedFile(file) {
   document.getElementById('file-name-display').innerText = `تم اختيار الملف: ${file.name}`;
 
   const fileName = file.name.toLowerCase();
@@ -621,6 +626,36 @@ function normalizeUploadedRows(rows) {
   });
 }
 
+// ============ سحب وإفلات الملف (Drag & Drop) على منطقة الرفع ============
+function handleDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('upload-box').classList.add('drag-over');
+}
+
+function handleDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('upload-box').classList.remove('drag-over');
+}
+
+function handleFileDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('upload-box').classList.remove('drag-over');
+
+  const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+  if (!file) return;
+
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+    alert('برجاء إفلات ملف CSV أو Excel (xlsx/xls) بس');
+    return;
+  }
+
+  processUploadedFile(file);
+}
+
 function renderCsvPreview(data) {
   const tbody = document.getElementById('csv-preview-tbody');
   tbody.innerHTML = '';
@@ -638,8 +673,53 @@ function renderCsvPreview(data) {
     `;
   });
 
+  renderCsvCompaniesPanel(data);
   populateCsvDistUsersList();
   document.getElementById('csv-dist-summary').innerHTML = '';
+}
+
+// اسم الشركة لأي صف مرفوع، بغض النظر عن اسم العمود بالظبط (عربي أو إنجليزي)
+function getCsvRowCompany(row) {
+  return row.company || row['الشركة'] || 'غير محدد';
+}
+
+// لوحة الشركات الموجودة في الملف المرفوع، مع عدد طلبات كل شركة وزرار حذف لشيلها بالكامل من الملف
+function renderCsvCompaniesPanel(data) {
+  const container = document.getElementById('csv-companies-list');
+  container.innerHTML = '';
+
+  if (!data || data.length === 0) {
+    container.innerHTML = `<p style="font-size: 13px; color: var(--text-muted);">لا توجد بيانات.</p>`;
+    return;
+  }
+
+  const counts = {};
+  const order = [];
+  data.forEach(row => {
+    const company = getCsvRowCompany(row);
+    if (!(company in counts)) { counts[company] = 0; order.push(company); }
+    counts[company]++;
+  });
+
+  order.forEach(company => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background: var(--card-bg); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 8px;';
+    row.innerHTML = `
+      <span style="font-size: 13px; font-weight: 600;">${company} <span style="color: var(--text-muted); font-weight: 400;">(${counts[company]} طلب)</span></span>
+      <button type="button" class="btn-delete-row" onclick="deleteCompanyFromCsv(${JSON.stringify(company)})">🗑️ حذف</button>
+    `;
+    container.appendChild(row);
+  });
+}
+
+// بيشيل كل طلبات شركة معينة من الملف المرفوع قبل التوزيع/الرفع لـ Supabase
+function deleteCompanyFromCsv(company) {
+  const count = parsedCsvData.filter(row => getCsvRowCompany(row) === company).length;
+  const confirmDelete = confirm(`هل أنت متأكد من حذف كل طلبات شركة "${company}" (${count} طلب) من الملف؟`);
+  if (!confirmDelete) return;
+
+  parsedCsvData = parsedCsvData.filter(row => getCsvRowCompany(row) !== company);
+  renderCsvPreview(parsedCsvData);
 }
 
 // قائمة كل المستخدمين (مراجعين + أدمن) بمربعات اختيار للمشاركة في التوزيع المتوازن
@@ -679,7 +759,7 @@ function runBalancedCsvDistribution() {
   const targetInput = document.getElementById('csv-dist-target-input');
   const targetPerPerson = parseInt(targetInput.value, 10) || 0; // 0 = بدون تارجت، توزيع متساوي بس
 
-  const getCompany = row => row.company || row['الشركة'] || 'غير محدد';
+  const getCompany = getCsvRowCompany;
   const pools = {};
   const poolOrder = [];
   parsedCsvData.forEach(row => {
@@ -865,10 +945,14 @@ function updateKPIs(data) {
   document.getElementById('stat-total').innerText = data.length.toLocaleString('ar-EG');
   const accepted = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مقبول').length;
   const rejected = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مرفوض').length;
+  // "لم يتم المراجعة" بيتحسب بنفس منطق الفلتر بالظبط: القيمة الفعلية للـ review_status لازم تساوي "لم يتم المراجعة"
+  // (أو تكون فاضية، لأن الفاضي بيتحول لنفس النص ده افتراضيًا) — عشان ميختلطش مع حالة "معلق" اللي هي حالة تانية منفصلة.
+  const pending = data.filter(o => (o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة') === 'لم يتم المراجعة').length;
+
   document.getElementById('stat-accepted').innerText = accepted.toLocaleString('ar-EG');
   document.getElementById('stat-rejected').innerText = rejected.toLocaleString('ar-EG');
   document.getElementById('stat-reviewed').innerText = (accepted + rejected).toLocaleString('ar-EG');
-  document.getElementById('stat-pending').innerText = (data.length - (accepted + rejected)).toLocaleString('ar-EG');
+  document.getElementById('stat-pending').innerText = pending.toLocaleString('ar-EG');
 }
 
 function renderReviewersStats(data) {

@@ -162,12 +162,13 @@
               <option value="ALL">كل المراجعين</option>
             </select>
 
-            <label style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
+            <label id="date-filter-label" style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
             <input type="date" id="date-filter" class="date-input" onchange="onDateFilterChange()">
-            <button class="btn btn-secondary" onclick="resetDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+            <button id="reset-date-btn" class="btn btn-secondary" onclick="resetDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
 
             <select id="status-filter" class="filter-select">
               <option value="ALL">كل الحالات</option>
+              <option value="لم يتم المراجعة">لم يتم المراجعة</option>
               <option value="مقبول">مقبول</option>
               <option value="مرفوض">مرفوض</option>
               <option value="معلق">معلق</option>
@@ -234,9 +235,9 @@
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">قم برفع ملف CSV يحتوي على الأعمدة للتوزيع المباشر لـ Supabase.</p>
 
         <div class="upload-box">
-          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف CSV هنا أو اضغط للاختيار</p>
-          <input type="file" id="csv-file-input" class="file-input" accept=".csv" onchange="handleFileSelect(event)">
-          <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف CSV</button>
+          <p style="margin-bottom: 15px; font-weight: 700;">اضغط لاختيار ملف CSV أو Excel (xlsx)</p>
+          <input type="file" id="csv-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleFileSelect(event)">
+          <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف CSV أو Excel</button>
           <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
         </div>
 
@@ -351,6 +352,17 @@
             <button class="btn btn-secondary" onclick="executeCertBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التوزيع</button>
             <input type="date" id="cert-bulk-date-input" class="date-input" style="padding: 4px 8px; font-size: 12px;">
             <button class="btn btn-secondary" onclick="executeCertBulkDateUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق التاريخ</button>
+            <select id="cert-bulk-status-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
+              <option value="">تغيير الحالة إلى...</option>
+              <option value="تم الطباعة">تم الطباعة</option>
+              <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
+              <option value="مرفوض">مرفوض</option>
+              <option value="محجوز">محجوز</option>
+              <option value="خطأ جهة ولاية">خطأ جهة ولاية</option>
+              <option value="خطأ عنوان">خطأ عنوان</option>
+              <option value="معلق">معلق</option>
+            </select>
+            <button class="btn btn-secondary" onclick="executeCertBulkStatusUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق الحالة</button>
             <button class="btn btn-danger" onclick="executeCertBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
           </div>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; border-top: 1px dashed var(--card-border); padding-top: 12px; margin-top: 2px;">

@@ -59,6 +59,8 @@ let totalRecordsCount = 0;
 let selectedOrder = null;
 let parsedCsvData = [];
 let parsedPrintOrderNumbers = [];
+let printOrderAssignments = {}; // order_number -> اسم الأدمن المخصص ليه (من التوزيع التلقائي)
+let printDistUserSelection = null;
 let selectedOrderNumbers = new Set();
 
 // ============ حالة تاب طباعة الشهادات ============
@@ -828,23 +830,131 @@ function renderPrintPreview() {
   const hasData = parsedPrintOrderNumbers.length > 0;
   document.getElementById('print-preview-area').style.display = hasData ? 'block' : 'none';
   document.getElementById('print-total-banner').style.display = hasData ? 'block' : 'none';
+  document.getElementById('print-dist-panel').style.display = hasData ? 'block' : 'none';
   document.getElementById('print-total-banner-count').innerText = parsedPrintOrderNumbers.length;
   document.getElementById('print-count').innerText = parsedPrintOrderNumbers.length;
 
+  if (hasData) populatePrintDistUsersList();
+
   const tbody = document.getElementById('print-preview-tbody');
   const PREVIEW_LIMIT = 500;
-  tbody.innerHTML = parsedPrintOrderNumbers.slice(0, PREVIEW_LIMIT).map(num => `<tr><td class="order-no-cell">${num}</td></tr>`).join('');
+  tbody.innerHTML = parsedPrintOrderNumbers.slice(0, PREVIEW_LIMIT).map(num => `
+    <tr>
+      <td class="order-no-cell">${num}</td>
+      <td>${printOrderAssignments[num] || '-'}</td>
+    </tr>
+  `).join('');
   if (parsedPrintOrderNumbers.length > PREVIEW_LIMIT) {
-    tbody.innerHTML += `<tr><td style="text-align:center; color: var(--text-muted);">... و ${parsedPrintOrderNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
+    tbody.innerHTML += `<tr><td colspan="2" style="text-align:center; color: var(--text-muted);">... و ${parsedPrintOrderNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
   }
+}
+
+function populatePrintDistUsersList() {
+  const container = document.getElementById('print-dist-users-list');
+  const adminKeys = Object.keys(USERS_DB).filter(key => USERS_DB[key].role === 'admin');
+
+  if (!printDistUserSelection) {
+    printDistUserSelection = new Set(adminKeys); // أول مرة بس: كل الأدمن متحدد افتراضيًا
+  }
+
+  container.innerHTML = '';
+  adminKeys.forEach(key => {
+    const isChecked = printDistUserSelection.has(key) ? 'checked' : '';
+    container.innerHTML += `
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
+        <input type="checkbox" class="print-dist-user-checkbox" value="${key}" ${isChecked} onchange="onPrintDistUserToggle(this)">
+        ${key}
+      </label>
+    `;
+  });
+}
+
+function onPrintDistUserToggle(checkbox) {
+  const adminKeys = Object.keys(USERS_DB).filter(key => USERS_DB[key].role === 'admin');
+  if (!printDistUserSelection) printDistUserSelection = new Set(adminKeys);
+  if (checkbox.checked) printDistUserSelection.add(checkbox.value);
+  else printDistUserSelection.delete(checkbox.value);
+}
+
+function selectAllPrintDistUsers(checked) {
+  const adminKeys = Object.keys(USERS_DB).filter(key => USERS_DB[key].role === 'admin');
+  document.querySelectorAll('.print-dist-user-checkbox').forEach(cb => { cb.checked = checked; });
+  printDistUserSelection = new Set(checked ? adminKeys : []);
+}
+
+// توزيع تلقائي متساوي (Round-robin) على الأدمن المختارين، مع وقف عند التارجت لو محدد
+function runPrintBalancedDistribution() {
+  if (parsedPrintOrderNumbers.length === 0) {
+    alert('برجاء رفع ملف أولاً.');
+    return;
+  }
+
+  const selectedAdmins = Array.from(document.querySelectorAll('.print-dist-user-checkbox:checked')).map(cb => cb.value);
+  if (selectedAdmins.length === 0) {
+    alert('برجاء اختيار أدمن واحد على الأقل للتوزيع.');
+    return;
+  }
+
+  const targetPerPerson = parseInt(document.getElementById('print-dist-target-input').value, 10) || 0; // 0 = بدون تارجت
+
+  printOrderAssignments = {};
+  const counts = {};
+  selectedAdmins.forEach(a => counts[a] = 0);
+
+  let userIndex = 0;
+  let assignedCount = 0;
+
+  for (const num of parsedPrintOrderNumbers) {
+    if (targetPerPerson > 0 && selectedAdmins.every(a => counts[a] >= targetPerPerson)) break;
+
+    let attempts = 0;
+    while (targetPerPerson > 0 && counts[selectedAdmins[userIndex]] >= targetPerPerson && attempts < selectedAdmins.length) {
+      userIndex = (userIndex + 1) % selectedAdmins.length;
+      attempts++;
+    }
+    if (targetPerPerson > 0 && attempts >= selectedAdmins.length) break;
+
+    const admin = selectedAdmins[userIndex];
+    printOrderAssignments[num] = admin;
+    counts[admin]++;
+    assignedCount++;
+    userIndex = (userIndex + 1) % selectedAdmins.length;
+  }
+
+  renderPrintPreview();
+  renderPrintDistSummary(counts, parsedPrintOrderNumbers.length - assignedCount);
+}
+
+function renderPrintDistSummary(counts, leftoverCount) {
+  const container = document.getElementById('print-dist-summary');
+  const rows = Object.keys(counts).map(name => `
+    <div class="reviewer-stat">
+      <div class="reviewer-info"><div class="name">${name}</div></div>
+      <div class="reviewer-counts"><div class="count-accepted">${counts[name]} طلب</div></div>
+    </div>
+  `).join('');
+
+  const leftoverHtml = leftoverCount > 0
+    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لم يتم توزيعه، لأن كل الأدمن المختارين وصلوا للعدد المستهدف. زوّد التارجت أو اختار أدمن إضافيين.</p>`
+    : '';
+
+  container.innerHTML = `
+    <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-muted);">ملخص التوزيع:</h4>
+    ${rows}
+    ${leftoverHtml}
+  `;
 }
 
 function resetPrintUploadData() {
   if (parsedPrintOrderNumbers.length > 0 && !confirm('هل تريد مسح كل الأرقام المرفوعة حاليًا والبدء من جديد؟')) return;
   parsedPrintOrderNumbers = [];
+  printOrderAssignments = {};
+  printDistUserSelection = null;
   document.getElementById('print-file-name-display').innerText = '';
   document.getElementById('print-preview-area').style.display = 'none';
   document.getElementById('print-total-banner').style.display = 'none';
+  document.getElementById('print-dist-panel').style.display = 'none';
+  document.getElementById('print-dist-summary').innerHTML = '';
 }
 
 function handlePrintDragOver(event) {
@@ -882,7 +992,11 @@ async function uploadPrintOrdersToSupabase() {
     const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
     const newRows = parsedPrintOrderNumbers
       .filter(num => !existingNumbers.has(String(num)))
-      .map(num => ({ order_number: num }));
+      .map(num => {
+        const row = { order_number: num };
+        if (printOrderAssignments[num]) row.Layout = printOrderAssignments[num];
+        return row;
+      });
     const skippedCount = parsedPrintOrderNumbers.length - newRows.length;
 
     if (newRows.length === 0) {
@@ -1244,9 +1358,9 @@ function updateKPIs(data) {
   document.getElementById('stat-total').innerText = data.length.toLocaleString('ar-EG');
   const accepted = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مقبول').length;
   const rejected = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مرفوض').length;
-  // "لم يتم المراجعة" بيتحسب بنفس منطق الفلتر بالظبط: القيمة الفعلية للحالة لازم تساوي "لم يتم المراجعة"
-  // (أو تكون فاضية، لأن الفاضي بيتحول لنفس النص ده افتراضيًا) — عشان ميختلطش مع حالة "معلق" اللي هي حالة تانية منفصلة.
-  const pending = data.filter(o => (o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة') === 'لم يتم المراجعة').length;
+  // "لم يتم المراجعة" = كل حاجة مش مقبول ومش مرفوض (يشمل "معلق" والفاضي)، عشان الإجمالي يفضل دايمًا
+  // بيساوي بالظبط "تم المراجعة" + "لم يتم المراجعة" من غير ما تضيع أي طلبات في المنتصف.
+  const pending = data.length - accepted - rejected;
 
   document.getElementById('stat-accepted').innerText = accepted.toLocaleString('ar-EG');
   document.getElementById('stat-rejected').innerText = rejected.toLocaleString('ar-EG');

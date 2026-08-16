@@ -234,8 +234,8 @@
         <h2 style="font-size: 20px; margin-bottom: 10px;">لوحة الأدمن: رفع وتوزيع الطلبات على المراجعين</h2>
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">قم برفع ملف CSV يحتوي على الأعمدة للتوزيع المباشر لـ Supabase.</p>
 
-        <div class="upload-box">
-          <p style="margin-bottom: 15px; font-weight: 700;">اضغط لاختيار ملف CSV أو Excel (xlsx)</p>
+        <div class="upload-box" id="upload-box" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
+          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف CSV أو Excel (xlsx) هنا أو اضغط للاختيار</p>
           <input type="file" id="csv-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleFileSelect(event)">
           <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف CSV أو Excel</button>
           <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
@@ -255,6 +255,13 @@
               </thead>
               <tbody id="csv-preview-tbody"></tbody>
             </table>
+          </div>
+
+          <!-- لوحة الشركات الموجودة في الملف مع إمكانية حذف أي شركة بالكامل قبل التوزيع/الرفع -->
+          <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+            <h3 style="font-size: 15px; margin-bottom: 6px;">🏢 الشركات الموجودة في الملف</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">اضغط "🗑️ حذف" جنب أي شركة عشان تشيل كل طلباتها من الملف قبل ما توزّع أو ترفع.</p>
+            <div id="csv-companies-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto;"></div>
           </div>
 
           <!-- لوحة التوزيع المتوازن (حسب الشركات + عدد لكل مراجع) -->

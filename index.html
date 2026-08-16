@@ -12,7 +12,7 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
- 
+
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -92,6 +92,7 @@
       <button class="tab-btn active" id="dashboard-tab-btn" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
       <button class="tab-btn" id="admin-tab-btn" style="display: none;" onclick="switchTab('admin')">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
       <button class="tab-btn" id="certificates-tab-btn" style="display: none;" onclick="switchTab('certificates')">🖨️ طباعة الشهادات</button>
+      <button class="tab-btn" id="print-distribute-tab-btn" style="display: none;" onclick="switchTab('print-distribute')">📦 توزيع طلبات الطباعة</button>
     </div>
 
     <!-- TAB 1: Dashboard View -->
@@ -422,6 +423,41 @@
         </div>
       </div>
     </div>
+
+    <!-- TAB 4: توزيع طلبات الطباعة (رفع أرقام طلبات جديدة لجدول الطباعة) -->
+    <div id="tab-print-distribute" style="display: none;">
+      <div class="admin-container">
+        <h2 style="font-size: 20px; margin-bottom: 10px;">توزيع طلبات الطباعة: رفع أرقام طلبات جديدة</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+          ارفع ملف (CSV أو Excel) فيه عمود برقم الطلب — النظام هيتعرف على العمود ده تلقائيًا حتى لو اسمه مختلف (زي requestnumber)، وهيضيف الأرقام دي كطلبات جديدة في جدول الطباعة جاهزة للتوزيع بعدين من تاب "طباعة الشهادات".
+        </p>
+
+        <div class="upload-box" id="print-upload-box" ondragover="handlePrintDragOver(event)" ondragleave="handlePrintDragLeave(event)" ondrop="handlePrintFileDrop(event)">
+          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف أو أكتر (CSV أو Excel) هنا أو اضغط للاختيار</p>
+          <p style="margin-bottom: 15px; font-size: 12px; color: var(--text-muted);">بيقرا عمود رقم الطلب بس، وأي عمود تاني في الملف بيتجاهله. تقدر ترفع أكتر من ملف مرة واحدة أو ورا بعض.</p>
+          <input type="file" id="print-file-input" class="file-input" accept=".csv,.xlsx,.xls" multiple onchange="handlePrintFileSelect(event)">
+          <button class="btn btn-secondary" onclick="document.getElementById('print-file-input').click()">اختيار ملف أو أكتر (CSV أو Excel)</button>
+          <button class="btn btn-danger" onclick="resetPrintUploadData()" style="margin-right: 8px;">🗑️ مسح الكل والبدء من جديد</button>
+          <p id="print-file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
+        </div>
+
+        <div id="print-total-banner" class="kpi-card" style="display: none; margin-bottom: 20px; text-align: center;">
+          <div class="kpi-title">إجمالي أرقام الطلبات المرفوعة</div>
+          <div class="kpi-value" id="print-total-banner-count" style="color: var(--accent-purple);">0</div>
+        </div>
+
+        <div id="print-preview-area" style="display: none;">
+          <h3 style="margin-bottom: 10px; font-size: 16px;">معاينة أرقام الطلبات (<span id="print-count">0</span> طلب)</h3>
+          <div style="max-height: 300px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--card-border); border-radius: 8px;">
+            <table>
+              <thead><tr><th>رقم الطلب</th></tr></thead>
+              <tbody id="print-preview-tbody"></tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" id="btn-upload-print" onclick="uploadPrintOrdersToSupabase()" style="width: auto;">تأكيد ورفع الطلبات لجدول الطباعة</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Modal المراجعة -->
@@ -497,6 +533,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260816c"></script>
+  <script src="script.js?v=20260816d"></script>
 </body>
 </html>

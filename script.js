@@ -6,7 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
-     
+    
 const USERS_DB = {
   "عمر": { password: "123", role: "admin", name: "عمر" },
   "موندي": { password: "123", role: "admin", name: "موندي" },
@@ -15,8 +15,8 @@ const USERS_DB = {
   "دينا": { password: "123", role: "admin", name: "دينا" },
   "سرحان": { password: "123", role: "admin", name: "سرحان" },
   "روان": { password: "123", role: "admin", name: "روان" },
-    "سارة": { password: "123", role: "admin", name: "سارة" },
-
+  "سارة": { password: "sara123", role: "admin", name: "سارة" },
+  
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -492,6 +492,32 @@ async function runBatchedSupabaseAction(tableName, matchColumn, matchValues, act
   return null; // كل الدفعات نجحت
 }
 
+async function executeBulkDateUpdate() {
+  const newDate = document.getElementById('bulk-date-input').value;
+  if (!newDate) { alert('برجاء اختيار التاريخ أولاً'); return; }
+  if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedOrderNumbers.size}) طلب إلى "${newDate}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  if (targetOrders.length === 0) return;
+  const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+  const matchValues = targetOrders.map(o => o[matchColumn]);
+
+  try {
+    const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'update', { date: newDate });
+    if (error) { alert('حدث خطأ أثناء تحديث التاريخ: ' + error.message); }
+    else {
+      alert(`تم تحديث تاريخ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newDate}"!`);
+      targetOrders.forEach(o => { o.date = newDate; });
+      selectedOrderNumbers.clear();
+      updateSelectedCount();
+      await loadData();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 async function executeBulkDelete() {
   if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
@@ -655,6 +681,7 @@ function resetCsvUploadData() {
   parsedCsvData = [];
   document.getElementById('file-name-display').innerText = '';
   document.getElementById('csv-preview-area').style.display = 'none';
+  document.getElementById('csv-total-banner').style.display = 'none';
 }
 
 // بيوحّد أسماء الأعمدة المهمة بغض النظر عن الاسم بالظبط اللي مكتوب بيه العمود في الملف
@@ -667,8 +694,8 @@ function normalizeUploadedRows(rows) {
     company: ['الشركة', 'company'],
     reviewer: ['المراجع', 'reviewer'],
     date: ['التاريخ', 'تاريخ الطلب', 'date'],
-    status: ['الحالة', 'status'],
-    review_status: ['حالة المراجعة', 'المراجعة', 'review_status', 'review status'],
+    status: ['حالة المراجعة', 'الحالة', 'status'],
+    review_status: ['المراجعة', 'حالة الطلب', 'review_status', 'review status'],
     rejection_reason: ['سبب الرفض', 'rejection_reason', 'reason']
   };
 
@@ -726,7 +753,10 @@ function renderCsvPreview(data) {
   const tbody = document.getElementById('csv-preview-tbody');
   tbody.innerHTML = '';
   document.getElementById('csv-count').innerText = data.length;
-  document.getElementById('csv-preview-area').style.display = 'block';
+  document.getElementById('csv-preview-area').style.display = data.length > 0 ? 'block' : 'none';
+
+  document.getElementById('csv-total-banner-count').innerText = data.length.toLocaleString('ar-EG');
+  document.getElementById('csv-total-banner').style.display = data.length > 0 ? 'block' : 'none';
 
   data.slice(0, 10).forEach(row => {
     tbody.innerHTML += `

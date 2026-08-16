@@ -679,6 +679,7 @@ function parseFileToRows(file) {
 function resetCsvUploadData() {
   if (parsedCsvData.length > 0 && !confirm('هل تريد مسح كل الملفات/البيانات المرفوعة حاليًا والبدء من جديد؟')) return;
   parsedCsvData = [];
+  csvDistUserSelection = null; // يرجع الاختيار الافتراضي (الكل متحدد) في المرة الجاية
   document.getElementById('file-name-display').innerText = '';
   document.getElementById('csv-preview-area').style.display = 'none';
   document.getElementById('csv-total-banner').style.display = 'none';
@@ -833,23 +834,40 @@ function deleteCompanyFromCsv(company) {
 }
 
 // قائمة كل المستخدمين (مراجعين + أدمن) بمربعات اختيار للمشاركة في التوزيع المتوازن
+// بيحافظ على اختيار المراجعين اللي حددهم المستخدم بنفسه بدل ما يترجع "الكل متحدد" تلقائي في كل مرة
+// (كان بيحصل قبل كده كل ما يترفع ملف جديد أو تتحذف شركة، فالاختيار اليدوي كان بيضيع).
+let csvDistUserSelection = null;
+
 function populateCsvDistUsersList() {
   const container = document.getElementById('csv-dist-users-list');
+
+  if (!csvDistUserSelection) {
+    csvDistUserSelection = new Set(Object.keys(USERS_DB)); // أول مرة بس: الكل متحدد افتراضيًا
+  }
+
   container.innerHTML = '';
 
   Object.keys(USERS_DB).forEach(key => {
     const roleLabel = USERS_DB[key].role === 'admin' ? ' (أدمن)' : '';
+    const isChecked = csvDistUserSelection.has(key) ? 'checked' : '';
     container.innerHTML += `
       <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
-        <input type="checkbox" class="csv-dist-user-checkbox" value="${key}" checked>
+        <input type="checkbox" class="csv-dist-user-checkbox" value="${key}" ${isChecked} onchange="onCsvDistUserToggle(this)">
         ${key}${roleLabel}
       </label>
     `;
   });
 }
 
+function onCsvDistUserToggle(checkbox) {
+  if (!csvDistUserSelection) csvDistUserSelection = new Set(Object.keys(USERS_DB));
+  if (checkbox.checked) csvDistUserSelection.add(checkbox.value);
+  else csvDistUserSelection.delete(checkbox.value);
+}
+
 function selectAllCsvDistUsers(checked) {
   document.querySelectorAll('.csv-dist-user-checkbox').forEach(cb => { cb.checked = checked; });
+  csvDistUserSelection = new Set(checked ? Object.keys(USERS_DB) : []);
 }
 
 // توزيع متوازن: كل الطلبات بيتم خلطها بالتبادل بين الشركات أولاً (عشان كل مراجع ياخد خليط من كل الشركات)،

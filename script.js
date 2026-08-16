@@ -15,8 +15,7 @@ const USERS_DB = {
   "دينا": { password: "123", role: "admin", name: "دينا" },
   "سرحان": { password: "123", role: "admin", name: "سرحان" },
   "روان": { password: "123", role: "admin", name: "روان" },
-     "سارة": { password: "sara123", role: "admin", name: "سارة" },
- 
+  
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -544,52 +543,96 @@ async function deleteSingleOrder(orderNum) {
 }
 
 function handleFileSelect(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  processUploadedFile(file);
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  handleMultipleFiles(files);
+  event.target.value = ''; // نفضّي الـ input عشان لو اختار نفس الملف تاني يشتغل الـ onchange تاني
 }
 
-// بتتنادى سواء الملف اتختار بالزرار أو اتسحب وأفلت (Drag & Drop) على منطقة الرفع
-function processUploadedFile(file) {
-  document.getElementById('file-name-display').innerText = `تم اختيار الملف: ${file.name}`;
+// بيتعامل مع أكتر من ملف مرفوع مرة واحدة (أو أكتر من مرة ورا بعض) — كل ملف جديد بيتضاف على اللي قبله
+// بدل ما يمسحه، وكل شيت جوه ملف الإكسيل (لو فيه أكتر من شيت/تبويب) بيتقرأ ويتضاف كمان.
+async function handleMultipleFiles(fileList) {
+  const files = Array.from(fileList).filter(f => {
+    const name = f.name.toLowerCase();
+    return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls');
+  });
 
-  const fileName = file.name.toLowerCase();
-  const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+  if (files.length === 0) {
+    alert('برجاء اختيار ملفات CSV أو Excel (xlsx/xls) بس');
+    return;
+  }
 
-  if (isExcel) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
+  const namesLabel = files.map(f => f.name).join('، ');
+  document.getElementById('file-name-display').innerText = `جاري قراءة: ${namesLabel} ...`;
 
-        // بيقرأ أول صف كأسماء أعمدة (بالظبط زي ما هي مكتوبة في الملف) ويحول كل صف لكائن بنفس أسماء الأعمدة دي
-        const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+  try {
+    let allNewRows = [];
+    for (const file of files) {
+      const rawRows = await parseFileToRows(file);
+      allNewRows = allNewRows.concat(normalizeUploadedRows(rawRows));
+    }
 
-        parsedCsvData = normalizeUploadedRows(rows);
-        renderCsvPreview(parsedCsvData);
-      } catch (err) {
-        alert('تعذّر قراءة ملف الإكسيل: ' + err.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  } else {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: function(results) {
-        parsedCsvData = normalizeUploadedRows(results.data);
-        renderCsvPreview(parsedCsvData);
-      }
+    // أي طلب معندوش تاريخ في الملف، بياخد تاريخ النهاردة تلقائي عشان يظهر فورًا كـ "أحدث تاريخ" أول ما التطبيق يفتح
+    const todayIso = new Date().toISOString().split('T')[0];
+    allNewRows.forEach(row => {
+      if (!row.date) row.date = todayIso;
     });
+
+    parsedCsvData = parsedCsvData.concat(allNewRows); // إضافة على اللي موجود بالفعل، مش استبدال
+    document.getElementById('file-name-display').innerText = `تم إضافة: ${namesLabel} (الإجمالي الآن ${parsedCsvData.length} طلب)`;
+    renderCsvPreview(parsedCsvData);
+  } catch (err) {
+    alert('تعذّر قراءة أحد الملفات: ' + err.message);
   }
 }
 
-// بيوحّد أسماء الأعمدة المهمة (رقم الطلب / الشركة / المراجع / التاريخ) بغض النظر عن الاسم بالظبط
-// اللي مكتوب بيه العمود في الملف (عربي أو إنجليزي، بمسافات زيادة أو حروف كبيرة/صغيرة مختلفة)،
-// وبيسيب باقي الأعمدة زي ما هي عشان ترفع لـ Supabase براحتها.
+// بيقرأ ملف واحد (CSV أو Excel) ويرجّع كل الصفوف الخام فيه كـ Promise.
+// لو الملف Excel وفيه أكتر من شيت/تبويب، بيقرأهم كلهم ويجمعهم مع بعض.
+function parseFileToRows(file) {
+  return new Promise((resolve, reject) => {
+    const fileName = file.name.toLowerCase();
+    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+    if (isExcel) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+
+          let combinedRows = [];
+          workbook.SheetNames.forEach(sheetName => {
+            const worksheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+            combinedRows = combinedRows.concat(rows);
+          });
+
+          resolve(combinedRows);
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = () => reject(new Error(`تعذّر قراءة الملف ${file.name}`));
+      reader.readAsArrayBuffer(file);
+    } else {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: results => resolve(results.data),
+        error: err => reject(err)
+      });
+    }
+  });
+}
+
+// بيمسح كل البيانات المرفوعة حاليًا عشان تبدأ رفع من جديد من الأول
+function resetCsvUploadData() {
+  if (parsedCsvData.length > 0 && !confirm('هل تريد مسح كل الملفات/البيانات المرفوعة حاليًا والبدء من جديد؟')) return;
+  parsedCsvData = [];
+  document.getElementById('file-name-display').innerText = '';
+  document.getElementById('csv-preview-area').style.display = 'none';
+}
+
+// بيوحّد أسماء الأعمدة المهمة بغض النظر عن الاسم بالظبط اللي مكتوب بيه العمود في الملف
+// (عربي أو إنجليزي، بمسافات زيادة أو حروف كبيرة/صغيرة مختلفة)، وبيسيب باقي الأعمدة زي ما هي.
 function normalizeUploadedRows(rows) {
   if (!rows || rows.length === 0) return [];
 
@@ -597,7 +640,10 @@ function normalizeUploadedRows(rows) {
     order_number: ['رقم الطلب', 'order_number', 'order number', 'order no', 'order_no'],
     company: ['الشركة', 'company'],
     reviewer: ['المراجع', 'reviewer'],
-    date: ['التاريخ', 'date']
+    date: ['التاريخ', 'تاريخ الطلب', 'date'],
+    status: ['الحالة', 'status'],
+    review_status: ['حالة المراجعة', 'المراجعة', 'review_status', 'review status'],
+    rejection_reason: ['سبب الرفض', 'rejection_reason', 'reason']
   };
 
   const originalKeys = Object.keys(rows[0]);
@@ -644,16 +690,10 @@ function handleFileDrop(event) {
   event.stopPropagation();
   document.getElementById('upload-box').classList.remove('drag-over');
 
-  const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
-  if (!file) return;
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (!files || files.length === 0) return;
 
-  const fileName = file.name.toLowerCase();
-  if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
-    alert('برجاء إفلات ملف CSV أو Excel (xlsx/xls) بس');
-    return;
-  }
-
-  processUploadedFile(file);
+  handleMultipleFiles(files);
 }
 
 function renderCsvPreview(data) {

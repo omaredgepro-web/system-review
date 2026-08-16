@@ -30,7 +30,7 @@ const USERS_DB = {
   "كريم": { password: "123", role: "reviewer", name: "كريم" },
   "علي": { password: "123", role: "reviewer", name: "علي" }
 };
- 
+
 // ============ الوضع الداكن / الفاتح ============
 function applyThemeIcon() {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -58,6 +58,7 @@ const pageSize = 20;
 let totalRecordsCount = 0;
 let selectedOrder = null;
 let parsedCsvData = [];
+let parsedPrintOrderNumbers = [];
 let selectedOrderNumbers = new Set();
 
 // ============ حالة تاب طباعة الشهادات ============
@@ -131,6 +132,7 @@ function setupUserSession(username, userInfo) {
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
+  document.getElementById('print-distribute-tab-btn').style.display = isAdmin ? 'block' : 'none';
 
   // تغيير تاريخ الطلبات المعروضة متاح للأدمن بس؛ المراجع دايمًا شايف أحدث تاريخ متاح
   document.getElementById('date-filter-label').style.display = isAdmin ? 'inline' : 'none';
@@ -173,6 +175,7 @@ function switchTab(tabName) {
   document.getElementById('tab-dashboard').style.display = 'none';
   document.getElementById('tab-admin').style.display = 'none';
   document.getElementById('tab-certificates').style.display = 'none';
+  document.getElementById('tab-print-distribute').style.display = 'none';
 
   if (tabName === 'dashboard') {
     document.getElementById('dashboard-tab-btn').classList.add('active');
@@ -184,6 +187,9 @@ function switchTab(tabName) {
     document.getElementById('certificates-tab-btn').classList.add('active');
     document.getElementById('tab-certificates').style.display = 'block';
     if (!certDataLoaded) loadCertificatesData();
+  } else if (tabName === 'print-distribute') {
+    document.getElementById('print-distribute-tab-btn').classList.add('active');
+    document.getElementById('tab-print-distribute').style.display = 'block';
   }
 }
 
@@ -748,6 +754,171 @@ function handleFileDrop(event) {
   if (!files || files.length === 0) return;
 
   handleMultipleFiles(files);
+}
+
+// ============ توزيع طلبات الطباعة: رفع أرقام طلبات جديدة لجدول الطباعة (Layout) ============
+// بيقرا العمود اللي فيه رقم الطلب بس، بغض النظر عن اسمه بالظبط في الملف
+// (رقم الطلب / order_number / requestnumber / request number ...إلخ) وبيتجاهل كل الأعمدة التانية.
+function normalizeHeaderKey(key) {
+  return key.toString().trim().toLowerCase().replace(/[\s_\-]+/g, '');
+}
+
+const ORDER_NUMBER_ALIASES = [
+  'رقم الطلب', 'order_number', 'order number', 'order no', 'order_no',
+  'requestnumber', 'request_number', 'request number', 'requestno', 'request no'
+].map(normalizeHeaderKey);
+
+function extractOrderNumbersFromRows(rows) {
+  if (!rows || rows.length === 0) return [];
+
+  const firstRowKeys = Object.keys(rows[0]);
+  let matchedKey = null;
+  for (const key of firstRowKeys) {
+    if (ORDER_NUMBER_ALIASES.includes(normalizeHeaderKey(key))) { matchedKey = key; break; }
+  }
+  if (!matchedKey) return [];
+
+  return rows
+    .map(row => String(row[matchedKey] || '').trim())
+    .filter(v => v !== '');
+}
+
+function handlePrintFileSelect(event) {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  handleMultiplePrintFiles(files);
+  event.target.value = '';
+}
+
+async function handleMultiplePrintFiles(fileList) {
+  const files = Array.from(fileList).filter(f => {
+    const name = f.name.toLowerCase();
+    return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls');
+  });
+
+  if (files.length === 0) {
+    alert('برجاء اختيار ملفات CSV أو Excel (xlsx/xls) بس');
+    return;
+  }
+
+  const namesLabel = files.map(f => f.name).join('، ');
+  document.getElementById('print-file-name-display').innerText = `جاري قراءة: ${namesLabel} ...`;
+
+  try {
+    let allNewNumbers = [];
+    for (const file of files) {
+      const rawRows = await parseFileToRows(file);
+      const extracted = extractOrderNumbersFromRows(rawRows);
+      if (extracted.length === 0 && rawRows.length > 0) {
+        alert(`معرفتش ألاقي عمود رقم الطلب في الملف "${file.name}". تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.`);
+        continue;
+      }
+      allNewNumbers = allNewNumbers.concat(extracted);
+    }
+
+    parsedPrintOrderNumbers = [...new Set(parsedPrintOrderNumbers.concat(allNewNumbers))];
+    document.getElementById('print-file-name-display').innerText = `تم إضافة: ${namesLabel} (الإجمالي الآن ${parsedPrintOrderNumbers.length} رقم طلب)`;
+    renderPrintPreview();
+  } catch (err) {
+    alert('تعذّر قراءة أحد الملفات: ' + err.message);
+  }
+}
+
+function renderPrintPreview() {
+  const hasData = parsedPrintOrderNumbers.length > 0;
+  document.getElementById('print-preview-area').style.display = hasData ? 'block' : 'none';
+  document.getElementById('print-total-banner').style.display = hasData ? 'block' : 'none';
+  document.getElementById('print-total-banner-count').innerText = parsedPrintOrderNumbers.length;
+  document.getElementById('print-count').innerText = parsedPrintOrderNumbers.length;
+
+  const tbody = document.getElementById('print-preview-tbody');
+  const PREVIEW_LIMIT = 500;
+  tbody.innerHTML = parsedPrintOrderNumbers.slice(0, PREVIEW_LIMIT).map(num => `<tr><td class="order-no-cell">${num}</td></tr>`).join('');
+  if (parsedPrintOrderNumbers.length > PREVIEW_LIMIT) {
+    tbody.innerHTML += `<tr><td style="text-align:center; color: var(--text-muted);">... و ${parsedPrintOrderNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
+  }
+}
+
+function resetPrintUploadData() {
+  if (parsedPrintOrderNumbers.length > 0 && !confirm('هل تريد مسح كل الأرقام المرفوعة حاليًا والبدء من جديد؟')) return;
+  parsedPrintOrderNumbers = [];
+  document.getElementById('print-file-name-display').innerText = '';
+  document.getElementById('print-preview-area').style.display = 'none';
+  document.getElementById('print-total-banner').style.display = 'none';
+}
+
+function handlePrintDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('print-upload-box').classList.add('drag-over');
+}
+
+function handlePrintDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('print-upload-box').classList.remove('drag-over');
+}
+
+function handlePrintFileDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('print-upload-box').classList.remove('drag-over');
+
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (!files || files.length === 0) return;
+
+  handleMultiplePrintFiles(files);
+}
+
+async function uploadPrintOrdersToSupabase() {
+  if (parsedPrintOrderNumbers.length === 0) return;
+  const btn = document.getElementById('btn-upload-print');
+  btn.innerText = 'جاري الرفع...';
+  btn.disabled = true;
+
+  try {
+    // استبعاد أي رقم طلب موجود بالفعل في جدول الطباعة عشان نتفادى التكرار
+    if (!certDataLoaded) await loadCertificatesData();
+    const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
+    const newRows = parsedPrintOrderNumbers
+      .filter(num => !existingNumbers.has(String(num)))
+      .map(num => ({ order_number: num }));
+    const skippedCount = parsedPrintOrderNumbers.length - newRows.length;
+
+    if (newRows.length === 0) {
+      alert('كل أرقام الطلبات دي موجودة بالفعل في جدول الطباعة، مفيش جديد يتضاف.');
+      btn.innerText = 'تأكيد ورفع الطلبات لجدول الطباعة';
+      btn.disabled = false;
+      return;
+    }
+
+    const batches = chunkArray(newRows, 150);
+    let insertedCount = 0;
+    let firstError = null;
+
+    for (const batch of batches) {
+      const { error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch);
+      if (error) { firstError = error; break; }
+      insertedCount += batch.length;
+    }
+
+    if (firstError) {
+      alert(`تم رفع ${insertedCount} رقم طلب بنجاح قبل ما يحصل خطأ: ${firstError.message}\nجرب تاني للأرقام الباقية.`);
+    } else {
+      const skippedNote = skippedCount > 0 ? ` (${skippedCount} كانوا مكررين واتجاهلوا)` : '';
+      alert(`تم رفع ${insertedCount} رقم طلب جديد بنجاح!${skippedNote}`);
+      resetPrintUploadData();
+    }
+
+    certDataLoaded = false;
+    await loadCertificatesData();
+    switchTab('certificates');
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    btn.innerText = 'تأكيد ورفع الطلبات لجدول الطباعة';
+    btn.disabled = false;
+  }
 }
 
 function renderCsvPreview(data) {

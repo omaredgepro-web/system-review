@@ -29,7 +29,7 @@ const USERS_DB = {
   "كريم": { password: "123", role: "reviewer", name: "كريم" },
   "علي": { password: "123", role: "reviewer", name: "علي" }
 };
-
+ 
 // ============ الوضع الداكن / الفاتح ============
 function applyThemeIcon() {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';

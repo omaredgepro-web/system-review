@@ -8,14 +8,15 @@ const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
     
 const USERS_DB = {
-  "عمر": { password: "123", role: "admin", name: "عمر" },
-  "موندي": { password: "123", role: "admin", name: "موندي" },
-  "مؤمن": { password: "123", role: "admin", name: "مؤمن" },
-  "ابو هيبة": { password: "123", role: "admin", name: "ابو هيبة" },
-  "دينا": { password: "123", role: "admin", name: "دينا" },
-  "سرحان": { password: "123", role: "admin", name: "سرحان" },
-  "روان": { password: "123", role: "admin", name: "روان" },
-  
+  "عمر": { password: "Umar123", role: "admin", name: "عمر" },
+  "موندي": { password: "A555555a", role: "admin", name: "موندي" },
+  "مؤمن": { password: "momen666", role: "admin", name: "مؤمن" },
+  "ابو هيبة": { password: "aboheiba123", role: "admin", name: "ابو هيبة" },
+  "دينا": { password: "dina123", role: "admin", name: "دينا" },
+  "سرحان": { password: "007", role: "admin", name: "سرحان" },
+  "روان": { password: "rawan123", role: "admin", name: "روان" },
+      "ساره": { password: "sara123", role: "admin", name: "روان" },
+
   "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
   "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
   "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
@@ -130,6 +131,11 @@ function setupUserSession(username, userInfo) {
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
+
+  // تغيير تاريخ الطلبات المعروضة متاح للأدمن بس؛ المراجع دايمًا شايف أحدث تاريخ متاح
+  document.getElementById('date-filter-label').style.display = isAdmin ? 'inline' : 'none';
+  document.getElementById('date-filter').style.display = isAdmin ? 'inline-block' : 'none';
+  document.getElementById('reset-date-btn').style.display = isAdmin ? 'inline-flex' : 'none';
 
   populateReviewerDropdowns();
   loadData();
@@ -283,7 +289,7 @@ function renderCurrentPage() {
   let filtered = window.visibleData.filter(item => {
     const orderNum = String(item.order_number || item.order_no || item['رقم الطلب'] || '').toLowerCase();
     const matchesSearch = !searchValue || orderNum.includes(searchValue);
-    const reviewStatus = item.review_status || item['حالة المراجعة'] || '';
+    const reviewStatus = item.review_status || item['حالة المراجعة'] || 'لم يتم المراجعة';
     const matchesStatus = (statusValue === 'ALL') || (reviewStatus === statusValue);
     
     const reviewer = item.reviewer || item['المراجع'] || '';
@@ -542,13 +548,77 @@ function handleFileSelect(event) {
   if (!file) return;
 
   document.getElementById('file-name-display').innerText = `تم اختيار الملف: ${file.name}`;
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    complete: function(results) {
-      parsedCsvData = results.data;
-      renderCsvPreview(parsedCsvData);
+
+  const fileName = file.name.toLowerCase();
+  const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+  if (isExcel) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        // بيقرأ أول صف كأسماء أعمدة (بالظبط زي ما هي مكتوبة في الملف) ويحول كل صف لكائن بنفس أسماء الأعمدة دي
+        const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
+
+        parsedCsvData = normalizeUploadedRows(rows);
+        renderCsvPreview(parsedCsvData);
+      } catch (err) {
+        alert('تعذّر قراءة ملف الإكسيل: ' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: function(results) {
+        parsedCsvData = normalizeUploadedRows(results.data);
+        renderCsvPreview(parsedCsvData);
+      }
+    });
+  }
+}
+
+// بيوحّد أسماء الأعمدة المهمة (رقم الطلب / الشركة / المراجع / التاريخ) بغض النظر عن الاسم بالظبط
+// اللي مكتوب بيه العمود في الملف (عربي أو إنجليزي، بمسافات زيادة أو حروف كبيرة/صغيرة مختلفة)،
+// وبيسيب باقي الأعمدة زي ما هي عشان ترفع لـ Supabase براحتها.
+function normalizeUploadedRows(rows) {
+  if (!rows || rows.length === 0) return [];
+
+  const headerAliases = {
+    order_number: ['رقم الطلب', 'order_number', 'order number', 'order no', 'order_no'],
+    company: ['الشركة', 'company'],
+    reviewer: ['المراجع', 'reviewer'],
+    date: ['التاريخ', 'date']
+  };
+
+  const originalKeys = Object.keys(rows[0]);
+  const keyMap = {}; // originalKey -> canonicalKey (لو اتلاقى تطابق)
+
+  originalKeys.forEach(origKey => {
+    const normalized = origKey.trim().toLowerCase();
+    for (const canonical in headerAliases) {
+      if (headerAliases[canonical].some(alias => alias.toLowerCase() === normalized)) {
+        keyMap[origKey] = canonical;
+        break;
+      }
     }
+  });
+
+  return rows.map(row => {
+    const newRow = { ...row };
+    Object.keys(keyMap).forEach(origKey => {
+      const canonical = keyMap[origKey];
+      // بيضيف مفتاح موحّد (زي order_number) لو مش موجود بالفعل، من غير ما يمسح العمود الأصلي
+      if (!(canonical in newRow) || newRow[canonical] === '' || newRow[canonical] === undefined) {
+        newRow[canonical] = row[origKey];
+      }
+    });
+    return newRow;
   });
 }
 
@@ -1331,6 +1401,41 @@ async function executeCertBulkDateUpdate() {
     else {
       alert(`تم تحديث تاريخ ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newDate}"!`);
       targetOrders.forEach(o => { o.date = newDate; });
+      selectedCertOrderNumbers.clear();
+      updateCertSelectedCount();
+      applyCertDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+async function executeCertBulkStatusUpdate() {
+  const newStatus = document.getElementById('cert-bulk-status-select').value;
+  if (!newStatus) { alert('برجاء اختيار الحالة من القائمة'); return; }
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل لتغيير حالته'); return; }
+
+  let reason = '-';
+  if (CERT_REASON_REQUIRED_STATUSES.includes(newStatus)) {
+    const enteredReason = prompt(`اكتب السبب اللي هيتسجل مع كل الـ (${selectedCertOrderNumbers.size}) طلب المحدد لحالة "${newStatus}":`);
+    if (enteredReason === null) return; // ألغى المستخدم العملية
+    if (!enteredReason.trim()) { alert('السبب مطلوب لهذه الحالة'); return; }
+    reason = enteredReason.trim();
+  }
+
+  const confirmChange = confirm(`هل أنت متأكد من تغيير حالة (${selectedCertOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  const updateData = { status: newStatus, reason: reason };
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).in('id', matchValues);
+    if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); }
+    else {
+      alert(`تم تغيير حالة ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
+      targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; });
       selectedCertOrderNumbers.clear();
       updateCertSelectedCount();
       applyCertDateFiltering();

@@ -217,6 +217,7 @@ function switchTab(tabName) {
   document.getElementById('tab-admin').style.display = 'none';
   document.getElementById('tab-certificates').style.display = 'none';
   document.getElementById('tab-print-distribute').style.display = 'none';
+  document.getElementById('tab-rejections').style.display = 'none';
 
   if (tabName === 'dashboard') {
     document.getElementById('dashboard-tab-btn').classList.add('active');
@@ -228,6 +229,11 @@ function switchTab(tabName) {
     document.getElementById('certificates-tab-btn').classList.add('active');
     document.getElementById('tab-certificates').style.display = 'block';
     if (!certDataLoaded) loadCertificatesData();
+  } else if (tabName === 'rejections') {
+    document.getElementById('rejections-tab-btn').classList.add('active');
+    document.getElementById('tab-rejections').style.display = 'block';
+    if (!certDataLoaded) { loadCertificatesData().then(renderRejectionsTab); }
+    else { renderRejectionsTab(); }
   } else if (tabName === 'print-distribute') {
     document.getElementById('print-distribute-tab-btn').classList.add('active');
     document.getElementById('tab-print-distribute').style.display = 'block';
@@ -1953,6 +1959,88 @@ function populateCertLayoutFilter() {
     reviewerSelect.innerHTML = `<option value="">اختر المراجع...</option>` +
       ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
   }
+
+  const rejectionsReviewerFilter = document.getElementById('rejections-reviewer-filter');
+  if (rejectionsReviewerFilter) {
+    rejectionsReviewerFilter.innerHTML = `<option value="ALL">كل المراجعين</option>` +
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+  }
+}
+
+// ============ تاب مرفوضات (يظهر للكل - مراجع وأدمن) ============
+function toggleRejectionsStatsSidebar() {
+  document.getElementById('rejections-stats-sidebar').classList.toggle('active');
+}
+
+function getRejectedCertRows() {
+  return (certMasterData || []).filter(o => o.status === 'مرفوض');
+}
+
+function renderRejectionsTab() {
+  const tbody = document.getElementById('rejections-tbody');
+  if (!tbody) return;
+
+  const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
+  const reviewerValue = document.getElementById('rejections-reviewer-filter').value;
+
+  let rows = getRejectedCertRows();
+
+  if (reviewerValue && reviewerValue !== 'ALL') {
+    rows = rows.filter(o => o.reviewer === reviewerValue);
+  }
+  if (searchValue) {
+    rows = rows.filter(o => String(o.order_number || '').toLowerCase().includes(searchValue));
+  }
+
+  document.getElementById('rejections-stat-total').innerText = rows.length;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(o => {
+      const orderNum = o.order_number || '-';
+      const layout = o.Layout || o.layout || '-';
+      const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
+      const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || '-');
+      const reason = o.reason && o.reason !== '-' ? o.reason : '-';
+      const date = o.date || extractDateString(o) || '-';
+      return `
+        <tr>
+          <td class="order-no-cell">${orderNum}</td>
+          <td>${layout}</td>
+          <td>${reviewerName}</td>
+          <td>${reason}</td>
+          <td>${date}</td>
+        </tr>`;
+    }).join('');
+  }
+
+  renderRejectionsReviewerStats();
+}
+
+function renderRejectionsReviewerStats() {
+  const container = document.getElementById('rejections-reviewer-stats');
+  if (!container) return;
+
+  const counts = {};
+  getRejectedCertRows().forEach(o => {
+    const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
+    const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || 'غير محدد');
+    counts[reviewerName] = (counts[reviewerName] || 0) + 1;
+  });
+
+  const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  if (names.length === 0) {
+    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد رفض مسجل</p>';
+    return;
+  }
+
+  container.innerHTML = names.map(name => `
+    <div class="reviewer-stat">
+      <div class="reviewer-info"><div class="name">${name}</div></div>
+      <div class="reviewer-counts"><div class="count-rejected">${counts[name]} طلب</div></div>
+    </div>
+  `).join('');
 }
 
 function applyCertDateFiltering() {
@@ -2383,6 +2471,7 @@ async function saveCertUpdate() {
     } else {
       Object.assign(selectedCertOrder, updateData);
       applyCertDateFiltering();
+      renderRejectionsTab();
       closeCertModal();
     }
   } catch (err) {

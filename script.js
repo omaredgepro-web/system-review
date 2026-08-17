@@ -566,6 +566,71 @@ function clearOrderSelection() {
   renderCurrentPage();
 }
 
+// ============ التاريخ الإجباري لدفعة الرفع (لوحة الأدمن CSV) ============
+function useCsvUploadTodayDate() {
+  const dateInput = document.getElementById('csv-upload-date-input');
+  dateInput.value = new Date().toISOString().split('T')[0];
+  applyCsvUploadDateToAllRows();
+}
+
+// بيطبّق التاريخ المختار على كل الصفوف المرفوعة حاليًا (يستبدل أي تاريخ كان موجود بالملف الأصلي)،
+// ويحدّث حالة الخانة عشان يبقى واضح إن التاريخ اتأكد فعليًا.
+function applyCsvUploadDateToAllRows() {
+  const dateInput = document.getElementById('csv-upload-date-input');
+  const statusEl = document.getElementById('csv-upload-date-status');
+
+  if (!dateInput.value) {
+    statusEl.innerText = '⚠️ لسه معملتش اختيار';
+    statusEl.style.color = 'var(--badge-hold-text)';
+    return;
+  }
+
+  if (parsedCsvData && parsedCsvData.length > 0) {
+    parsedCsvData.forEach(row => { row.date = dateInput.value; });
+    renderCsvPreview(parsedCsvData);
+  }
+
+  statusEl.innerText = `✅ الطلبات هتتسجل بتاريخ: ${dateInput.value}`;
+  statusEl.style.color = 'var(--badge-accept-text)';
+}
+
+// بيتأكد إن التاريخ اتحدد قبل السماح بأي توزيع أو رفع لـ Supabase — لو لأ، بيوقف العملية وينبّه المستخدم
+function ensureCsvUploadDateSelected() {
+  const dateInput = document.getElementById('csv-upload-date-input');
+  if (!dateInput.value) {
+    alert('برجاء اختيار التاريخ اللي هتتسجل بيه الطلبات دي الأول (أو اضغط "استخدام تاريخ النهاردة") قبل التوزيع أو الرفع.');
+    dateInput.focus();
+    return false;
+  }
+  return true;
+}
+
+// تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع على مراجع أو لأ) — مفيد لو
+// فلترت بالفعل (بالمراجع أو الشركة أو الحالة) وعايز تحدد أول دفعة من اللي ظاهر عندك بالضبط
+function selectNextOrderFromFiltered() {
+  const input = document.getElementById('order-select-first-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  if (!window.currentFilteredData || window.currentFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const getOrderNum = o => o.order_number || o.order_no || o['رقم الطلب'];
+  const unselected = window.currentFilteredData.filter(o => !selectedOrderNumbers.has(getOrderNum(o)));
+
+  if (unselected.length === 0) { alert('كل الطلبات المطابقة للفلتر الحالي متحددة بالفعل'); return; }
+
+  const batch = unselected.slice(0, count);
+  batch.forEach(o => selectedOrderNumbers.add(getOrderNum(o)));
+
+  updateSelectedCount();
+  renderCurrentPage();
+  input.value = '';
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح ضمن الفلتر الحالي)`);
+  }
+}
+
 // تقسيم أي مصفوفة كبيرة لدفعات أصغر
 function chunkArray(arr, size) {
   const chunks = [];
@@ -800,6 +865,10 @@ function resetCsvUploadData() {
   document.getElementById('file-name-display').innerText = '';
   document.getElementById('csv-preview-area').style.display = 'none';
   document.getElementById('csv-total-banner').style.display = 'none';
+  document.getElementById('csv-upload-date-input').value = '';
+  const statusEl = document.getElementById('csv-upload-date-status');
+  statusEl.innerText = '⚠️ لسه معملتش اختيار';
+  statusEl.style.color = 'var(--badge-hold-text)';
 }
 
 // بيوحّد أسماء الأعمدة المهمة بغض النظر عن الاسم بالظبط اللي مكتوب بيه العمود في الملف
@@ -1357,7 +1426,7 @@ function deleteCompanyFromCsv(company) {
   renderCsvPreview(parsedCsvData);
 }
 
-// ============ التوزيع المخصص: تحديد يدوي (مراجع + شركة + عدد) ============
+// ============ التوزيع المخصص: تحديد يدوي (مراجع + مجموعة شركات + عدد إجمالي يتقسم نسبيًا) ============
 let customDistRules = [];
 
 function populateCustomDistSelects() {
@@ -1368,29 +1437,67 @@ function populateCustomDistSelects() {
   }
 }
 
+// بيحسب عدد الطلبات "غير الموزّعة" (معندهاش مراجع) لكل شركة، مفيد لعرض العدد المتاح وللتقسيم النسبي
+function getUnassignedCountsByCompany(data) {
+  const counts = {};
+  (data || []).forEach(row => {
+    if (row.reviewer || row['المراجع']) return;
+    const c = getCsvRowCompany(row);
+    counts[c] = (counts[c] || 0) + 1;
+  });
+  return counts;
+}
+
 function populateCustomDistCompanySelect(data) {
-  const select = document.getElementById('custom-dist-company-select');
-  if (!select) return;
+  const container = document.getElementById('custom-dist-companies-checklist');
+  if (!container) return;
 
-  const currentValue = select.value;
-  const companies = new Set();
-  (data || []).forEach(row => companies.add(getCsvRowCompany(row)));
-  const sorted = Array.from(companies).sort((a, b) => a.localeCompare(b, 'ar'));
+  const previouslyChecked = new Set(
+    Array.from(container.querySelectorAll('.custom-dist-company-checkbox:checked')).map(cb => cb.value)
+  );
 
-  select.innerHTML = `<option value="">اختر الشركة...</option>` + sorted.map(c => `<option value="${c}">${c}</option>`).join('');
-  if (sorted.includes(currentValue)) select.value = currentValue;
+  const counts = getUnassignedCountsByCompany(data);
+  const sorted = Object.keys(counts).sort((a, b) => a.localeCompare(b, 'ar'));
+
+  container.innerHTML = '';
+  if (sorted.length === 0) {
+    container.innerHTML = `<p style="font-size: 12px; color: var(--text-muted);">لا توجد شركات متاحة (كل الطلبات موزّعة بالفعل أو مفيش ملف مرفوع).</p>`;
+  }
+
+  sorted.forEach(company => {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex; align-items:center; gap:6px; font-size:13px; background: var(--bg-dark); border:1px solid var(--card-border); padding:6px 10px; border-radius:6px; cursor:pointer;';
+    const isChecked = previouslyChecked.has(company) ? 'checked' : '';
+    label.innerHTML = `<input type="checkbox" class="custom-dist-company-checkbox" value="${company}" ${isChecked}> ${company} (${counts[company]} متاح)`;
+    label.querySelector('input').addEventListener('change', updateCustomDistCompaniesTotal);
+    container.appendChild(label);
+  });
+
+  updateCustomDistCompaniesTotal();
+}
+
+function getSelectedCustomDistCompanies() {
+  return Array.from(document.querySelectorAll('.custom-dist-company-checkbox:checked')).map(cb => cb.value);
+}
+
+function updateCustomDistCompaniesTotal() {
+  const counts = getUnassignedCountsByCompany(parsedCsvData);
+  const selected = getSelectedCustomDistCompanies();
+  const total = selected.reduce((sum, c) => sum + (counts[c] || 0), 0);
+  const totalEl = document.getElementById('custom-dist-companies-total');
+  if (totalEl) totalEl.innerText = total;
 }
 
 function addCustomDistRule() {
   const reviewer = document.getElementById('custom-dist-reviewer-select').value;
-  const company = document.getElementById('custom-dist-company-select').value;
+  const companies = getSelectedCustomDistCompanies();
   const count = parseInt(document.getElementById('custom-dist-count-input').value, 10);
 
   if (!reviewer) { alert('اختار المراجع أولاً'); return; }
-  if (!company) { alert('اختار الشركة أولاً'); return; }
+  if (companies.length === 0) { alert('اختار شركة واحدة على الأقل من القائمة'); return; }
   if (!count || count <= 0) { alert('اكتب عدد صحيح أكبر من صفر'); return; }
 
-  customDistRules.push({ reviewer, company, count });
+  customDistRules.push({ reviewer, companies, count });
   renderCustomDistRulesList();
   document.getElementById('custom-dist-count-input').value = '';
 }
@@ -1413,7 +1520,7 @@ function renderCustomDistRulesList() {
     row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: var(--card-bg); border:1px solid var(--card-border); padding:6px 10px; border-radius:6px; margin-bottom:6px; font-size:13px;';
 
     const label = document.createElement('span');
-    label.textContent = `${rule.reviewer} ← ${rule.company}: ${rule.count} طلب`;
+    label.textContent = `${rule.reviewer} ← (${rule.companies.join(' + ')}): ${rule.count} طلب إجمالي`;
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -1427,8 +1534,10 @@ function renderCustomDistRulesList() {
   });
 }
 
-// بيطبّق كل القواعد اللي أضفتها بالترتيب: كل قاعدة بتاخد أول N طلب من الشركة المحددة اللي لسه مالهاش مراجع
+// بيطبّق كل القواعد بالترتيب: كل قاعدة بتاخد العدد الإجمالي المطلوب وتقسّمه نسبيًا بين الشركات
+// المختارة حسب نصيب كل شركة الفعلي من الطلبات غير الموزّعة بينهم (Largest Remainder Method لدقة أعلى)
 function applyCustomDistRules() {
+  if (!ensureCsvUploadDateSelected()) return;
   if (!customDistRules || customDistRules.length === 0) {
     alert('لسه معملتش أي قاعدة توزيع مخصص. ضيف قاعدة الأول من فوق.');
     return;
@@ -1442,15 +1551,44 @@ function applyCustomDistRules() {
   const summary = [];
 
   customDistRules.forEach(rule => {
-    const candidates = parsedCsvData.filter(row =>
-      getCsvRowCompany(row) === rule.company && !row.reviewer && !row[reviewerColKey]
-    );
-    const toAssign = candidates.slice(0, rule.count);
-    toAssign.forEach(row => {
-      row[reviewerColKey] = rule.reviewer;
-      row.reviewer = rule.reviewer;
+    // تجميع الطلبات غير الموزّعة لكل شركة من شركات القاعدة دي، بترتيبها الأصلي
+    const companyPools = {};
+    rule.companies.forEach(c => { companyPools[c] = []; });
+    parsedCsvData.forEach(row => {
+      const c = getCsvRowCompany(row);
+      if (rule.companies.includes(c) && !row.reviewer && !row[reviewerColKey]) {
+        companyPools[c].push(row);
+      }
     });
-    summary.push({ ...rule, assigned: toAssign.length });
+
+    const totalAvailable = rule.companies.reduce((sum, c) => sum + companyPools[c].length, 0);
+    const targetTotal = Math.min(rule.count, totalAvailable);
+    const companyBreakdown = {};
+
+    if (targetTotal > 0) {
+      // حساب نصيب كل شركة بنفس نسبتها الحالية في المتاح، مع تقريب دقيق (Largest Remainder Method)
+      let targets = rule.companies.map(c => {
+        const raw = targetTotal * (companyPools[c].length / totalAvailable);
+        return { company: c, count: Math.floor(raw), remainder: raw - Math.floor(raw) };
+      });
+
+      let allocated = targets.reduce((s, t) => s + t.count, 0);
+      let remainderNeeded = targetTotal - allocated;
+
+      targets.sort((a, b) => b.remainder - a.remainder);
+      for (let i = 0; i < targets.length && remainderNeeded > 0; i++) {
+        if (targets[i].count < companyPools[targets[i].company].length) { targets[i].count++; remainderNeeded--; }
+      }
+
+      targets.forEach(t => {
+        const taken = companyPools[t.company].splice(0, Math.min(t.count, companyPools[t.company].length));
+        taken.forEach(row => { row[reviewerColKey] = rule.reviewer; row.reviewer = rule.reviewer; });
+        if (taken.length > 0) companyBreakdown[t.company] = taken.length;
+      });
+    }
+
+    const actuallyAssigned = Object.values(companyBreakdown).reduce((a, b) => a + b, 0);
+    summary.push({ reviewer: rule.reviewer, companies: rule.companies, count: rule.count, assigned: actuallyAssigned, companyBreakdown });
   });
 
   renderCsvPreview(parsedCsvData);
@@ -1462,18 +1600,49 @@ function renderCustomDistSummary(summary) {
   const rows = summary.map(s => {
     const shortfall = s.count - s.assigned;
     const warning = shortfall > 0
-      ? `<span style="color: var(--badge-hold-text);"> (${shortfall} ناقص — مكانش متاح عدد كفاية من هذه الشركة غير موزّع)</span>`
+      ? `<span style="color: var(--badge-hold-text);"> (${shortfall} ناقص — مكانش متاح عدد كفاية من الشركات دي غير موزّع)</span>`
       : '';
+    const breakdownLine = Object.entries(s.companyBreakdown).map(([c, n]) => `${c}: ${n}`).join('، ');
+
     return `<div class="reviewer-stat">
-      <div class="reviewer-info"><div class="name">${s.reviewer} ← ${s.company}</div></div>
+      <div class="reviewer-info"><div class="name">${s.reviewer} ← (${s.companies.join(' + ')})</div><div class="total">${breakdownLine || '—'}</div></div>
       <div class="reviewer-counts"><div class="count-accepted">${s.assigned} / ${s.count} طلب</div></div>
-    </div>${warning ? `<p style="font-size: 11px; margin: 2px 0 8px;">${warning}</p>` : ''}`;
+    </div>${warning ? `<p style="font-size: 11px; margin: 2px 0 8px;">${warning}</p>` : ''}
+    ${buildReviewerBreakdownHtml(s.reviewer)}`;
   }).join('');
 
   container.innerHTML = `
     <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-muted);">ملخص التوزيع المخصص:</h4>
     ${rows}
   `;
+}
+
+// بيحسب توزيع طلبات مراجع معين (من الملف المرفوع حاليًا) حسب الشركة (بالنسبة%) وحسب حالة المراجعة
+// (زي "تم اعادة المراجعة" و"جاري المراجعة" لو موجودين) — بيتستخدم في ملخصات كل أنواع التوزيع
+function buildReviewerBreakdownHtml(reviewerUsername) {
+  const rows = parsedCsvData.filter(r => (r.reviewer || r['المراجع']) === reviewerUsername);
+  if (rows.length === 0) return '';
+
+  const byCompany = {};
+  const byStatus = {};
+  rows.forEach(r => {
+    const c = getCsvRowCompany(r);
+    byCompany[c] = (byCompany[c] || 0) + 1;
+    const s = r.status || r['الحالة'] || r['حالة المراجعة'] || '';
+    if (s) byStatus[s] = (byStatus[s] || 0) + 1;
+  });
+
+  const companyParts = Object.entries(byCompany)
+    .sort((a, b) => b[1] - a[1])
+    .map(([c, n]) => `${c}: ${n} (${Math.round((n / rows.length) * 100)}%)`)
+    .join('، ');
+
+  const statusParts = Object.entries(byStatus).map(([s, n]) => `${s}: ${n}`).join('، ');
+
+  return `<div style="font-size: 11px; color: var(--text-muted); margin: 2px 0 12px; padding-right: 4px;">
+    <div>📊 توزيع الشركات (إجمالي ${reviewerUsername} الآن ${rows.length}): ${companyParts}</div>
+    ${Object.keys(byStatus).length > 0 ? `<div>📋 حالات المراجعة: ${statusParts}</div>` : ''}
+  </div>`;
 }
 
 // قائمة كل المستخدمين (مراجعين + أدمن) بمربعات اختيار للمشاركة في التوزيع المتوازن
@@ -1516,6 +1685,7 @@ function selectAllCsvDistUsers(checked) {
 // توزيع متوازن: كل الطلبات بيتم خلطها بالتبادل بين الشركات أولاً (عشان كل مراجع ياخد خليط من كل الشركات)،
 // بعدين بتتوزع بالتساوي (Round-robin) على المراجعين المختارين، مع وقف عند التارجت لو محدد.
 function runBalancedCsvDistribution() {
+  if (!ensureCsvUploadDateSelected()) return;
   if (!parsedCsvData || parsedCsvData.length === 0) {
     alert('برجاء رفع ملف CSV أولاً.');
     return;
@@ -1603,6 +1773,7 @@ function renderCsvDistSummary(counts, leftoverCount) {
       <div class="reviewer-info"><div class="name">${name}</div></div>
       <div class="reviewer-counts"><div class="count-accepted">${counts[name]} طلب</div></div>
     </div>
+    ${buildReviewerBreakdownHtml(name)}
   `).join('');
 
   const leftoverHtml = leftoverCount > 0
@@ -1625,6 +1796,7 @@ const ALLOWED_ORDER_COLUMNS = ['order_number', 'company', 'reviewer', 'date', 's
 
 async function uploadCsvToSupabase() {
   if (parsedCsvData.length === 0) return;
+  if (!ensureCsvUploadDateSelected()) return;
 
   const assignedOnly = document.getElementById('csv-upload-assigned-only-checkbox').checked;
   const dataToUpload = assignedOnly

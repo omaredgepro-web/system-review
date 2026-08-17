@@ -6,6 +6,7 @@ const TABLE_NAME = 'system_review1';
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
+const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
       
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
@@ -1946,6 +1947,12 @@ function populateCertLayoutFilter() {
     modalSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
     bulkReassignSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
   });
+
+  const reviewerSelect = document.getElementById('cert-modal-reviewer');
+  if (reviewerSelect) {
+    reviewerSelect.innerHTML = `<option value="">اختر المراجع...</option>` +
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+  }
 }
 
 function applyCertDateFiltering() {
@@ -2322,6 +2329,7 @@ function openCertEditModal(orderNum) {
   document.getElementById('cert-modal-status').value = CERT_STATUSES.includes(selectedCertOrder.status) ? selectedCertOrder.status : 'معلق';
   document.getElementById('cert-modal-layout').value = selectedCertOrder.Layout || selectedCertOrder.layout || '';
   document.getElementById('cert-modal-reason').value = selectedCertOrder.reason && selectedCertOrder.reason !== '-' ? selectedCertOrder.reason : '';
+  document.getElementById('cert-modal-reviewer').value = selectedCertOrder.reviewer || '';
   toggleCertReasonField();
   document.getElementById('cert-edit-modal').style.display = 'flex';
 }
@@ -2334,6 +2342,7 @@ function closeCertModal() {
 function toggleCertReasonField() {
   const status = document.getElementById('cert-modal-status').value;
   document.getElementById('cert-reason-group').style.display = CERT_REASON_REQUIRED_STATUSES.includes(status) ? 'block' : 'none';
+  document.getElementById('cert-reviewer-group').style.display = CERT_REVIEWER_REQUIRED_STATUSES.includes(status) ? 'block' : 'none';
 }
 
 async function saveCertUpdate() {
@@ -2342,10 +2351,16 @@ async function saveCertUpdate() {
   const newStatus = document.getElementById('cert-modal-status').value;
   const newLayout = document.getElementById('cert-modal-layout').value;
   const newReason = document.getElementById('cert-modal-reason').value.trim();
+  const newReviewer = document.getElementById('cert-modal-reviewer').value;
   const newDate = document.getElementById('cert-modal-date').value;
 
   if (CERT_REASON_REQUIRED_STATUSES.includes(newStatus) && !newReason) {
     alert('برجاء كتابة السبب.');
+    return;
+  }
+
+  if (CERT_REVIEWER_REQUIRED_STATUSES.includes(newStatus) && !newReviewer) {
+    alert('برجاء اختيار المراجع.');
     return;
   }
 
@@ -2357,6 +2372,7 @@ async function saveCertUpdate() {
     status: newStatus,
     Layout: newLayout,
     reason: CERT_REASON_REQUIRED_STATUSES.includes(newStatus) ? newReason : '-',
+    reviewer: CERT_REVIEWER_REQUIRED_STATUSES.includes(newStatus) ? newReviewer : null,
     date: newDate || null
   };
 

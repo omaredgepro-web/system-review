@@ -386,7 +386,9 @@ function renderCurrentPage() {
     const matchesStatus = (statusValue === 'ALL') || (reviewStatus === statusValue);
     
     const reviewer = item.reviewer || item['المراجع'] || '';
-    const matchesReviewer = (reviewerValue === 'ALL') || (reviewerValue === 'UNASSIGNED' ? !reviewer : (reviewer === reviewerValue));
+    const matchesReviewer = (reviewerValue === 'ALL')
+      || (reviewerValue === 'UNASSIGNED' ? !reviewer
+        : (reviewer === reviewerValue || getDisplayName(reviewer) === getDisplayName(reviewerValue)));
 
     const company = (item.company || item['الشركة'] || '').normalize('NFC').trim();
     const matchesCompany = (companyValue === 'ALL') || (company === companyValue);
@@ -836,6 +838,14 @@ function normalizeUploadedRows(rows) {
         newRow[canonical] = row[origKey];
       }
     });
+
+    // لو عمود المراجع في الملف مكتوب بالاسم العربي (زي "يوسف") بدل اليوزرنيم الإنجليزي المخزّن في profiles،
+    // بنحوله هنا لليوزرنيم قبل الرفع، عشان فلتر المراجع والتوزيع يفضلوا شغالين صح على الداتا الجديدة.
+    if (newRow.reviewer) {
+      const matchByName = ALL_PROFILES.find(p => p.name === newRow.reviewer);
+      if (matchByName) newRow.reviewer = matchByName.username;
+    }
+
     return newRow;
   });
 }
@@ -969,7 +979,7 @@ function populatePrintDistUsersList() {
     container.innerHTML += `
       <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
         <input type="checkbox" class="print-dist-user-checkbox" value="${key}" ${isChecked} onchange="onPrintDistUserToggle(this)">
-        ${key}
+        ${getDisplayName(key)}
       </label>
     `;
   });
@@ -1608,7 +1618,9 @@ function renderCsvDistSummary(counts, leftoverCount) {
 // الأعمدة الفعلية الموجودة في جدول system_review1 على Supabase.
 // أي عمود تاني (زي أسماء الأعمدة العربية الأصلية من ملف الإكسيل "الشركة"، "رقم الطلب"...)
 // بيتشال قبل الرفع عشان محتترفضش العملية بسبب "column not found in schema cache".
-const ALLOWED_ORDER_COLUMNS = ['id', 'order_number', 'company', 'reviewer', 'date', 'status', 'review_status', 'rejection_reason'];
+// 'id' اتشالت من هنا عن قصد: أي رفع CSV جديد لازم يبقى دايمًا إضافة (insert) لطلبات جديدة،
+// مش تعديل صف موجود بالغلط لو حد رفع ملف فيه عمود id قديم (زي ملف مُصدَّر من النظام قبل كده).
+const ALLOWED_ORDER_COLUMNS = ['order_number', 'company', 'reviewer', 'date', 'status', 'review_status', 'rejection_reason'];
 
 async function uploadCsvToSupabase() {
   if (parsedCsvData.length === 0) return;
@@ -1632,7 +1644,6 @@ async function uploadCsvToSupabase() {
       ALLOWED_ORDER_COLUMNS.forEach(key => {
         if (row[key] !== undefined && row[key] !== '') newRow[key] = row[key];
       });
-      if (newRow.id === "" || newRow.id === undefined || newRow.id === null) delete newRow.id;
       return newRow;
     });
 
@@ -2064,7 +2075,7 @@ function getFilteredRejectionsRows() {
   let rows = rejectionsAllData || [];
 
   if (reviewerValue && reviewerValue !== 'ALL') {
-    rows = rows.filter(o => o.reviewer === reviewerValue);
+    rows = rows.filter(o => o.reviewer === reviewerValue || getDisplayName(o.reviewer) === getDisplayName(reviewerValue));
   }
   if (substatusValue === 'PENDING') {
     rows = rows.filter(o => !o.reviewer_action);

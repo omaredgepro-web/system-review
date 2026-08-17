@@ -193,6 +193,8 @@
               <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="selected-count">0</span> طلب</span>
               <input type="number" id="bulk-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
               <button class="btn btn-secondary" onclick="selectNextOrderBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (تلقائي حسب نسب الشركات)</button>
+              <input type="number" id="order-select-first-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
+              <button class="btn btn-secondary" onclick="selectNextOrderFromFiltered()" style="padding: 4px 10px; font-size: 12px;">تحديد الأول من النتائج الحالية</button>
               <button class="btn btn-secondary" onclick="clearOrderSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -257,6 +259,17 @@
           <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
         </div>
 
+        <!-- تاريخ إجباري للطلبات دي: لازم يتحدد قبل أي توزيع أو رفع لـ Supabase -->
+        <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px; background: rgba(99, 102, 241, 0.08); border-color: var(--accent-purple);">
+          <h3 style="font-size: 14px; margin-bottom: 8px;">📅 تاريخ تسجيل هذه الدفعة من الطلبات (مطلوب)</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">اختار التاريخ اللي هتتسجل بيه كل الطلبات دي في قاعدة البيانات. لازم تحدده قبل ما تقدر تعمل توزيع أو ترفع الطلبات.</p>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <input type="date" id="csv-upload-date-input" class="date-input" onchange="applyCsvUploadDateToAllRows()">
+            <button class="btn btn-secondary" onclick="useCsvUploadTodayDate()" style="padding: 6px 14px; font-size: 12px;">استخدام تاريخ النهاردة</button>
+            <span id="csv-upload-date-status" style="font-size: 12px; color: var(--badge-hold-text);">⚠️ لسه معملتش اختيار</span>
+          </div>
+        </div>
+
         <!-- إجمالي عدد الطلبات المرفوعة، ظاهر بشكل واضح فور اختيار/إفلات أي ملف -->
         <div id="csv-total-banner" class="kpi-card" style="display: none; margin-bottom: 20px; text-align: center;">
           <div class="kpi-title">إجمالي عدد الطلبات في الملف/الملفات المرفوعة</div>
@@ -292,23 +305,24 @@
             <div id="csv-duplicates-panel" style="font-size: 13px;"></div>
           </div>
 
-          <!-- لوحة التوزيع المخصص: تحديد يدوي لكل مراجع (شركة معينة + عدد معين) -->
+          <!-- لوحة التوزيع المخصص: تحديد يدوي لكل مراجع (مجموعة شركات + عدد) مع تقسيم نسبي تلقائي بينهم -->
           <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
-            <h3 style="font-size: 15px; margin-bottom: 6px;">🎯 توزيع مخصص (شركة + عدد لكل مراجع)</h3>
+            <h3 style="font-size: 15px; margin-bottom: 6px;">🎯 توزيع مخصص (شركة/شركات + عدد لكل مراجع)</h3>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
-              لو عايز تحدد بنفسك مثلاً "أدهم ياخد 50 طلب من شركة رؤية" و"يوسف ياخد 30 طلب من نفس الشركة"، ضيف قاعدة لكل حالة وبعدين اضغط تطبيق. الترتيب مهم: القواعد بتتنفذ بالترتيب اللي أضفتها بيه، وكل قاعدة بتاخد من الطلبات اللي لسه مالهاش مراجع بس.
+              لو عايز تحدد بنفسك مثلاً "أدهم ياخد 50 طلب من (كويتية + رؤية + اشرف طلعت)"، اختار المراجع، حدد شركة واحدة أو أكتر من القائمة تحت، اكتب العدد الكلي، وضيف قاعدة. لو اخترت أكتر من شركة، الـ 50 هتتقسم عليهم تلقائيًا حسب نسبة كل شركة من إجمالي الطلبات المتاحة (غير الموزّعة) بينهم — مثلاً لو اشرف طلعت عنده أكبر عدد، هياخد الحصة الأكبر تلقائيًا. الترتيب مهم: القواعد بتتنفذ بالترتيب اللي أضفتها بيه، وكل قاعدة بتاخد من الطلبات اللي لسه مالهاش مراجع بس.
             </p>
 
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
               <select id="custom-dist-reviewer-select" class="filter-select" style="padding: 6px 10px; font-size: 13px;">
                 <option value="">اختر المراجع...</option>
               </select>
-              <select id="custom-dist-company-select" class="filter-select" style="padding: 6px 10px; font-size: 13px;">
-                <option value="">اختر الشركة...</option>
-              </select>
-              <input type="number" id="custom-dist-count-input" class="filter-select" min="1" placeholder="كام طلب؟" style="width: 110px; padding: 6px 10px; font-size: 13px;">
+              <input type="number" id="custom-dist-count-input" class="filter-select" min="1" placeholder="كام طلب إجمالي؟" style="width: 130px; padding: 6px 10px; font-size: 13px;">
               <button class="btn btn-secondary" onclick="addCustomDistRule()" style="padding: 6px 14px; font-size: 12px;">➕ إضافة قاعدة</button>
             </div>
+
+            <p style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">اختر شركة واحدة أو أكتر (هتتقسم النسبة بينهم تلقائي):</p>
+            <div id="custom-dist-companies-checklist" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 160px; overflow-y: auto; padding: 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; margin-bottom: 8px;"></div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">الإجمالي المتاح (غير موزّع) في الشركات المحددة: <span id="custom-dist-companies-total" style="font-weight: 700; color: var(--text-main);">0</span> طلب</p>
 
             <div id="custom-dist-rules-list" style="margin-bottom: 14px;">
               <p style="font-size: 12px; color: var(--text-muted);">لسه معملتش أي قاعدة.</p>

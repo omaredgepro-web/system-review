@@ -281,11 +281,38 @@
             <div id="csv-duplicates-panel" style="font-size: 13px;"></div>
           </div>
 
+          <!-- لوحة التوزيع المخصص: تحديد يدوي لكل مراجع (شركة معينة + عدد معين) -->
+          <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+            <h3 style="font-size: 15px; margin-bottom: 6px;">🎯 توزيع مخصص (شركة + عدد لكل مراجع)</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+              لو عايز تحدد بنفسك مثلاً "أدهم ياخد 50 طلب من شركة رؤية" و"يوسف ياخد 30 طلب من نفس الشركة"، ضيف قاعدة لكل حالة وبعدين اضغط تطبيق. الترتيب مهم: القواعد بتتنفذ بالترتيب اللي أضفتها بيه، وكل قاعدة بتاخد من الطلبات اللي لسه مالهاش مراجع بس.
+            </p>
+
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+              <select id="custom-dist-reviewer-select" class="filter-select" style="padding: 6px 10px; font-size: 13px;">
+                <option value="">اختر المراجع...</option>
+              </select>
+              <select id="custom-dist-company-select" class="filter-select" style="padding: 6px 10px; font-size: 13px;">
+                <option value="">اختر الشركة...</option>
+              </select>
+              <input type="number" id="custom-dist-count-input" class="filter-select" min="1" placeholder="كام طلب؟" style="width: 110px; padding: 6px 10px; font-size: 13px;">
+              <button class="btn btn-secondary" onclick="addCustomDistRule()" style="padding: 6px 14px; font-size: 12px;">➕ إضافة قاعدة</button>
+            </div>
+
+            <div id="custom-dist-rules-list" style="margin-bottom: 14px;">
+              <p style="font-size: 12px; color: var(--text-muted);">لسه معملتش أي قاعدة.</p>
+            </div>
+
+            <button class="btn btn-primary" onclick="applyCustomDistRules()" style="width: auto; padding: 8px 16px;">▶️ تطبيق التوزيع المخصص الآن</button>
+
+            <div id="custom-dist-summary" style="margin-top: 14px;"></div>
+          </div>
+
           <!-- لوحة التوزيع المتوازن (حسب الشركات + عدد لكل مراجع) -->
           <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
             <h3 style="font-size: 15px; margin-bottom: 6px;">⚖️ توزيع متوازن على المراجعين</h3>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
-              بيوزّع الطلبات بالتساوي بين المراجعين المختارين، مع ضمان إن كل مراجع ياخد خليط متوازن من كل الشركات (مش شركة واحدة بس). لو حددت "عدد الطلبات لكل شخص"، التوزيع هيوقف عند الوصول للعدد ده لكل واحد.
+              بيوزّع الطلبات بالتساوي بين المراجعين المختارين، مع ضمان إن كل مراجع ياخد خليط متوازن من كل الشركات (مش شركة واحدة بس)، وكمان بيوازن بين حالات المراجعة المختلفة لو موجودة أكتر من حالة (زي "تم المراجعة" و"جاري المراجعة"). لو حددت "عدد الطلبات لكل شخص"، التوزيع هيوقف عند الوصول للعدد ده لكل واحد.
             </p>
 
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
@@ -300,6 +327,11 @@
 
             <div id="csv-dist-summary"></div>
           </div>
+
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); cursor: pointer; margin-bottom: 12px;">
+            <input type="checkbox" id="csv-upload-assigned-only-checkbox" checked>
+            رفع الطلبات الموزّعة على مراجع فقط (استبعاد أي طلب لسه من غير مراجع من الرفع لقاعدة البيانات)
+          </label>
 
           <button class="btn btn-primary" id="btn-upload-supabase" onclick="uploadCsvToSupabase()" style="width: auto;">تأكيد وتوزيع الطلبات لـ Supabase</button>
         </div>

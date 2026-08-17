@@ -1056,6 +1056,7 @@ function renderCsvPreview(data) {
   });
 
   renderCsvCompaniesPanel(data);
+  renderCsvDuplicatesPanel(data);
   populateCsvDistUsersList();
   document.getElementById('csv-dist-summary').innerHTML = '';
 }
@@ -1088,11 +1089,34 @@ function renderCsvCompaniesPanel(data) {
 
   order.forEach(company => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background: var(--card-bg); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 8px;';
+    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap: 10px; background: var(--card-bg); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 8px; flex-wrap: wrap;';
 
     const label = document.createElement('span');
     label.style.cssText = 'font-size: 13px; font-weight: 600;';
     label.textContent = `${company} (${counts[company]} طلب)`;
+
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+    // خانة تحديد عدد معين من الشركة دي بس، والباقي يتشال من الملف
+    const limitInput = document.createElement('input');
+    limitInput.type = 'number';
+    limitInput.min = '1';
+    limitInput.max = String(counts[company]);
+    limitInput.placeholder = 'كام طلب؟';
+    limitInput.className = 'filter-select';
+    limitInput.style.cssText = 'width: 90px; padding: 4px 8px; font-size: 12px;';
+
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.className = 'btn btn-secondary';
+    applyBtn.style.cssText = 'padding: 4px 10px; font-size: 12px;';
+    applyBtn.innerText = 'تطبيق';
+    applyBtn.addEventListener('click', () => {
+      const limitValue = parseInt(limitInput.value, 10);
+      if (!limitValue || limitValue < 1) { alert('اكتب رقم صحيح أكبر من صفر.'); return; }
+      applyCsvCompanyLimit(company, limitValue);
+    });
 
     // بنستخدم addEventListener بدل onclick="..." هنا عشان أسماء بعض الشركات ممكن تحتوي على علامات تنصيص
     // أو رموز خاصة كانت بتكسر الـ HTML attribute وتمنع الزرار من الشغل خالص.
@@ -1102,10 +1126,84 @@ function renderCsvCompaniesPanel(data) {
     deleteBtn.innerText = '🗑️ حذف';
     deleteBtn.addEventListener('click', () => deleteCompanyFromCsv(company));
 
+    controls.appendChild(limitInput);
+    controls.appendChild(applyBtn);
+    controls.appendChild(deleteBtn);
+
     row.appendChild(label);
-    row.appendChild(deleteBtn);
+    row.appendChild(controls);
     container.appendChild(row);
   });
+}
+
+// بيسيب بس أول N طلب من شركة معينة في الملف، ويشيل الباقي قبل الرفع/التوزيع
+function applyCsvCompanyLimit(company, limitValue) {
+  let kept = 0;
+  const before = parsedCsvData.filter(row => getCsvRowCompany(row) === company).length;
+
+  if (limitValue >= before) {
+    alert(`العدد اللي كتبته (${limitValue}) أكبر من أو يساوي عدد طلبات الشركة الموجودة (${before})، فمفيش حاجة هتتشال.`);
+    return;
+  }
+
+  const confirmLimit = confirm(`هيتم الإبقاء على أول ${limitValue} طلب بس من شركة "${company}" (من أصل ${before})، والباقي (${before - limitValue}) هيتشال من الملف. تأكيد؟`);
+  if (!confirmLimit) return;
+
+  parsedCsvData = parsedCsvData.filter(row => {
+    if (getCsvRowCompany(row) !== company) return true;
+    kept++;
+    return kept <= limitValue;
+  });
+
+  renderCsvPreview(parsedCsvData);
+}
+
+// فحص الأرقام المكررة: داخل نفس الملف المرفوع، وكمان اللي موجودة بالفعل في قاعدة البيانات
+function getCsvRowOrderNumber(row) {
+  return String(row.order_number || row['رقم الطلب'] || '').trim();
+}
+
+function renderCsvDuplicatesPanel(data) {
+  const container = document.getElementById('csv-duplicates-panel');
+  if (!container) return;
+
+  if (!data || data.length === 0) { container.innerHTML = ''; return; }
+
+  const seenCounts = {};
+  data.forEach(row => {
+    const num = getCsvRowOrderNumber(row);
+    if (!num) return;
+    seenCounts[num] = (seenCounts[num] || 0) + 1;
+  });
+
+  const dupWithinFile = Object.keys(seenCounts).filter(num => seenCounts[num] > 1);
+
+  const existingSet = new Set((window.masterData || []).map(o => String(o.order_number || o.order_no || o['رقم الطلب'])));
+  const dupExisting = [...new Set(data.map(getCsvRowOrderNumber))].filter(num => num && existingSet.has(num));
+
+  if (dupWithinFile.length === 0 && dupExisting.length === 0) {
+    container.innerHTML = `<p style="color: var(--badge-accept-text);">✅ مفيش أي رقم طلب مكرر — لا داخل الملف ولا في قاعدة البيانات.</p>`;
+    return;
+  }
+
+  let html = '';
+
+  if (dupWithinFile.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-bottom:6px;">⚠️ ${dupWithinFile.length} رقم طلب مكرر داخل نفس الملف (ظهر أكتر من مرة):</p>`;
+    html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-bottom:14px;">`;
+    html += dupWithinFile.map(num => `${num} <span style="color: var(--badge-reject-text);">(×${seenCounts[num]})</span>`).join('، ');
+    html += `</div>`;
+  }
+
+  if (dupExisting.length > 0) {
+    html += `<p style="color: var(--badge-hold-text); font-weight:700; margin-bottom:6px;">⚠️ ${dupExisting.length} رقم طلب موجود بالفعل في قاعدة البيانات:</p>`;
+    html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">تنبيه: الرفع هيتم بدون معرف (id) مطابق، يعني لو رفعتهم هيتسجلوا كصفوف جديدة مكررة، مش هيستبدلوا القديمة.</p>`;
+    html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px;">`;
+    html += dupExisting.join('، ');
+    html += `</div>`;
+  }
+
+  container.innerHTML = html;
 }
 
 // بيشيل كل طلبات شركة معينة من الملف المرفوع قبل التوزيع/الرفع لـ Supabase

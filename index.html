@@ -12,7 +12,7 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
-   
+  
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -158,7 +158,12 @@
           
           <div class="table-filters">
             <input type="text" id="search-input" class="search-input" placeholder="ابحث برقم الطلب...">
-            
+
+            <label style="font-size: 13px; color: var(--text-muted);">الشركة:</label>
+            <select id="company-filter" class="filter-select">
+              <option value="ALL">كل الشركات</option>
+            </select>
+
             <label id="reviewer-filter-label" style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
             <select id="reviewer-filter" class="filter-select">
               <option value="ALL">كل المراجعين</option>
@@ -669,6 +674,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260817b"></script>
+  <script src="script.js?v=20260817c"></script>
 </body>
 </html>

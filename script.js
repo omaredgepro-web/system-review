@@ -2434,7 +2434,14 @@ function selectNextCertFromFiltered() {
   }
 }
 
-// تصدير أرقام الطلبات المحددة فقط (بدون باقي الأعمدة) لملف Excel
+// تصدير أرقام الطلبات المحددة فقط (بدون باقي الأعمدة) - Excel أو TXT
+function getSelectedCertExportFileLabel() {
+  const layoutFilterValue = document.getElementById('cert-layout-filter').value;
+  const nameLabel = (layoutFilterValue && layoutFilterValue !== 'ALL' && layoutFilterValue !== 'UNASSIGNED') ? `_${layoutFilterValue}` : '';
+  const dateLabel = document.getElementById('cert-date-filter').value || 'غير محدد';
+  return `ارقام_الطلبات${nameLabel}_${dateLabel}`;
+}
+
 function exportSelectedCertOrderNumbers() {
   if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
 
@@ -2447,12 +2454,29 @@ function exportSelectedCertOrderNumbers() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام الطلبات');
 
-  const layoutFilterValue = document.getElementById('cert-layout-filter').value;
-  const nameLabel = (layoutFilterValue && layoutFilterValue !== 'ALL' && layoutFilterValue !== 'UNASSIGNED') ? `_${layoutFilterValue}` : '';
-  const dateLabel = document.getElementById('cert-date-filter').value || 'غير محدد';
-
-  XLSX.writeFile(workbook, `ارقام_الطلبات${nameLabel}_${dateLabel}.xlsx`);
+  XLSX.writeFile(workbook, `${getSelectedCertExportFileLabel()}.xlsx`);
 }
+
+// نفس التصدير بس كملف TXT، رقم طلب في كل سطر (من غير عناوين أو أي تنسيق إضافي)
+function exportSelectedCertOrderNumbersTxt() {
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
+
+  const orderNumbers = Array.from(selectedCertOrderNumbers);
+  const content = orderNumbers.join('\r\n');
+
+  // \uFEFF: BOM عشان الأحرف العربية والأرقام تظهر صح لو الملف اتفتح في Notepad على ويندوز
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${getSelectedCertExportFileLabel()}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 
 async function executeCertBulkReassign() {
   const newLayout = document.getElementById('cert-bulk-reassign-select').value;

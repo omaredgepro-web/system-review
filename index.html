@@ -475,6 +475,7 @@
       <div class="dashboard-layout">
         <div class="main-content">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+            <span id="rejections-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
             <h3 style="font-size: 16px;">قائمة الطلبات المرفوضة</h3>
             <button class="btn btn-secondary" onclick="toggleRejectionsStatsSidebar()">📊 إحصائيات المراجعين</button>
           </div>
@@ -486,6 +487,10 @@
             <select id="rejections-reviewer-filter" class="filter-select" onchange="renderRejectionsTab()">
               <option value="ALL">كل المراجعين</option>
             </select>
+
+            <label style="font-size: 13px; color: var(--text-muted);">تاريخ الرفض:</label>
+            <input type="date" id="rejections-date-filter" class="date-input" onchange="onRejectionsDateFilterChange()">
+            <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
           </div>
 
           <div class="table-container">

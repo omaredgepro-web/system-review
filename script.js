@@ -36,6 +36,15 @@ async function fetchAllProfiles() {
   return data;
 }
 
+// بيحوّل اليوزرنيم المخزّن (زي "adham") للاسم العربي المعروض (زي "ادهم") في أي مكان بيتعرض للمستخدم.
+// لو القيمة مش يوزرنيم معروف في ALL_PROFILES (بيانات قديمة كانت متخزنة بالاسم مباشرة، أو "غير موزّع"، أو فاضية)،
+// بيرجّع نفس القيمة زي ما هي من غير تغيير.
+function getDisplayName(value) {
+  if (!value) return value;
+  const profile = ALL_PROFILES.find(p => p.username === value);
+  return profile ? profile.name : value;
+}
+
 // ============ الوضع الداكن / الفاتح ============
 function applyThemeIcon() {
   const theme = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -375,7 +384,7 @@ function renderTable(orders) {
     const formattedDate = order.date || extractDateString(order) || '-';
     const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
     const company = order.company || order['الشركة'] || '-';
-    const reviewer = order.reviewer || order['المراجع'] || '-';
+    const reviewer = getDisplayName(order.reviewer || order['المراجع'] || '-');
     const progressStatus = order.status || order['الحالة'] || '-';
     const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
     const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
@@ -1112,7 +1121,7 @@ function renderCsvPreview(data) {
       <tr>
         <td>${row.order_number || row['رقم الطلب'] || '-'}</td>
         <td>${row.company || row['الشركة'] || '-'}</td>
-        <td>${row.reviewer || row['المراجع'] || '-'}</td>
+        <td>${getDisplayName(row.reviewer || row['المراجع']) || '-'}</td>
         <td>${row.date || row['التاريخ'] || '-'}</td>
       </tr>
     `;
@@ -1703,8 +1712,9 @@ function updateKPIs(data) {
 function renderReviewersStats(data) {
   const stats = {};
   data.forEach(o => {
-    const name = o.reviewer || o['المراجع'];
-    if (!name) return;
+    const rawName = o.reviewer || o['المراجع'];
+    if (!rawName) return;
+    const name = getDisplayName(rawName);
     const revStatus = o.review_status || o['حالة المراجعة'];
     if (!stats[name]) stats[name] = { total: 0, accepted: 0, rejected: 0 };
     stats[name].total++;
@@ -1786,7 +1796,7 @@ function exportTodayOrdersToExcel() {
   const rows = window.allData.map(order => {
     const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
     const company = order.company || order['الشركة'] || '-';
-    const reviewer = order.reviewer || order['المراجع'] || '-';
+    const reviewer = getDisplayName(order.reviewer || order['المراجع'] || '-');
     const progressStatus = order.status || order['الحالة'] || '-';
     const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
     const date = order.date || extractDateString(order) || '-';
@@ -1823,8 +1833,9 @@ function exportReviewerStatsToExcel() {
 
   const stats = {};
   window.allData.forEach(o => {
-    const name = o.reviewer || o['المراجع'];
-    if (!name) return;
+    const rawName = o.reviewer || o['المراجع'];
+    if (!rawName) return;
+    const name = getDisplayName(rawName);
     const revStatus = o.review_status || o['حالة المراجعة'];
     if (!stats[name]) stats[name] = { total: 0, accepted: 0, rejected: 0, pending: 0 };
     stats[name].total++;
@@ -2046,7 +2057,7 @@ function renderRejectionsTab() {
   } else {
     tbody.innerHTML = rows.map(o => {
       const orderNum = o.order_number || '-';
-      const layout = o.Layout || o.layout || '-';
+      const layout = getDisplayName(o.Layout || o.layout) || '-';
       const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
       const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || '-');
       const reason = o.reason && o.reason !== '-' ? o.reason : '-';
@@ -2241,7 +2252,7 @@ function renderCertTable(orders) {
   orders.forEach(order => {
     const orderNum = order.order_number || '-';
     const rawLayout = order.Layout || order.layout || '';
-    const layout = rawLayout || 'غير موزعة';
+    const layout = rawLayout ? getDisplayName(rawLayout) : 'غير موزعة';
     const rawStatus = order.status || '';
     const status = rawStatus || 'لم يتم الطباعة';
     const rawDate = order.date || extractDateString(order) || '';

@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RZz9pDGfJXNtZYc7wADlHg_uMffms_6';
 const TABLE_NAME = 'system_review1';
-
+ 
 // ⚠️ عدّل اسم الجدول ده لو مختلف عندك في Supabase (استنتجته من اسم ملف الـ CSV اللي بعتهولي)
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];

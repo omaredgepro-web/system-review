@@ -268,11 +268,17 @@
             </table>
           </div>
 
-          <!-- لوحة الشركات الموجودة في الملف مع إمكانية حذف أي شركة بالكامل قبل التوزيع/الرفع -->
+          <!-- لوحة الشركات الموجودة في الملف مع إمكانية حذف شركة بالكامل، أو تحديد عدد معين بس منها -->
           <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
             <h3 style="font-size: 15px; margin-bottom: 6px;">🏢 الشركات الموجودة في الملف</h3>
-            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">اضغط "🗑️ حذف" جنب أي شركة عشان تشيل كل طلباتها من الملف قبل ما توزّع أو ترفع.</p>
-            <div id="csv-companies-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto;"></div>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">اضغط "🗑️ حذف" جنب أي شركة عشان تشيل كل طلباتها من الملف قبل ما توزّع أو ترفع. أو حدد رقم في الخانة ودوس "تطبيق" عشان تسيب بس العدد ده من طلبات الشركة (والباقي يتشال من الملف).</p>
+            <div id="csv-companies-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto;"></div>
+          </div>
+
+          <!-- لوحة الأرقام المكررة: تنبيه قبل الرفع لأي رقم طلب مكرر داخل الملف أو موجود بالفعل في قاعدة البيانات -->
+          <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+            <h3 style="font-size: 15px; margin-bottom: 6px;">🔁 فحص أرقام الطلبات المكررة</h3>
+            <div id="csv-duplicates-panel" style="font-size: 13px;"></div>
           </div>
 
           <!-- لوحة التوزيع المتوازن (حسب الشركات + عدد لكل مراجع) -->
@@ -555,6 +561,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260816e"></script>
+  <script src="script.js?v=20260817"></script>
 </body>
 </html>

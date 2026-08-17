@@ -85,6 +85,15 @@
         <p id="user-welcome-text">لوحة التحكم وإدارة المراجعة والطلبات</p>
       </div>
       <div class="header-actions">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); padding: 6px 12px; border-radius: 20px;">
+          <span id="live-status-indicator" title="حالة التحديث المباشر">🟡 تحديث دوري</span>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap;">
+            <input type="checkbox" id="live-updates-toggle" checked style="width: 13px; height: 13px;">
+            تحديث تلقائي
+          </label>
+          <span style="white-space: nowrap;">آخر تحديث: <span id="live-last-update-time">-</span></span>
+          <button type="button" class="btn btn-secondary" onclick="manualRefreshCurrentTab()" style="padding: 3px 10px; font-size: 11px;">🔄 تحديث الآن</button>
+        </div>
         <button class="btn btn-secondary" onclick="toggleTheme()" style="padding: 6px 14px; font-size: 13px;">
           <span class="theme-toggle-icon">💡</span>
           <span class="theme-toggle-text">وضع فاتح</span>

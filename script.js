@@ -2272,7 +2272,9 @@ function renderCertPage() {
     const status = item.status || '';
     const matchesStatus = (statusValue === 'ALL') || (statusValue === 'UNPRINTED' ? !status : (status === statusValue));
     const layout = item.Layout || item.layout || '';
-    const matchesLayout = (layoutValue === 'ALL') || (layoutValue === 'UNASSIGNED' ? !layout : (layout === layoutValue));
+    const matchesLayout = (layoutValue === 'ALL')
+      || (layoutValue === 'UNASSIGNED' ? !layout
+        : (layout === layoutValue || getDisplayName(layout) === getDisplayName(layoutValue)));
     return matchesSearch && matchesStatus && matchesLayout;
   });
 

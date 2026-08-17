@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RZz9pDGfJXNtZYc7wADlHg_uMffms_6';
 const TABLE_NAME = 'system_review1';
- 
+
 // ⚠️ عدّل اسم الجدول ده لو مختلف عندك في Supabase (استنتجته من اسم ملف الـ CSV اللي بعتهولي)
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
@@ -2287,6 +2287,17 @@ function renderCertPage() {
   updateCertPaginationControls(from + 1, Math.min(to, certTotalRecordsCount));
 }
 
+// بيعيد رسم نفس الصفحة الحالية زي ما هي (نفس الترتيب ونفس الطلبات الظاهرة) من غير ما
+// يعيد تطبيق الفلاتر من جديد. بنستخدمها بعد تغيير الحالة عشان لو الطلب بقى مش مطابق
+// للفلتر الحالي (زي فلتر "لم يتم الطباعة") ميختفيش من الشيت وتوزيعة الـ 100 تفضل زي ما هي.
+function rerenderCertPageInPlace() {
+  if (!window.certFilteredData) { applyCertDateFiltering(); return; }
+  const from = (certCurrentPage - 1) * certPageSize;
+  const to = from + certPageSize;
+  renderCertTable(window.certFilteredData.slice(from, to));
+  updateCertPaginationControls(from + 1, Math.min(to, certTotalRecordsCount));
+}
+
 function renderCertTable(orders) {
   const tbody = document.getElementById('cert-tbody');
   tbody.innerHTML = '';
@@ -2558,7 +2569,7 @@ async function executeCertBulkStatusUpdate() {
       targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; });
       selectedCertOrderNumbers.clear();
       updateCertSelectedCount();
-      applyCertDateFiltering();
+      rerenderCertPageInPlace();
     }
   } catch (err) { alert('خطأ: ' + err.message); }
 }
@@ -2669,7 +2680,7 @@ async function saveCertUpdate() {
       alert('فشل التحديث: ' + error.message);
     } else {
       Object.assign(selectedCertOrder, updateData);
-      applyCertDateFiltering();
+      rerenderCertPageInPlace();
       applyRejectionsDateFiltering();
       closeCertModal();
     }

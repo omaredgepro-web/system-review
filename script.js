@@ -11,7 +11,7 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
- 
+
 function getUsernames() {
   return ALL_PROFILES.map(p => p.username);
 }
@@ -35,7 +35,7 @@ async function fetchAllProfiles() {
   if (error) { console.error(error); return []; }
   return data;
 }
- 
+
 // بيحوّل اليوزرنيم المخزّن (زي "adham") للاسم العربي المعروض (زي "ادهم") في أي مكان بيتعرض للمستخدم.
 // لو القيمة مش يوزرنيم معروف في ALL_PROFILES (بيانات قديمة كانت متخزنة بالاسم مباشرة، أو "غير موزّع"، أو فاضية)،
 // بيرجّع نفس القيمة زي ما هي من غير تغيير.
@@ -1591,6 +1591,7 @@ function applyCustomDistRules() {
     summary.push({ reviewer: rule.reviewer, companies: rule.companies, count: rule.count, assigned: actuallyAssigned, companyBreakdown });
   });
 
+  sortParsedCsvDataByReviewer(customDistRules.map(r => r.reviewer));
   renderCsvPreview(parsedCsvData);
   renderCustomDistSummary(summary);
 }
@@ -1762,6 +1763,7 @@ function runBalancedCsvDistribution() {
     userIndex = (userIndex + 1) % selectedUsers.length;
   }
 
+  sortParsedCsvDataByReviewer(selectedUsers);
   renderCsvPreview(parsedCsvData);
   renderCsvDistSummary(counts, parsedCsvData.length - assignedCount);
 }
@@ -2998,3 +3000,69 @@ document.getElementById('search-input').addEventListener('input', () => { curren
 document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('company-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
+
+// ============================================================
+// ترتيب الطلبات بعد أي توزيع (متوازن أو مخصص) بحيث طلبات كل مراجع
+// تبقى مجمّعة ورا بعض، مش متفرقة في الملف. الترتيب بين المراجعين نفسهم
+// بيتبع preferredOrder (نفس ترتيب اختيارهم في الواجهة)، والطلبات اللي
+// لسه من غير مراجع بتتحط في الآخر.
+// ============================================================
+function sortParsedCsvDataByReviewer(preferredOrder) {
+  if (!parsedCsvData || parsedCsvData.length === 0) return;
+
+  const reviewerColKey = (parsedCsvData[0] && 'المراجع' in parsedCsvData[0]) ? 'المراجع' : 'reviewer';
+  const orderIndex = {};
+  (preferredOrder || []).forEach((u, i) => { if (!(u in orderIndex)) orderIndex[u] = i; });
+
+  const rankOf = (row) => {
+    const val = row.reviewer || row[reviewerColKey];
+    if (!val) return Infinity; // غير الموزّع في آخر الملف دايمًا
+    return (val in orderIndex) ? orderIndex[val] : Object.keys(orderIndex).length;
+  };
+
+  parsedCsvData = parsedCsvData
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => (rankOf(a.row) - rankOf(b.row)) || (a.i - b.i))
+    .map(x => x.row);
+}
+
+// ============================================================
+// تصدير معاينة التوزيع كملف Excel - قبل أي رفع فعلي لـ Supabase.
+// بيصدّر الملف بالحالة الحالية بالظبط (بعد أي توزيع متوازن/مخصص/يدوي عملته)،
+// عشان تراجعه أو تبعته لحد تاني قبل ما تأكد الرفع.
+// ============================================================
+function exportCsvPreviewToExcel() {
+  if (!parsedCsvData || parsedCsvData.length === 0) {
+    alert('لا يوجد بيانات لتصديرها. ارفع ملف أولاً.');
+    return;
+  }
+
+  const reviewerColKey = (parsedCsvData[0] && 'المراجع' in parsedCsvData[0]) ? 'المراجع' : 'reviewer';
+
+  const rows = parsedCsvData.map(row => {
+    const orderNum = row.order_number || row['رقم الطلب'] || '-';
+    const company = getCsvRowCompany(row);
+    const reviewerRaw = row.reviewer || row[reviewerColKey];
+    const reviewer = reviewerRaw ? getDisplayName(reviewerRaw) : 'غير موزّع';
+    const date = row.date || row['التاريخ'] || '-';
+    const status = row.status || row['الحالة'] || row['حالة المراجعة'] || '-';
+
+    return {
+      'رقم الطلب': orderNum,
+      'الشركة': company,
+      'المراجع': reviewer,
+      'حالة المراجعة': status,
+      'التاريخ': date
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 18 }, { wch: 12 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'معاينة التوزيع');
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  XLSX.writeFile(workbook, `معاينة_التوزيع_${stamp}.xlsx`);
+}

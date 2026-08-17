@@ -195,6 +195,93 @@ async function setupUserSession(profile) {
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
   loadData();
+  startLiveUpdates();
+}
+
+// ============ التحديث المباشر (Live) للداشبورد بدون الحاجة لدوس Refresh يدوي ============
+// بيشتغل بطريقتين مع بعض:
+// 1) Supabase Realtime: اشتراك في أي تغيير (إضافة/تعديل/حذف) بيحصل في جداول الطلبات، وبمجرد ما يوصل
+//    تنبيه بيعمل تحديث صامت للبيانات فورًا (محتاج تفعيل Realtime على الجدول من لوحة Supabase:
+//    Database → Replication → فعّل الجدول ده لو لسه مش مفعّل).
+// 2) Polling احتياطي كل 45 ثانية في حالة إن Realtime مش مفعّل أو حصل قطع اتصال مؤقت، عشان التحديث
+//    يفضل شغال بأي شكل حتى لو من غير الإعداد الإضافي في Supabase.
+let liveUpdatesStarted = false;
+let liveRealtimeChannel = null;
+let livePollIntervalId = null;
+let liveRefreshDebounceTimer = null;
+
+function startLiveUpdates() {
+  if (liveUpdatesStarted) return; // يمنع تكرار الاشتراك لو اتنادت الدالة أكتر من مرة
+  liveUpdatesStarted = true;
+
+  try {
+    liveRealtimeChannel = supabaseClient
+      .channel('live-orders-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, () => scheduleLiveRefresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: CERT_TABLE_NAME }, () => scheduleLiveRefresh())
+      .subscribe(status => {
+        const indicator = document.getElementById('live-status-indicator');
+        if (!indicator) return;
+        if (status === 'SUBSCRIBED') {
+          indicator.innerText = '🟢 مباشر';
+          indicator.title = 'التحديث المباشر شغال (Realtime)';
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          indicator.innerText = '🟡 تحديث دوري';
+          indicator.title = 'Realtime مش متاح دلوقتي، بيتم الاعتماد على التحديث الدوري كل 45 ثانية';
+        }
+      });
+  } catch (err) {
+    console.error('تعذّر تفعيل Realtime، هيتم الاعتماد على التحديث الدوري بس:', err.message);
+  }
+
+  // Polling احتياطي، بيشتغل بجانب Realtime دايمًا كضمانة إضافية
+  livePollIntervalId = setInterval(() => scheduleLiveRefresh(), 45000);
+}
+
+// بيأجّل التحديث شوية (debounce) عشان لو حصلت عدة تغييرات مرة واحدة (زي رفع ملف كبير) ميعملش
+// تحديث لكل صف لوحده، وبيتجاهل التحديث تمامًا لو المستخدم مركّز في مودال تعديل مفتوح حاليًا
+// عشان ميقاطعوش، أو لو زرار "إيقاف التحديث المباشر" مفعّل.
+function scheduleLiveRefresh() {
+  if (!isLiveUpdatesEnabled()) return;
+
+  clearTimeout(liveRefreshDebounceTimer);
+  liveRefreshDebounceTimer = setTimeout(() => {
+    if (isAnyModalOpen()) return; // منأجلش التحديث لو المستخدم فاتح مودال، بس منعملهوش دلوقتي عشان ميقاطعوش
+
+    if (currentTab === 'dashboard') {
+      loadData(true);
+    } else if (currentTab === 'certificates' || currentTab === 'rejections') {
+      loadCertificatesData(true).then(() => {
+        if (currentTab === 'rejections') applyRejectionsDateFiltering();
+      });
+    }
+    // تابات "لوحة الأدمن" و"توزيع طلبات الطباعة" مش محتاجة تحديث مباشر لأنها لوحات رفع/توزيع مش عرض بيانات حي
+  }, 1200);
+}
+
+function isAnyModalOpen() {
+  return [...document.querySelectorAll('.modal-overlay')].some(m => getComputedStyle(m).display !== 'none');
+}
+
+function isLiveUpdatesEnabled() {
+  const toggle = document.getElementById('live-updates-toggle');
+  return !toggle || toggle.checked;
+}
+
+function markLiveRefreshed() {
+  const timeEl = document.getElementById('live-last-update-time');
+  if (timeEl) timeEl.innerText = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// زرار "تحديث الآن" اليدوي: بيحدّث بيانات التاب الحالي فورًا (مش صامت، بيوضح مؤشر التحميل العادي)
+function manualRefreshCurrentTab() {
+  if (currentTab === 'dashboard') {
+    loadData();
+  } else if (currentTab === 'certificates' || currentTab === 'rejections') {
+    loadCertificatesData().then(() => {
+      if (currentTab === 'rejections') applyRejectionsDateFiltering();
+    });
+  }
 }
 
 function populateReviewerDropdowns() {
@@ -249,7 +336,10 @@ async function handleLogout() {
   location.reload();
 }
 
+let currentTab = 'dashboard';
+
 function switchTab(tabName) {
+  currentTab = tabName;
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
   document.getElementById('tab-dashboard').style.display = 'none';
   document.getElementById('tab-admin').style.display = 'none';
@@ -302,9 +392,9 @@ function extractDateString(item) {
   return parseToIsoDate(item.date || item.created_at || item['التاريخ'] || item['تاريخ الطلب'] || '');
 }
 
-async function loadData() {
+async function loadData(silent) {
   const tbody = document.getElementById('orders-tbody');
-  tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري جلب البيانات من Supabase...</td></tr>`;
+  if (!silent) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري جلب البيانات من Supabase...</td></tr>`;
 
   try {
     let allFetched = [];
@@ -322,15 +412,16 @@ async function loadData() {
     }
 
     if (allFetched.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد بيانات متاحة</td></tr>`;
+      if (!silent) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد بيانات متاحة</td></tr>`;
       return;
     }
 
     window.masterData = allFetched;
     applyDateFiltering();
+    markLiveRefreshed();
 
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+    if (!silent) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
   }
 }
 
@@ -1958,8 +2049,8 @@ function updatePaginationControls(from, to) {
 function changePage(direction) { currentPage += direction; renderCurrentPage(); }
 
 // ============ تاب طباعة الشهادات (أدمن فقط) ============
-async function loadCertificatesData() {
-  document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
+async function loadCertificatesData(silent) {
+  if (!silent) document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     let allFetched = [];
     let from = 0, step = 1000, hasMore = true;
@@ -1979,8 +2070,9 @@ async function loadCertificatesData() {
     certDataLoaded = true;
     populateCertLayoutFilter();
     applyCertDateFiltering();
+    markLiveRefreshed();
   } catch (err) {
-    document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    if (!silent) document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
   }
 }
 

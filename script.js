@@ -196,12 +196,12 @@ function populateReviewerDropdowns() {
 
   // بيشمل المراجعين والأدمن كمان، لإمكانية توزيع الطلبات على الأدمن برضو لو احتاج الأمر
   ALL_PROFILES.filter(p => p.role === 'reviewer').forEach(p => {
-    filterSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
-    reassignSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
+    filterSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
+    reassignSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
   });
   ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
-    filterSelect.innerHTML += `<option value="${p.username}">${p.username} (أدمن)</option>`;
-    reassignSelect.innerHTML += `<option value="${p.username}">${p.username} (أدمن)</option>`;
+    filterSelect.innerHTML += `<option value="${p.username}">${p.name} (أدمن)</option>`;
+    reassignSelect.innerHTML += `<option value="${p.username}">${p.name} (أدمن)</option>`;
   });
 }
 
@@ -1303,7 +1303,7 @@ function populateCustomDistSelects() {
   const reviewerSelect = document.getElementById('custom-dist-reviewer-select');
   if (reviewerSelect && reviewerSelect.options.length <= 1) {
     reviewerSelect.innerHTML = `<option value="">اختر المراجع...</option>` +
-      ALL_PROFILES.map(p => `<option value="${p.username}">${p.username}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
   }
 }
 
@@ -1435,7 +1435,7 @@ function populateCsvDistUsersList() {
     container.innerHTML += `
       <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
         <input type="checkbox" class="csv-dist-user-checkbox" value="${p.username}" ${isChecked} onchange="onCsvDistUserToggle(this)">
-        ${p.username}${roleLabel}
+        ${p.name}${roleLabel}
       </label>
     `;
   });
@@ -1942,9 +1942,9 @@ function populateCertLayoutFilter() {
   bulkReassignSelect.innerHTML = `<option value="">توزيع على المسؤول...</option>`;
 
   ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
-    filterSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
-    modalSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
-    bulkReassignSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
+    filterSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
+    modalSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
+    bulkReassignSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
   });
 }
 

@@ -2011,26 +2011,38 @@ function applyRejectionsDateFiltering() {
 function onRejectionsDateFilterChange() { applyRejectionsDateFiltering(); }
 function resetRejectionsDateToLatest() { document.getElementById('rejections-date-filter').value = ''; applyRejectionsDateFiltering(); }
 
-function renderRejectionsTab() {
-  const tbody = document.getElementById('rejections-tbody');
-  if (!tbody) return;
-
+function getFilteredRejectionsRows() {
   const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
   const reviewerValue = document.getElementById('rejections-reviewer-filter').value;
+  const substatusValue = document.getElementById('rejections-substatus-filter').value;
 
   let rows = rejectionsAllData || [];
 
   if (reviewerValue && reviewerValue !== 'ALL') {
     rows = rows.filter(o => o.reviewer === reviewerValue);
   }
+  if (substatusValue === 'PENDING') {
+    rows = rows.filter(o => !o.reviewer_action);
+  } else if (substatusValue && substatusValue !== 'ALL') {
+    rows = rows.filter(o => o.reviewer_action === substatusValue);
+  }
   if (searchValue) {
     rows = rows.filter(o => String(o.order_number || '').toLowerCase().includes(searchValue));
   }
+  return rows;
+}
+
+function renderRejectionsTab() {
+  const tbody = document.getElementById('rejections-tbody');
+  if (!tbody) return;
+
+  const rows = getFilteredRejectionsRows();
+  const isAdmin = currentUser && currentUser.role === 'admin';
 
   document.getElementById('rejections-stat-total').innerText = rows.length;
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
   } else {
     tbody.innerHTML = rows.map(o => {
       const orderNum = o.order_number || '-';
@@ -2039,6 +2051,26 @@ function renderRejectionsTab() {
       const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || '-');
       const reason = o.reason && o.reason !== '-' ? o.reason : '-';
       const date = o.date || extractDateString(o) || '-';
+
+      let substatusBadge = `<span class="badge badge-hold">بانتظار المراجع</span>`;
+      if (o.reviewer_action === 'تم التعديل') substatusBadge = `<span class="badge badge-accepted">تم التعديل</span>`;
+      else if (o.reviewer_action === 'تم الرفض للشركة') substatusBadge = `<span class="badge badge-rejected">تم الرفض للشركة</span>`;
+
+      const isOwnReviewer = currentUser && (o.reviewer === currentUser.username);
+      let actionsHtml = '';
+
+      if (isOwnReviewer || isAdmin) {
+        actionsHtml += `
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="setRejectionReviewerAction('${orderNum}', 'تم التعديل')">✅ تم التعديل</button>
+          <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="setRejectionReviewerAction('${orderNum}', 'تم الرفض للشركة')">🚫 رفض نهائي</button>`;
+      }
+      if (isAdmin) {
+        actionsHtml += `
+          <button class="btn btn-open" style="padding: 4px 8px; font-size: 11px;" onclick="setRejectionPrinted('${orderNum}')">🖨️ تم الطباعة</button>
+          <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="openCertEditModal('${orderNum}')">✏️ رفض تاني / تعديل</button>`;
+      }
+      if (!actionsHtml) actionsHtml = '-';
+
       return `
         <tr>
           <td class="order-no-cell">${orderNum}</td>
@@ -2046,11 +2078,60 @@ function renderRejectionsTab() {
           <td>${reviewerName}</td>
           <td>${reason}</td>
           <td>${date}</td>
+          <td>${substatusBadge}</td>
+          <td style="display:flex; gap:6px; flex-wrap:wrap;">${actionsHtml}</td>
         </tr>`;
     }).join('');
   }
 
   renderRejectionsReviewerStats();
+}
+
+async function setRejectionReviewerAction(orderNum, action) {
+  const row = (certMasterData || []).find(o => String(o.order_number) === String(orderNum));
+  if (!row) return;
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ reviewer_action: action }).eq('id', row.id);
+    if (error) { alert('فشل التحديث: ' + error.message); return; }
+    row.reviewer_action = action;
+    renderRejectionsTab();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+async function setRejectionPrinted(orderNum) {
+  const row = (certMasterData || []).find(o => String(o.order_number) === String(orderNum));
+  if (!row) return;
+  if (!confirm(`تأكيد تحويل حالة الطلب ${orderNum} إلى "تم الطباعة"؟`)) return;
+  try {
+    const updateData = { status: 'تم الطباعة', reason: '-', reviewer_action: null };
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).eq('id', row.id);
+    if (error) { alert('فشل التحديث: ' + error.message); return; }
+    Object.assign(row, updateData);
+    applyCertDateFiltering();
+    applyRejectionsDateFiltering();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+function exportRejectionsOrderNumbers() {
+  const rows = getFilteredRejectionsRows();
+  if (rows.length === 0) { alert('لا توجد طلبات مطابقة للتصدير'); return; }
+
+  const exportRows = rows.map(o => ({ 'رقم الطلب': o.order_number || '-' }));
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 28 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام الطلبات المرفوضة');
+
+  const substatusValue = document.getElementById('rejections-substatus-filter').value;
+  const substatusLabel = (substatusValue && substatusValue !== 'ALL') ? `_${substatusValue === 'PENDING' ? 'بانتظار_المراجع' : substatusValue}` : '';
+  const dateLabel = document.getElementById('rejections-date-filter').value || 'غير محدد';
+
+  XLSX.writeFile(workbook, `مرفوضات${substatusLabel}_${dateLabel}.xlsx`);
 }
 
 function renderRejectionsReviewerStats() {
@@ -2496,6 +2577,7 @@ async function saveCertUpdate() {
     Layout: newLayout,
     reason: CERT_REASON_REQUIRED_STATUSES.includes(newStatus) ? newReason : '-',
     reviewer: CERT_REVIEWER_REQUIRED_STATUSES.includes(newStatus) ? newReviewer : null,
+    reviewer_action: null,
     date: newDate || null
   };
 

@@ -17,7 +17,7 @@
       document.documentElement.setAttribute('data-theme', savedTheme);
     })();
   </script>
-    
+  
   <!-- المكتبات الخارجية -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -375,6 +375,7 @@
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <span id="cert-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
             <button class="btn btn-secondary" onclick="exportUnassignedCertOrders()">📥 تنزيل الطلبات الغير موزعة (Excel)</button>
+            <button class="btn btn-secondary" onclick="toggleCertMultiSelectPanel()">📋 تحديد متعدد (نسخ/لصق أو ملف)</button>
           </div>
           <h3 style="font-size: 16px;">قائمة حالات الشهادات</h3>
         </div>
@@ -402,6 +403,28 @@
             <option value="خطأ عنوان">خطأ عنوان</option>
             <option value="معلق">معلق</option>
           </select>
+        </div>
+
+        <!-- لوحة التحديد المتعدد: لصق أرقام طلبات أو رفع ملف عشان تتحدد تلقائيًا في الجدول -->
+        <div id="cert-multiselect-panel" class="admin-container" style="display:none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+            <h3 style="font-size: 15px;">📋 إدخال متعدد / ملف</h3>
+            <button type="button" onclick="clearCertMultiSelectInput()" style="background:none; border:none; color: var(--badge-reject-text); font-size: 12px; cursor:pointer; font-weight:600;">مسح</button>
+          </div>
+          <p style="font-size:12px; color: var(--text-muted); margin-bottom: 12px;">الصق أو اكتب أرقام الطلبات (رقم في كل سطر، أو مفصولة بفاصلة)، أو ارفع ملف فيه عمود رقم الطلب. النظام هيحددهم تلقائيًا في الجدول تحت — من ضمن التاريخ المعروض حاليًا بس.</p>
+
+          <textarea id="cert-multiselect-textarea" class="form-control" style="min-height: 110px; margin-bottom: 12px; resize: vertical;" placeholder="أدخل أرقام الطلبات هنا..."></textarea>
+
+          <div class="upload-box" id="cert-multiselect-dropzone" ondragover="handleCertMultiSelectDragOver(event)" ondragleave="handleCertMultiSelectDragLeave(event)" ondrop="handleCertMultiSelectDrop(event)" style="padding: 16px; margin-bottom: 14px;">
+            <p style="font-size: 13px; margin-bottom: 8px;">اضغط لرفع ملف أو اسحبه هنا</p>
+            <input type="file" id="cert-multiselect-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleCertMultiSelectFileSelect(event)">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('cert-multiselect-file-input').click()" style="padding: 6px 14px; font-size: 12px;">اختيار ملف</button>
+            <p id="cert-multiselect-file-name" style="margin-top: 8px; font-size: 11px; color: var(--badge-accept-text);"></p>
+          </div>
+
+          <button type="button" class="btn btn-primary" onclick="verifyAndSelectCertOrders()" style="width:auto; padding: 10px 24px;">✚ تحقق وإضافة للتحديد</button>
+
+          <div id="cert-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
         </div>
 
         <!-- شريط الإجراءات الجماعية لتاب الشهادات (تحديد بالعدد + توزيع + حذف) -->
@@ -441,7 +464,7 @@
           </div>
         </div>
 
-        <div class="table-container cert-table-scroll">
+        <div class="table-container">
           <table>
             <thead>
               <tr>
@@ -680,6 +703,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260817d"></script>
+  <script src="script.js?v=20260818b"></script>
 </body>
 </html>

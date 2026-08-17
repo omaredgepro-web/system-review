@@ -195,6 +195,13 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 .main-content { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; width: 100%; }
 .table-container { overflow-x: auto; position: relative; width: 100%; max-width: 100%; }
 
+/* جدول طباعة الشهادات (100 طلب في الصفحة) - سكرول رأسي مع تثبيت رأس الجدول
+   عشان يفضل ظاهر وانت بتحدد وبتنزل تحت */
+.cert-table-scroll { max-height: 75vh; overflow-y: auto; }
+.cert-table-scroll thead th { position: sticky; top: 0; z-index: 15; }
+.cert-table-scroll .sticky-action-col { z-index: 16; }
+.cert-table-scroll thead th.sticky-action-col { z-index: 17; }
+
 .table-filters { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
 .search-input, .filter-select, .date-input { background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; font-size: 14px; outline: none; }
 .search-input { width: 200px; }

@@ -500,6 +500,17 @@ async function runBatchedSupabaseAction(tableName, matchColumn, matchValues, act
   return null; // كل الدفعات نجحت
 }
 
+// بيرفع (upsert) كمية كبيرة من الصفوف لـ Supabase على دفعات، بدل ما يبعتهم كلهم في طلب واحد
+// (ممكن يفشل مع آلاف الصفوف بسبب حجم الطلب الكبير).
+async function runBatchedUpsert(tableName, rows, batchSize = 500) {
+  const batches = chunkArray(rows, batchSize);
+  for (const batch of batches) {
+    const { error } = await supabaseClient.from(tableName).upsert(batch);
+    if (error) return error;
+  }
+  return null;
+}
+
 async function executeBulkDateUpdate() {
   const newDate = document.getElementById('bulk-date-input').value;
   if (!newDate) { alert('برجاء اختيار التاريخ أولاً'); return; }
@@ -641,6 +652,13 @@ async function handleMultipleFiles(fileList) {
     parsedCsvData = parsedCsvData.concat(allNewRows); // إضافة على اللي موجود بالفعل، مش استبدال
     document.getElementById('file-name-display').innerText = `تم إضافة: ${namesLabel} (الإجمالي الآن ${parsedCsvData.length} طلب)`;
     renderCsvPreview(parsedCsvData);
+
+    // تنبيه منبثق فوري لو فيه طلبات من الملف اللي اترفع بس دلوقتي متسجلة بالفعل بتاريخ النهاردة
+    // (ده أخطر من التكرار العادي لأنه معناه إن الطلب ممكن يتراجع مرتين في نفس اليوم غلط)
+    const todayDupInNewRows = getTodayDuplicateOrderNumbers(allNewRows);
+    if (todayDupInNewRows.length > 0) {
+      alert(`🚨 تنبيه: ${todayDupInNewRows.length} رقم طلب من الملف اللي رفعته دلوقتي مسجل بالفعل بتاريخ النهاردة في قاعدة البيانات.\n\nممكن يكون الطلب ده اتراجع مرتين غلط. راجع قسم "🔁 فحص أرقام الطلبات المكررة" تحت قبل ما تكمل.`);
+    }
   } catch (err) {
     alert('تعذّر قراءة أحد الملفات: ' + err.message);
   }
@@ -1058,6 +1076,8 @@ function renderCsvPreview(data) {
   renderCsvCompaniesPanel(data);
   renderCsvDuplicatesPanel(data);
   populateCsvDistUsersList();
+  populateCustomDistSelects();
+  populateCustomDistCompanySelect(data);
   document.getElementById('csv-dist-summary').innerHTML = '';
 }
 
@@ -1181,12 +1201,23 @@ function renderCsvDuplicatesPanel(data) {
   const existingSet = new Set((window.masterData || []).map(o => String(o.order_number || o.order_no || o['رقم الطلب'])));
   const dupExisting = [...new Set(data.map(getCsvRowOrderNumber))].filter(num => num && existingSet.has(num));
 
+  // فحص إضافي: هل نفس رقم الطلب موجود بالفعل في قاعدة البيانات بتاريخ اليوم بالظبط؟
+  // ده أخطر من التكرار العادي لأنه معناه إن الطلب ده اتراجع/اتسجل مرتين في نفس اليوم بالغلط.
+  const dupToday = getTodayDuplicateOrderNumbers(data);
+
   if (dupWithinFile.length === 0 && dupExisting.length === 0) {
     container.innerHTML = `<p style="color: var(--badge-accept-text);">✅ مفيش أي رقم طلب مكرر — لا داخل الملف ولا في قاعدة البيانات.</p>`;
     return;
   }
 
   let html = '';
+
+  if (dupToday.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚨 ${dupToday.length} رقم طلب مسجل بالفعل بتاريخ النهاردة — يبقى ممكن الطلب ده يتراجع مرتين في نفس اليوم غلط!</p>`;
+    html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--badge-reject-text); border-radius: 6px; padding: 8px; margin-bottom:14px;">`;
+    html += dupToday.join('، ');
+    html += `</div>`;
+  }
 
   if (dupWithinFile.length > 0) {
     html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-bottom:6px;">⚠️ ${dupWithinFile.length} رقم طلب مكرر داخل نفس الملف (ظهر أكتر من مرة):</p>`;
@@ -1206,6 +1237,17 @@ function renderCsvDuplicatesPanel(data) {
   container.innerHTML = html;
 }
 
+// بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بتاريخ اليوم بالظبط
+function getTodayDuplicateOrderNumbers(data) {
+  const todayIso = new Date().toISOString().split('T')[0];
+  const todaySet = new Set(
+    (window.masterData || [])
+      .filter(o => extractDateString(o) === todayIso)
+      .map(o => String(o.order_number || o.order_no || o['رقم الطلب']))
+  );
+  return [...new Set(data.map(getCsvRowOrderNumber))].filter(num => num && todaySet.has(num));
+}
+
 // بيشيل كل طلبات شركة معينة من الملف المرفوع قبل التوزيع/الرفع لـ Supabase
 function deleteCompanyFromCsv(company) {
   const count = parsedCsvData.filter(row => getCsvRowCompany(row) === company).length;
@@ -1214,6 +1256,125 @@ function deleteCompanyFromCsv(company) {
 
   parsedCsvData = parsedCsvData.filter(row => getCsvRowCompany(row) !== company);
   renderCsvPreview(parsedCsvData);
+}
+
+// ============ التوزيع المخصص: تحديد يدوي (مراجع + شركة + عدد) ============
+let customDistRules = [];
+
+function populateCustomDistSelects() {
+  const reviewerSelect = document.getElementById('custom-dist-reviewer-select');
+  if (reviewerSelect && reviewerSelect.options.length <= 1) {
+    reviewerSelect.innerHTML = `<option value="">اختر المراجع...</option>` +
+      Object.keys(USERS_DB).map(k => `<option value="${k}">${k}${USERS_DB[k].role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+  }
+}
+
+function populateCustomDistCompanySelect(data) {
+  const select = document.getElementById('custom-dist-company-select');
+  if (!select) return;
+
+  const currentValue = select.value;
+  const companies = new Set();
+  (data || []).forEach(row => companies.add(getCsvRowCompany(row)));
+  const sorted = Array.from(companies).sort((a, b) => a.localeCompare(b, 'ar'));
+
+  select.innerHTML = `<option value="">اختر الشركة...</option>` + sorted.map(c => `<option value="${c}">${c}</option>`).join('');
+  if (sorted.includes(currentValue)) select.value = currentValue;
+}
+
+function addCustomDistRule() {
+  const reviewer = document.getElementById('custom-dist-reviewer-select').value;
+  const company = document.getElementById('custom-dist-company-select').value;
+  const count = parseInt(document.getElementById('custom-dist-count-input').value, 10);
+
+  if (!reviewer) { alert('اختار المراجع أولاً'); return; }
+  if (!company) { alert('اختار الشركة أولاً'); return; }
+  if (!count || count <= 0) { alert('اكتب عدد صحيح أكبر من صفر'); return; }
+
+  customDistRules.push({ reviewer, company, count });
+  renderCustomDistRulesList();
+  document.getElementById('custom-dist-count-input').value = '';
+}
+
+function removeCustomDistRule(index) {
+  customDistRules.splice(index, 1);
+  renderCustomDistRulesList();
+}
+
+function renderCustomDistRulesList() {
+  const container = document.getElementById('custom-dist-rules-list');
+  if (customDistRules.length === 0) {
+    container.innerHTML = `<p style="font-size: 12px; color: var(--text-muted);">لسه معملتش أي قاعدة.</p>`;
+    return;
+  }
+
+  container.innerHTML = '';
+  customDistRules.forEach((rule, idx) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background: var(--card-bg); border:1px solid var(--card-border); padding:6px 10px; border-radius:6px; margin-bottom:6px; font-size:13px;';
+
+    const label = document.createElement('span');
+    label.textContent = `${rule.reviewer} ← ${rule.company}: ${rule.count} طلب`;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-delete-row';
+    removeBtn.innerText = '✕';
+    removeBtn.addEventListener('click', () => removeCustomDistRule(idx));
+
+    row.appendChild(label);
+    row.appendChild(removeBtn);
+    container.appendChild(row);
+  });
+}
+
+// بيطبّق كل القواعد اللي أضفتها بالترتيب: كل قاعدة بتاخد أول N طلب من الشركة المحددة اللي لسه مالهاش مراجع
+function applyCustomDistRules() {
+  if (!customDistRules || customDistRules.length === 0) {
+    alert('لسه معملتش أي قاعدة توزيع مخصص. ضيف قاعدة الأول من فوق.');
+    return;
+  }
+  if (!parsedCsvData || parsedCsvData.length === 0) {
+    alert('برجاء رفع ملف أولاً.');
+    return;
+  }
+
+  const reviewerColKey = (parsedCsvData[0] && 'المراجع' in parsedCsvData[0]) ? 'المراجع' : 'reviewer';
+  const summary = [];
+
+  customDistRules.forEach(rule => {
+    const candidates = parsedCsvData.filter(row =>
+      getCsvRowCompany(row) === rule.company && !row.reviewer && !row[reviewerColKey]
+    );
+    const toAssign = candidates.slice(0, rule.count);
+    toAssign.forEach(row => {
+      row[reviewerColKey] = rule.reviewer;
+      row.reviewer = rule.reviewer;
+    });
+    summary.push({ ...rule, assigned: toAssign.length });
+  });
+
+  renderCsvPreview(parsedCsvData);
+  renderCustomDistSummary(summary);
+}
+
+function renderCustomDistSummary(summary) {
+  const container = document.getElementById('custom-dist-summary');
+  const rows = summary.map(s => {
+    const shortfall = s.count - s.assigned;
+    const warning = shortfall > 0
+      ? `<span style="color: var(--badge-hold-text);"> (${shortfall} ناقص — مكانش متاح عدد كفاية من هذه الشركة غير موزّع)</span>`
+      : '';
+    return `<div class="reviewer-stat">
+      <div class="reviewer-info"><div class="name">${s.reviewer} ← ${s.company}</div></div>
+      <div class="reviewer-counts"><div class="count-accepted">${s.assigned} / ${s.count} طلب</div></div>
+    </div>${warning ? `<p style="font-size: 11px; margin: 2px 0 8px;">${warning}</p>` : ''}`;
+  }).join('');
+
+  container.innerHTML = `
+    <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-muted);">ملخص التوزيع المخصص:</h4>
+    ${rows}
+  `;
 }
 
 // قائمة كل المستخدمين (مراجعين + أدمن) بمربعات اختيار للمشاركة في التوزيع المتوازن
@@ -1279,15 +1440,30 @@ function runBalancedCsvDistribution() {
     pools[company].push(row);
   });
 
-  // تشبيك الطلبات بالتبادل بين الشركات (Round-robin) عشان يبقى فيه خليط متوازن قبل التوزيع على الأشخاص
+  // تشبيك الطلبات بالتبادل بين الشركات (Round-robin)، وبرضو بين حالات المراجعة المختلفة
+  // (زي "تم المراجعة" و"جاري المراجعة") لو موجود أكتر من حالة جوه نفس الشركة، عشان كل مراجع
+  // ياخد خليط متوازن مش بس من الشركات لكن من الحالات كمان.
+  const companyStatusPools = {};
+  parsedCsvData.forEach(row => {
+    const company = getCompany(row);
+    const statusKey = row.status || row['الحالة'] || row['حالة المراجعة'] || 'غير محدد';
+    if (!companyStatusPools[company]) companyStatusPools[company] = {};
+    if (!companyStatusPools[company][statusKey]) companyStatusPools[company][statusKey] = [];
+    companyStatusPools[company][statusKey].push(row);
+  });
+
   const interleaved = [];
   let stillHasMore = true;
   while (stillHasMore) {
     stillHasMore = false;
     for (const company of poolOrder) {
-      if (pools[company].length > 0) {
-        interleaved.push(pools[company].shift());
-        stillHasMore = true;
+      const statusKeys = Object.keys(companyStatusPools[company] || {});
+      for (const statusKey of statusKeys) {
+        const statusPool = companyStatusPools[company][statusKey];
+        if (statusPool.length > 0) {
+          interleaved.push(statusPool.shift());
+          stillHasMore = true;
+        }
       }
     }
   }
@@ -1348,11 +1524,22 @@ const ALLOWED_ORDER_COLUMNS = ['id', 'order_number', 'company', 'reviewer', 'dat
 
 async function uploadCsvToSupabase() {
   if (parsedCsvData.length === 0) return;
+
+  const assignedOnly = document.getElementById('csv-upload-assigned-only-checkbox').checked;
+  const dataToUpload = assignedOnly
+    ? parsedCsvData.filter(row => row.reviewer || row['المراجع'])
+    : parsedCsvData;
+
+  if (dataToUpload.length === 0) {
+    alert('لا توجد أي طلبات تم توزيعها على مراجع لرفعها. لو عايز ترفع كل الطلبات (حتى الغير موزّعة)، شيل علامة الصح من "رفع الطلبات الموزّعة فقط".');
+    return;
+  }
+
   const btn = document.getElementById('btn-upload-supabase');
   btn.innerText = 'جاري الرفع...'; btn.disabled = true;
 
   try {
-    const cleanData = parsedCsvData.map(row => {
+    const cleanData = dataToUpload.map(row => {
       const newRow = {};
       ALLOWED_ORDER_COLUMNS.forEach(key => {
         if (row[key] !== undefined && row[key] !== '') newRow[key] = row[key];
@@ -1361,10 +1548,12 @@ async function uploadCsvToSupabase() {
       return newRow;
     });
 
-    const { error } = await supabaseClient.from(TABLE_NAME).upsert(cleanData);
+    const error = await runBatchedUpsert(TABLE_NAME, cleanData);
     if (error) { alert('خطأ أثناء الرفع: ' + error.message); } 
     else {
-      alert('تم الرفع وتوزيع الطلبات بنجاح!');
+      const skippedCount = parsedCsvData.length - dataToUpload.length;
+      const skippedMsg = skippedCount > 0 ? `\n(${skippedCount} طلب اتشال لأنه لسه من غير مراجع ومترفعش)` : '';
+      alert(`تم رفع وتوزيع ${dataToUpload.length} طلب بنجاح!${skippedMsg}`);
       await loadData();
       switchTab('dashboard');
     }

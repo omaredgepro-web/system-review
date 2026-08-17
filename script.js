@@ -11,7 +11,7 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
-  
+
 function getUsernames() {
   return ALL_PROFILES.map(p => p.username);
 }
@@ -215,6 +215,31 @@ function populateReviewerDropdowns() {
   });
 }
 
+// بيبني قايمة الشركات في فلتر الداشبورد من كل الطلبات المحمّلة (مش بس طلبات التاريخ المحدد حاليًا)،
+// عشان تفضل القايمة كاملة وثابتة حتى لو غيّرت التاريخ.
+function populateCompanyFilter() {
+  const filterSelect = document.getElementById('company-filter');
+  if (!filterSelect || !window.masterData) return;
+
+  const currentValue = filterSelect.value || 'ALL';
+
+  const companies = [...new Set(
+    window.masterData
+      .map(o => o.company || o['الشركة'])
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, 'ar'));
+
+  filterSelect.innerHTML = `<option value="ALL">كل الشركات</option>`;
+  companies.forEach(company => {
+    filterSelect.innerHTML += `<option value="${company}">${company}</option>`;
+  });
+
+  // نحافظ على الاختيار الحالي لو لسه موجود في القايمة الجديدة
+  if ([...filterSelect.options].some(opt => opt.value === currentValue)) {
+    filterSelect.value = currentValue;
+  }
+}
+
 async function handleLogout() {
   await supabaseClient.auth.signOut();
   location.reload();
@@ -298,6 +323,7 @@ async function loadData() {
     }
 
     window.masterData = allFetched;
+    populateCompanyFilter();
     applyDateFiltering();
 
   } catch (err) {
@@ -347,6 +373,7 @@ function renderCurrentPage() {
   const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
   const statusValue = document.getElementById('status-filter').value;
   const reviewerValue = document.getElementById('reviewer-filter').value;
+  const companyValue = document.getElementById('company-filter').value;
 
   let filtered = window.visibleData.filter(item => {
     const orderNum = String(item.order_number || item.order_no || item['رقم الطلب'] || '').toLowerCase();
@@ -357,7 +384,10 @@ function renderCurrentPage() {
     const reviewer = item.reviewer || item['المراجع'] || '';
     const matchesReviewer = (reviewerValue === 'ALL') || (reviewerValue === 'UNASSIGNED' ? !reviewer : (reviewer === reviewerValue));
 
-    return matchesSearch && matchesStatus && matchesReviewer;
+    const company = item.company || item['الشركة'] || '';
+    const matchesCompany = (companyValue === 'ALL') || (company === companyValue);
+
+    return matchesSearch && matchesStatus && matchesReviewer && matchesCompany;
   });
 
   totalRecordsCount = filtered.length;
@@ -2643,3 +2673,4 @@ document.getElementById('cert-layout-filter').addEventListener('change', () => {
 document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
+document.getElementById('company-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });

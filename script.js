@@ -68,7 +68,7 @@ function toggleTheme() {
 let supabaseClient;
 let currentUser = null;
 let currentPage = 1;
-const pageSize = 20;
+const pageSize = 100;
 let totalRecordsCount = 0;
 let selectedOrder = null;
 let parsedCsvData = [];
@@ -311,7 +311,7 @@ async function loadData() {
     let from = 0, step = 1000, hasMore = true;
 
     while (hasMore) {
-      const { data, error } = await supabaseClient.from(TABLE_NAME).select('*').range(from, from + step - 1);
+      const { data, error } = await supabaseClient.from(TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
       if (error) throw error;
 
       if (data && data.length > 0) {
@@ -351,9 +351,8 @@ function applyDateFiltering() {
   populateCompanyFilter();
 
   totalRecordsCount = window.allData.length;
-  updateKPIs(window.allData); // الحالة العامة (KPIs) دايمًا بتعكس كل الطلبات، حتى للمراجع
 
-  // البيانات اللي فعليًا بتتعرض في الجدول والإحصائيات: المراجع (غير الأدمن) يشوف طلباته هو بس
+  // البيانات اللي فعليًا بتتعرض في الجدول والكروت فوق: المراجع (غير الأدمن) يشوف طلباته هو بس، من فوق لتحت
   if (currentUser && currentUser.role !== 'admin') {
     window.visibleData = window.allData.filter(item => {
       const reviewerName = item.reviewer || item['المراجع'] || '';
@@ -362,6 +361,8 @@ function applyDateFiltering() {
   } else {
     window.visibleData = window.allData;
   }
+
+  updateKPIs(window.visibleData); // الكروت فوق (KPIs) بتعكس بيانات المراجع نفسه بس، مش الحالة العامة لكل الطلبات
 
   renderReviewersStats(window.visibleData);
   renderCompanyStats(window.allData);
@@ -1731,7 +1732,7 @@ async function saveOrderUpdate() {
     if (error) alert('فشل التحديث: ' + error.message);
     else {
       Object.assign(selectedOrder, updateData);
-      updateKPIs(window.allData);
+      updateKPIs(window.visibleData);
       renderReviewersStats(window.visibleData);
       renderCurrentPage();
       closeModal();
@@ -1777,6 +1778,7 @@ function renderReviewersStats(data) {
 
   keys.forEach(name => {
     const item = stats[name];
+    const reviewed = item.accepted + item.rejected;
     container.innerHTML += `
       <div class="reviewer-stat">
         <div class="reviewer-info">
@@ -1786,6 +1788,7 @@ function renderReviewersStats(data) {
         <div class="reviewer-counts">
           <div class="count-accepted">مقبول: ${item.accepted}</div>
           <div class="count-rejected">مرفوض: ${item.rejected}</div>
+          <div style="color: var(--text-muted); margin-top: 4px;">تم المراجعة: ${reviewed}</div>
         </div>
       </div>
     `;
@@ -1892,6 +1895,7 @@ function exportReviewerStatsToExcel() {
   const rows = Object.keys(stats).map(name => ({
     'المراجع': name,
     'إجمالي الطلبات': stats[name].total,
+    'تم المراجعة': stats[name].accepted + stats[name].rejected,
     'مقبول': stats[name].accepted,
     'مرفوض': stats[name].rejected,
     'لم يتم المراجعة': stats[name].pending
@@ -1903,7 +1907,7 @@ function exportReviewerStatsToExcel() {
   }
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
-  worksheet['!cols'] = [{ wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
+  worksheet['!cols'] = [{ wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 16 }];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'إحصائيات المراجعين');
@@ -1976,7 +1980,7 @@ async function loadCertificatesData() {
     let from = 0, step = 1000, hasMore = true;
 
     while (hasMore) {
-      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').range(from, from + step - 1);
+      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
       if (error) throw error;
 
       if (data && data.length > 0) {
@@ -2244,6 +2248,113 @@ function applyCertDateFiltering() {
   renderCertPage();
 }
 
+// ============ تحديد متعدد عن طريق لصق أرقام طلبات أو رفع ملف (تاب الشهادات) ============
+let certMultiSelectFileRows = [];
+
+function toggleCertMultiSelectPanel() {
+  const panel = document.getElementById('cert-multiselect-panel');
+  panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+}
+
+function clearCertMultiSelectInput() {
+  document.getElementById('cert-multiselect-textarea').value = '';
+  document.getElementById('cert-multiselect-file-name').innerText = '';
+  document.getElementById('cert-multiselect-results').innerHTML = '';
+  certMultiSelectFileRows = [];
+}
+
+function handleCertMultiSelectDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('cert-multiselect-dropzone').classList.add('drag-over');
+}
+
+function handleCertMultiSelectDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('cert-multiselect-dropzone').classList.remove('drag-over');
+}
+
+function handleCertMultiSelectDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('cert-multiselect-dropzone').classList.remove('drag-over');
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (files && files.length > 0) processCertMultiSelectFile(files[0]);
+}
+
+function handleCertMultiSelectFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (file) processCertMultiSelectFile(file);
+  event.target.value = '';
+}
+
+async function processCertMultiSelectFile(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+    alert('برجاء رفع ملف CSV أو Excel بس');
+    return;
+  }
+
+  document.getElementById('cert-multiselect-file-name').innerText = `جاري قراءة: ${file.name} ...`;
+
+  try {
+    const rawRows = await parseFileToRows(file);
+    const extracted = extractOrderNumbersFromRows(rawRows);
+    if (extracted.length === 0) {
+      alert('معرفتش ألاقي عمود رقم الطلب في الملف ده. تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.');
+      document.getElementById('cert-multiselect-file-name').innerText = '';
+      return;
+    }
+    certMultiSelectFileRows = extracted;
+    document.getElementById('cert-multiselect-file-name').innerText = `تم رفع: ${file.name} (${extracted.length} رقم)`;
+  } catch (err) {
+    alert('تعذّر قراءة الملف: ' + err.message);
+  }
+}
+
+// بيدور على أرقام الطلبات (من المربع + الملف) داخل التاريخ المعروض حاليًا بس، ويحددهم تلقائيًا (checkboxes)
+// من غير ما يعمل أي Sort أو تغيير في ترتيب الجدول نفسه.
+function verifyAndSelectCertOrders() {
+  const textValue = document.getElementById('cert-multiselect-textarea').value;
+  const fromText = textValue.split(/[\n,،]+/).map(s => s.trim()).filter(Boolean);
+  const combined = [...new Set([...fromText, ...certMultiSelectFileRows])];
+
+  if (combined.length === 0) {
+    alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
+    return;
+  }
+
+  if (!certAllData || certAllData.length === 0) {
+    alert('لا يوجد بيانات محمّلة حاليًا للتاريخ المحدد.');
+    return;
+  }
+
+  const availableNumbers = new Set(certAllData.map(o => String(o.order_number)));
+  const found = [];
+  const notFound = [];
+
+  combined.forEach(num => {
+    if (availableNumbers.has(num)) {
+      found.push(num);
+      selectedCertOrderNumbers.add(num);
+    } else {
+      notFound.push(num);
+    }
+  });
+
+  updateCertSelectedCount();
+  renderCertPage(); // بيعيد رسم نفس البيانات بنفس الترتيب، بس الـ checkboxes بتتظبط تلقائيًا حسب التحديد
+
+  const resultsEl = document.getElementById('cert-multiselect-results');
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل).</p>`;
+  if (notFound.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود في التاريخ المعروض حاليًا:</p>`;
+    html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
+  }
+  resultsEl.innerHTML = html;
+}
+
 function onCertDateFilterChange() { certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 
@@ -2284,17 +2395,6 @@ function renderCertPage() {
 
   window.certFilteredData = filtered;
   renderCertTable(filtered.slice(from, to));
-  updateCertPaginationControls(from + 1, Math.min(to, certTotalRecordsCount));
-}
-
-// بيعيد رسم نفس الصفحة الحالية زي ما هي (نفس الترتيب ونفس الطلبات الظاهرة) من غير ما
-// يعيد تطبيق الفلاتر من جديد. بنستخدمها بعد تغيير الحالة عشان لو الطلب بقى مش مطابق
-// للفلتر الحالي (زي فلتر "لم يتم الطباعة") ميختفيش من الشيت وتوزيعة الـ 100 تفضل زي ما هي.
-function rerenderCertPageInPlace() {
-  if (!window.certFilteredData) { applyCertDateFiltering(); return; }
-  const from = (certCurrentPage - 1) * certPageSize;
-  const to = from + certPageSize;
-  renderCertTable(window.certFilteredData.slice(from, to));
   updateCertPaginationControls(from + 1, Math.min(to, certTotalRecordsCount));
 }
 
@@ -2569,7 +2669,7 @@ async function executeCertBulkStatusUpdate() {
       targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; });
       selectedCertOrderNumbers.clear();
       updateCertSelectedCount();
-      rerenderCertPageInPlace();
+      applyCertDateFiltering();
     }
   } catch (err) { alert('خطأ: ' + err.message); }
 }
@@ -2680,7 +2780,7 @@ async function saveCertUpdate() {
       alert('فشل التحديث: ' + error.message);
     } else {
       Object.assign(selectedCertOrder, updateData);
-      rerenderCertPageInPlace();
+      applyCertDateFiltering();
       applyRejectionsDateFiltering();
       closeCertModal();
     }

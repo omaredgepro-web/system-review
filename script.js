@@ -215,17 +215,19 @@ function populateReviewerDropdowns() {
   });
 }
 
-// بيبني قايمة الشركات في فلتر الداشبورد من كل الطلبات المحمّلة (مش بس طلبات التاريخ المحدد حاليًا)،
-// عشان تفضل القايمة كاملة وثابتة حتى لو غيّرت التاريخ.
+// بيبني قايمة الشركات في فلتر الداشبورد من طلبات التاريخ المحدد حاليًا بس (مش كل الطلبات اللي اترفعت قبل كده)،
+// عشان القايمة تعكس بالظبط الشركات الموجودة فعليًا في التاريخ ده. بيتم استدعاؤها في كل مرة يتغير فيها التاريخ.
 function populateCompanyFilter() {
   const filterSelect = document.getElementById('company-filter');
-  if (!filterSelect || !window.masterData) return;
+  if (!filterSelect || !window.allData) return;
 
   const currentValue = filterSelect.value || 'ALL';
 
+  // .normalize('NFC') بيوحّد أشكال الحروف العربية المتطابقة بصريًا لكن المخزّنة بترميز يونيكود مختلف شوية
+  // (سبب شائع لظهور نفس اسم الشركة مرتين في القايمة رغم إنه شكله واحد بالظبط).
   const companies = [...new Set(
-    window.masterData
-      .map(o => o.company || o['الشركة'])
+    window.allData
+      .map(o => (o.company || o['الشركة'] || '').normalize('NFC').trim())
       .filter(Boolean)
   )].sort((a, b) => a.localeCompare(b, 'ar'));
 
@@ -237,6 +239,8 @@ function populateCompanyFilter() {
   // نحافظ على الاختيار الحالي لو لسه موجود في القايمة الجديدة
   if ([...filterSelect.options].some(opt => opt.value === currentValue)) {
     filterSelect.value = currentValue;
+  } else {
+    filterSelect.value = 'ALL';
   }
 }
 
@@ -323,7 +327,6 @@ async function loadData() {
     }
 
     window.masterData = allFetched;
-    populateCompanyFilter();
     applyDateFiltering();
 
   } catch (err) {
@@ -345,6 +348,7 @@ function applyDateFiltering() {
 
   window.allData = window.masterData.filter(item => extractDateString(item) === targetDate);
   document.getElementById('active-date-label').innerText = `يعرض طلبات تاريخ: ${targetDate}`;
+  populateCompanyFilter();
 
   totalRecordsCount = window.allData.length;
   updateKPIs(window.allData); // الحالة العامة (KPIs) دايمًا بتعكس كل الطلبات، حتى للمراجع
@@ -384,7 +388,7 @@ function renderCurrentPage() {
     const reviewer = item.reviewer || item['المراجع'] || '';
     const matchesReviewer = (reviewerValue === 'ALL') || (reviewerValue === 'UNASSIGNED' ? !reviewer : (reviewer === reviewerValue));
 
-    const company = item.company || item['الشركة'] || '';
+    const company = (item.company || item['الشركة'] || '').normalize('NFC').trim();
     const matchesCompany = (companyValue === 'ALL') || (company === companyValue);
 
     return matchesSearch && matchesStatus && matchesReviewer && matchesCompany;

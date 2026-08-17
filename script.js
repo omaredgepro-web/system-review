@@ -7,7 +7,7 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
-        
+      
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
@@ -232,8 +232,8 @@ function switchTab(tabName) {
   } else if (tabName === 'rejections') {
     document.getElementById('rejections-tab-btn').classList.add('active');
     document.getElementById('tab-rejections').style.display = 'block';
-    if (!certDataLoaded) { loadCertificatesData().then(renderRejectionsTab); }
-    else { renderRejectionsTab(); }
+    if (!certDataLoaded) { loadCertificatesData().then(applyRejectionsDateFiltering); }
+    else { applyRejectionsDateFiltering(); }
   } else if (tabName === 'print-distribute') {
     document.getElementById('print-distribute-tab-btn').classList.add('active');
     document.getElementById('tab-print-distribute').style.display = 'block';
@@ -1968,6 +1968,8 @@ function populateCertLayoutFilter() {
 }
 
 // ============ تاب مرفوضات (يظهر للكل - مراجع وأدمن) ============
+let rejectionsAllData = [];
+
 function toggleRejectionsStatsSidebar() {
   document.getElementById('rejections-stats-sidebar').classList.toggle('active');
 }
@@ -1976,6 +1978,39 @@ function getRejectedCertRows() {
   return (certMasterData || []).filter(o => o.status === 'مرفوض');
 }
 
+function applyRejectionsDateFiltering() {
+  const rejected = getRejectedCertRows();
+
+  if (rejected.length === 0) {
+    rejectionsAllData = [];
+    document.getElementById('rejections-active-date-label').innerText = 'لا يوجد طلبات مرفوضة';
+    renderRejectionsTab();
+    return;
+  }
+
+  const dateInput = document.getElementById('rejections-date-filter').value;
+  let targetDate = dateInput;
+
+  if (!targetDate) {
+    const dates = rejected.map(extractDateString).filter(Boolean).sort().reverse();
+    targetDate = dates[0] || '';
+    if (targetDate) document.getElementById('rejections-date-filter').value = targetDate;
+  }
+
+  rejectionsAllData = rejected.filter(item => {
+    const d = extractDateString(item);
+    return d === targetDate || !d;
+  });
+  document.getElementById('rejections-active-date-label').innerText = targetDate
+    ? `يعرض مرفوضات تاريخ: ${targetDate} (+ الطلبات بدون تاريخ)`
+    : 'يعرض كل الطلبات المرفوضة (بدون تاريخ)';
+
+  renderRejectionsTab();
+}
+
+function onRejectionsDateFilterChange() { applyRejectionsDateFiltering(); }
+function resetRejectionsDateToLatest() { document.getElementById('rejections-date-filter').value = ''; applyRejectionsDateFiltering(); }
+
 function renderRejectionsTab() {
   const tbody = document.getElementById('rejections-tbody');
   if (!tbody) return;
@@ -1983,7 +2018,7 @@ function renderRejectionsTab() {
   const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
   const reviewerValue = document.getElementById('rejections-reviewer-filter').value;
 
-  let rows = getRejectedCertRows();
+  let rows = rejectionsAllData || [];
 
   if (reviewerValue && reviewerValue !== 'ALL') {
     rows = rows.filter(o => o.reviewer === reviewerValue);
@@ -2023,7 +2058,7 @@ function renderRejectionsReviewerStats() {
   if (!container) return;
 
   const counts = {};
-  getRejectedCertRows().forEach(o => {
+  (rejectionsAllData || []).forEach(o => {
     const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
     const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || 'غير محدد');
     counts[reviewerName] = (counts[reviewerName] || 0) + 1;
@@ -2031,7 +2066,7 @@ function renderRejectionsReviewerStats() {
 
   const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
   if (names.length === 0) {
-    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد رفض مسجل</p>';
+    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد رفض مسجل لهذا التاريخ</p>';
     return;
   }
 
@@ -2471,7 +2506,7 @@ async function saveCertUpdate() {
     } else {
       Object.assign(selectedCertOrder, updateData);
       applyCertDateFiltering();
-      renderRejectionsTab();
+      applyRejectionsDateFiltering();
       closeCertModal();
     }
   } catch (err) {

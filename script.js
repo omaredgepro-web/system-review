@@ -7,29 +7,33 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
       
-const USERS_DB = {
-  "عمر": { password: "123", role: "admin", name: "عمر" },
-  "موندي": { password: "123", role: "admin", name: "موندي" },
-  "مؤمن": { password: "123", role: "admin", name: "مؤمن" },
-  "ابو هيبة": { password: "123", role: "admin", name: "ابو هيبة" },
-  "دينا": { password: "123", role: "admin", name: "دينا" },
-  "سرحان": { password: "123", role: "admin", name: "سرحان" },
-  "روان": { password: "123", role: "admin", name: "روان" },
-  "سارة": { password: "sara123", role: "admin", name: "سارة" },
-  
-  "ادهم": { password: "123", role: "reviewer", name: "ادهم" },
-  "يوسف": { password: "123", role: "reviewer", name: "يوسف" },
-  "عمر جابر": { password: "123", role: "reviewer", name: "عمر جابر" },
-  "نيره": { password: "123", role: "reviewer", name: "نيره" },
-  "مريم": { password: "123", role: "reviewer", name: "مريم" },
-  "ايمان": { password: "123", role: "reviewer", name: "ايمان" },
-  "ايه": { password: "123", role: "reviewer", name: "ايه" },
-  "رحمه": { password: "123", role: "reviewer", name: "رحمه" },
-  "زبادي": { password: "123", role: "reviewer", name: "زبادي" },
-  "عمرو": { password: "123", role: "reviewer", name: "عمرو" },
-  "كريم": { password: "123", role: "reviewer", name: "كريم" },
-  "علي": { password: "123", role: "reviewer", name: "علي" }
-};
+// ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
+// مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
+let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
+
+function getUsernames() {
+  return ALL_PROFILES.map(p => p.username);
+}
+function getRole(username) {
+  const p = ALL_PROFILES.find(p => p.username === username);
+  return p ? p.role : null;
+}
+async function fetchOwnProfile(userId) {
+  const { data, error } = await supabaseClient
+    .from('profiles')
+    .select('id, username, name, role')
+    .eq('id', userId)
+    .single();
+  if (error) { console.error(error); return null; }
+  return data;
+}
+async function fetchAllProfiles() {
+  const { data, error } = await supabaseClient
+    .from('profiles')
+    .select('id, username, name, role');
+  if (error) { console.error(error); return []; }
+  return data;
+}
 
 // ============ الوضع الداكن / الفاتح ============
 function applyThemeIcon() {
@@ -73,14 +77,20 @@ let selectedCertOrder = null;
 let certDataLoaded = false;
 let selectedCertOrderNumbers = new Set();
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   applyThemeIcon();
 
-  const savedUser = localStorage.getItem('system_user');
-  if (savedUser) {
-    const userObj = JSON.parse(savedUser);
-    setupUserSession(userObj.username, userObj);
+  // Supabase بيحتفظ بالجلسة (session) لوحده - مش محتاجين نخزن يوزر/باسورد في localStorage تاني
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session && session.user) {
+    const profile = await fetchOwnProfile(session.user.id);
+    if (profile) {
+      await setupUserSession(profile);
+    } else {
+      // حساب معمول له تسجيل دخول في Supabase بس معندوش صف في profiles - حالة غير متوقعة، نطلعه بره
+      await supabaseClient.auth.signOut();
+    }
   }
 });
 
@@ -96,10 +106,11 @@ function toggleCompanySidebar() {
   sidebar.classList.toggle('active');
 }
 
-function handleLogin() {
+async function handleLogin() {
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value.trim();
   const errEl = document.getElementById('login-error');
+  const loginBtn = document.querySelector('#login-screen .btn-primary');
 
   errEl.style.display = 'none';
 
@@ -109,25 +120,55 @@ function handleLogin() {
     return;
   }
 
-  const user = USERS_DB[username];
+  if (loginBtn) { loginBtn.disabled = true; loginBtn.innerText = 'جاري الدخول...'; }
 
-  if (user && user.password === password) {
-    localStorage.setItem('system_user', JSON.stringify({ username, ...user }));
-    setupUserSession(username, user);
-  } else {
-    errEl.innerText = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+  try {
+    // 1) نلاقي الإيميل المرتبط باسم المستخدم ده عن طريق دالة (RPC) في Supabase
+    //    من غير ما نكشف أي أسماء يوزرات تانية أو نسمح بعمل enumeration
+    const { data: email, error: lookupError } = await supabaseClient.rpc('get_login_email', { p_username: username });
+
+    if (lookupError || !email) {
+      errEl.innerText = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // 2) تسجيل الدخول الفعلي - التحقق من الباسورد بيحصل جوه Supabase مش في المتصفح
+    const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+    if (authError || !authData.user) {
+      errEl.innerText = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // 3) هات بروفايل اليوزر (الاسم والرول) من جدول profiles
+    const profile = await fetchOwnProfile(authData.user.id);
+    if (!profile) {
+      errEl.innerText = 'تم تسجيل الدخول لكن لا يوجد بروفايل مرتبط بهذا الحساب. راجع الأدمن';
+      errEl.style.display = 'block';
+      await supabaseClient.auth.signOut();
+      return;
+    }
+
+    await setupUserSession(profile);
+  } catch (e) {
+    console.error(e);
+    errEl.innerText = 'حصل خطأ غير متوقع أثناء تسجيل الدخول';
     errEl.style.display = 'block';
+  } finally {
+    if (loginBtn) { loginBtn.disabled = false; loginBtn.innerText = '🔐 تسجيل الدخول'; }
   }
 }
 
-function setupUserSession(username, userInfo) {
-  currentUser = { username, ...userInfo };
-  
+async function setupUserSession(profile) {
+  currentUser = profile; // { id, username, name, role }
+
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-content').style.display = 'block';
-  document.getElementById('user-welcome-text').innerText = `مرحباً بك: ${userInfo.name} (${userInfo.role === 'admin' ? 'أدمن' : 'مراجع'})`;
+  document.getElementById('user-welcome-text').innerText = `مرحباً بك: ${profile.name} (${profile.role === 'admin' ? 'أدمن' : 'مراجع'})`;
 
-  const isAdmin = userInfo.role === 'admin';
+  const isAdmin = profile.role === 'admin';
   document.getElementById('admin-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('select-all-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
@@ -141,6 +182,7 @@ function setupUserSession(username, userInfo) {
   document.getElementById('date-filter').style.display = isAdmin ? 'inline-block' : 'none';
   document.getElementById('reset-date-btn').style.display = isAdmin ? 'inline-flex' : 'none';
 
+  ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
   loadData();
 }
@@ -153,22 +195,18 @@ function populateReviewerDropdowns() {
   reassignSelect.innerHTML = `<option value="">تغيير المراجع إلى...</option>`;
 
   // بيشمل المراجعين والأدمن كمان، لإمكانية توزيع الطلبات على الأدمن برضو لو احتاج الأمر
-  Object.keys(USERS_DB).forEach(key => {
-    if (USERS_DB[key].role === 'reviewer') {
-      filterSelect.innerHTML += `<option value="${key}">${key}</option>`;
-      reassignSelect.innerHTML += `<option value="${key}">${key}</option>`;
-    }
+  ALL_PROFILES.filter(p => p.role === 'reviewer').forEach(p => {
+    filterSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
+    reassignSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
   });
-  Object.keys(USERS_DB).forEach(key => {
-    if (USERS_DB[key].role === 'admin') {
-      filterSelect.innerHTML += `<option value="${key}">${key} (أدمن)</option>`;
-      reassignSelect.innerHTML += `<option value="${key}">${key} (أدمن)</option>`;
-    }
+  ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
+    filterSelect.innerHTML += `<option value="${p.username}">${p.username} (أدمن)</option>`;
+    reassignSelect.innerHTML += `<option value="${p.username}">${p.username} (أدمن)</option>`;
   });
 }
 
-function handleLogout() {
-  localStorage.removeItem('system_user');
+async function handleLogout() {
+  await supabaseClient.auth.signOut();
   location.reload();
 }
 
@@ -869,7 +907,7 @@ function renderPrintPreview() {
 
 function populatePrintDistUsersList() {
   const container = document.getElementById('print-dist-users-list');
-  const adminKeys = Object.keys(USERS_DB).filter(key => USERS_DB[key].role === 'admin');
+  const adminKeys = ALL_PROFILES.filter(p => p.role === 'admin').map(p => p.username);
 
   if (!printDistUserSelection) {
     printDistUserSelection = new Set(adminKeys); // أول مرة بس: كل الأدمن متحدد افتراضيًا
@@ -888,14 +926,14 @@ function populatePrintDistUsersList() {
 }
 
 function onPrintDistUserToggle(checkbox) {
-  const adminKeys = Object.keys(USERS_DB).filter(key => USERS_DB[key].role === 'admin');
+  const adminKeys = ALL_PROFILES.filter(p => p.role === 'admin').map(p => p.username);
   if (!printDistUserSelection) printDistUserSelection = new Set(adminKeys);
   if (checkbox.checked) printDistUserSelection.add(checkbox.value);
   else printDistUserSelection.delete(checkbox.value);
 }
 
 function selectAllPrintDistUsers(checked) {
-  const adminKeys = Object.keys(USERS_DB).filter(key => USERS_DB[key].role === 'admin');
+  const adminKeys = ALL_PROFILES.filter(p => p.role === 'admin').map(p => p.username);
   document.querySelectorAll('.print-dist-user-checkbox').forEach(cb => { cb.checked = checked; });
   printDistUserSelection = new Set(checked ? adminKeys : []);
 }
@@ -1265,7 +1303,7 @@ function populateCustomDistSelects() {
   const reviewerSelect = document.getElementById('custom-dist-reviewer-select');
   if (reviewerSelect && reviewerSelect.options.length <= 1) {
     reviewerSelect.innerHTML = `<option value="">اختر المراجع...</option>` +
-      Object.keys(USERS_DB).map(k => `<option value="${k}">${k}${USERS_DB[k].role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.username}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
   }
 }
 
@@ -1386,32 +1424,32 @@ function populateCsvDistUsersList() {
   const container = document.getElementById('csv-dist-users-list');
 
   if (!csvDistUserSelection) {
-    csvDistUserSelection = new Set(Object.keys(USERS_DB)); // أول مرة بس: الكل متحدد افتراضيًا
+    csvDistUserSelection = new Set(getUsernames()); // أول مرة بس: الكل متحدد افتراضيًا
   }
 
   container.innerHTML = '';
 
-  Object.keys(USERS_DB).forEach(key => {
-    const roleLabel = USERS_DB[key].role === 'admin' ? ' (أدمن)' : '';
-    const isChecked = csvDistUserSelection.has(key) ? 'checked' : '';
+  ALL_PROFILES.forEach(p => {
+    const roleLabel = p.role === 'admin' ? ' (أدمن)' : '';
+    const isChecked = csvDistUserSelection.has(p.username) ? 'checked' : '';
     container.innerHTML += `
       <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
-        <input type="checkbox" class="csv-dist-user-checkbox" value="${key}" ${isChecked} onchange="onCsvDistUserToggle(this)">
-        ${key}${roleLabel}
+        <input type="checkbox" class="csv-dist-user-checkbox" value="${p.username}" ${isChecked} onchange="onCsvDistUserToggle(this)">
+        ${p.username}${roleLabel}
       </label>
     `;
   });
 }
 
 function onCsvDistUserToggle(checkbox) {
-  if (!csvDistUserSelection) csvDistUserSelection = new Set(Object.keys(USERS_DB));
+  if (!csvDistUserSelection) csvDistUserSelection = new Set(getUsernames());
   if (checkbox.checked) csvDistUserSelection.add(checkbox.value);
   else csvDistUserSelection.delete(checkbox.value);
 }
 
 function selectAllCsvDistUsers(checked) {
   document.querySelectorAll('.csv-dist-user-checkbox').forEach(cb => { cb.checked = checked; });
-  csvDistUserSelection = new Set(checked ? Object.keys(USERS_DB) : []);
+  csvDistUserSelection = new Set(checked ? getUsernames() : []);
 }
 
 // توزيع متوازن: كل الطلبات بيتم خلطها بالتبادل بين الشركات أولاً (عشان كل مراجع ياخد خليط من كل الشركات)،
@@ -1903,12 +1941,10 @@ function populateCertLayoutFilter() {
   modalSelect.innerHTML = '';
   bulkReassignSelect.innerHTML = `<option value="">توزيع على المسؤول...</option>`;
 
-  Object.keys(USERS_DB).forEach(key => {
-    if (USERS_DB[key].role === 'admin') {
-      filterSelect.innerHTML += `<option value="${key}">${key}</option>`;
-      modalSelect.innerHTML += `<option value="${key}">${key}</option>`;
-      bulkReassignSelect.innerHTML += `<option value="${key}">${key}</option>`;
-    }
+  ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
+    filterSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
+    modalSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
+    bulkReassignSelect.innerHTML += `<option value="${p.username}">${p.username}</option>`;
   });
 }
 

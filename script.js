@@ -390,7 +390,23 @@ function renderCurrentPage() {
   const reviewerValue = document.getElementById('reviewer-filter').value;
   const companyValue = document.getElementById('company-filter').value;
 
-  let filtered = window.visibleData.filter(item => {
+  // لو المستخدم بيدور برقم الطلب، البحث لازم يشمل كل التواريخ (كل الداتا) مش بس تاريخ اليوم المحدد فوق.
+  // من غير بحث، بنرجع للسلوك العادي: بيانات اليوم/التاريخ المحدد فقط.
+  let baseData;
+  if (searchValue) {
+    if (currentUser && currentUser.role !== 'admin') {
+      baseData = (window.masterData || []).filter(item => {
+        const reviewerName = item.reviewer || item['المراجع'] || '';
+        return reviewerName === currentUser.username || reviewerName === currentUser.name;
+      });
+    } else {
+      baseData = window.masterData || [];
+    }
+  } else {
+    baseData = window.visibleData;
+  }
+
+  let filtered = baseData.filter(item => {
     const orderNum = String(item.order_number || item.order_no || item['رقم الطلب'] || '').toLowerCase();
     const matchesSearch = !searchValue || orderNum.includes(searchValue);
     const reviewStatus = item.review_status || item['حالة المراجعة'] || 'لم يتم المراجعة';
@@ -440,6 +456,7 @@ function renderTable(orders) {
     if (reviewStatus === 'مقبول') reviewBadge = 'badge-accepted';
     if (reviewStatus === 'مرفوض') reviewBadge = 'badge-rejected';
     if (reviewStatus === 'معلق') reviewBadge = 'badge-hold';
+    if (reviewStatus === 'Qc') reviewBadge = 'badge-qc';
 
     const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
@@ -1917,7 +1934,7 @@ function openEditModal(orderNum) {
 
   document.getElementById('modal-order-no').value = orderNum;
   const currentStatus = selectedOrder.review_status || selectedOrder['حالة المراجعة'] || 'مقبول';
-  document.getElementById('modal-review-status').value = ['مقبول', 'مرفوض', 'معلق'].includes(currentStatus) ? currentStatus : 'مقبول';
+  document.getElementById('modal-review-status').value = ['مقبول', 'مرفوض', 'معلق', 'Qc'].includes(currentStatus) ? currentStatus : 'مقبول';
   document.getElementById('modal-rejection-reason').value = selectedOrder.rejection_reason || selectedOrder.reason || selectedOrder['سبب الرفض'] || '';
 
   document.getElementById('edit-modal').style.display = 'flex';
@@ -1927,7 +1944,18 @@ function openEditModal(orderNum) {
 function closeModal() { document.getElementById('edit-modal').style.display = 'none'; selectedOrder = null; }
 function toggleRejectionField() {
   const status = document.getElementById('modal-review-status').value;
-  document.getElementById('rejection-reason-group').style.display = (status === 'مرفوض') ? 'block' : 'none';
+  const needsReason = (status === 'مرفوض' || status === 'معلق');
+  document.getElementById('rejection-reason-group').style.display = needsReason ? 'block' : 'none';
+
+  const label = document.getElementById('rejection-reason-label');
+  const textarea = document.getElementById('modal-rejection-reason');
+  if (status === 'معلق') {
+    label.innerHTML = 'سبب التعليق <span style="color: #f87171;">*</span>';
+    textarea.placeholder = 'اكتب سبب التعليق هنا...';
+  } else {
+    label.innerHTML = 'سبب الرفض <span style="color: #f87171;">*</span>';
+    textarea.placeholder = 'اكتب سبب الرفض هنا...';
+  }
 }
 
 async function saveOrderUpdate() {
@@ -1947,8 +1975,8 @@ async function saveOrderUpdate() {
   const newReviewStatus = document.getElementById('modal-review-status').value;
   const newRejectionReason = document.getElementById('modal-rejection-reason').value.trim();
 
-  if (newReviewStatus === 'مرفوض' && !newRejectionReason) {
-    alert('يرجى كتابة سبب الرفض');
+  if ((newReviewStatus === 'مرفوض' || newReviewStatus === 'معلق') && !newRejectionReason) {
+    alert(newReviewStatus === 'معلق' ? 'يرجى كتابة سبب التعليق' : 'يرجى كتابة سبب الرفض');
     return;
   }
 
@@ -1959,7 +1987,7 @@ async function saveOrderUpdate() {
   let matchValue = selectedOrder[matchColumn];
 
   const updateData = {};
-  const finalReason = (newReviewStatus === 'مرفوض') ? newRejectionReason : '-';
+  const finalReason = (newReviewStatus === 'مرفوض' || newReviewStatus === 'معلق') ? newRejectionReason : '-';
 
   if ('review_status' in selectedOrder) updateData.review_status = newReviewStatus;
   if ('حالة المراجعة' in selectedOrder) updateData['حالة المراجعة'] = newReviewStatus;
@@ -2078,6 +2106,158 @@ function renderCompanyStats(data) {
         </div>
       </div>
     `;
+  });
+}
+
+// ============ الرسوم البيانية (Overview / Companies / Reviewers) ============
+let chartsInstance = null;
+let currentChartView = 'overview';
+
+const CHART_COLORS = {
+  'مقبول': '#34d399',
+  'مرفوض': '#f87171',
+  'معلق': '#fbbf24',
+  'Qc': '#c084fc',
+  'لم يتم المراجعة': '#60a5fa'
+};
+
+function getCssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// بيانات الرسوم البيانية: للأدمن كل بيانات التاريخ المحدد، للمراجع العادي بياناته هو بس (نفس منطق الـ KPIs)
+function getChartsDataScope() {
+  if (currentUser && currentUser.role === 'admin') return window.allData || [];
+  return window.visibleData || [];
+}
+
+function openChartsModal() {
+  if (typeof Chart === 'undefined') {
+    alert('تعذر تحميل مكتبة الرسوم البيانية، تأكد من اتصال الإنترنت وحاول تاني.');
+    return;
+  }
+  document.getElementById('charts-modal').style.display = 'flex';
+  showChartView('overview');
+}
+
+function closeChartsModal() {
+  document.getElementById('charts-modal').style.display = 'none';
+  if (chartsInstance) { chartsInstance.destroy(); chartsInstance = null; }
+}
+
+function setActiveChartButton(view) {
+  ['overview', 'companies', 'reviewers'].forEach(v => {
+    const btn = document.getElementById('chart-view-btn-' + v);
+    if (!btn) return;
+    btn.classList.remove('btn-primary', 'btn-secondary');
+    btn.classList.add(v === view ? 'btn-primary' : 'btn-secondary');
+  });
+}
+
+function showChartView(view) {
+  currentChartView = view;
+  setActiveChartButton(view);
+
+  if (chartsInstance) { chartsInstance.destroy(); chartsInstance = null; }
+
+  const canvas = document.getElementById('charts-canvas');
+  const ctx = canvas.getContext('2d');
+  const data = getChartsDataScope();
+
+  if (view === 'overview') renderOverviewChart(ctx, data);
+  else if (view === 'companies') renderGroupedChart(ctx, data, o => (o.company || o['الشركة'] || '').toString().trim(), 'توزيع الطلبات حسب الشركات');
+  else if (view === 'reviewers') renderGroupedChart(ctx, data, o => getDisplayName(o.reviewer || o['المراجع'] || ''), 'توزيع الطلبات حسب المراجعين');
+}
+
+function getStatusCounts(data) {
+  const counts = { 'مقبول': 0, 'مرفوض': 0, 'معلق': 0, 'Qc': 0, 'لم يتم المراجعة': 0 };
+  data.forEach(o => {
+    const s = o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة';
+    if (counts[s] !== undefined) counts[s]++;
+    else counts['لم يتم المراجعة']++;
+  });
+  return counts;
+}
+
+function renderOverviewChart(ctx, data) {
+  const textColor = getCssVar('--text-main');
+  const counts = getStatusCounts(data);
+  const labels = Object.keys(counts);
+
+  document.getElementById('charts-title').innerText = '📊 نظرة عامة على الطلبات';
+  document.getElementById('charts-subtitle').innerText = `إجمالي الطلبات المعروضة: ${data.length.toLocaleString('ar-EG')}`;
+
+  chartsInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: labels.map(l => counts[l]),
+        backgroundColor: labels.map(l => CHART_COLORS[l]),
+        borderColor: getCssVar('--card-bg'),
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: textColor, font: { family: 'Cairo' } } },
+        tooltip: { rtl: true, bodyFont: { family: 'Cairo' }, titleFont: { family: 'Cairo' } }
+      }
+    }
+  });
+}
+
+function buildGroupStats(data, keyFn) {
+  const stats = {};
+  data.forEach(o => {
+    const key = keyFn(o);
+    if (!key) return;
+    const revStatus = o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة';
+    if (!stats[key]) stats[key] = { 'مقبول': 0, 'مرفوض': 0, 'معلق': 0, 'Qc': 0, 'لم يتم المراجعة': 0, total: 0 };
+    stats[key].total++;
+    if (stats[key][revStatus] !== undefined) stats[key][revStatus]++;
+    else stats[key]['لم يتم المراجعة']++;
+  });
+  return stats;
+}
+
+function renderGroupedChart(ctx, data, keyFn, titleText) {
+  const textColor = getCssVar('--text-main');
+  const gridColor = getCssVar('--card-border');
+
+  const stats = buildGroupStats(data, keyFn);
+  const keys = Object.keys(stats).sort((a, b) => stats[b].total - stats[a].total).slice(0, 20);
+
+  document.getElementById('charts-title').innerText = titleText.includes('الشركات') ? '🏢 ' + titleText : '👤 ' + titleText;
+  document.getElementById('charts-subtitle').innerText = keys.length ? `أعلى ${keys.length} عنصر حسب عدد الطلبات` : 'لا توجد بيانات كافية لعرضها';
+
+  const statusLabels = ['مقبول', 'مرفوض', 'معلق', 'Qc', 'لم يتم المراجعة'];
+
+  chartsInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: keys,
+      datasets: statusLabels.map(status => ({
+        label: status,
+        data: keys.map(k => stats[k][status]),
+        backgroundColor: CHART_COLORS[status]
+      }))
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { color: textColor, font: { family: 'Cairo' } }, grid: { color: gridColor } },
+        y: { stacked: true, ticks: { color: textColor, font: { family: 'Cairo' } }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: textColor, font: { family: 'Cairo' } } },
+        tooltip: { rtl: true, bodyFont: { family: 'Cairo' }, titleFont: { family: 'Cairo' } }
+      }
+    }
   });
 }
 

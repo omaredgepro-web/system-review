@@ -67,6 +67,12 @@ function toggleTheme() {
 
 let supabaseClient;
 let currentUser = null;
+
+// أسماء المستخدمين المسموح لهم بالحذف فقط (باقي الأدمنز يقدروا يضيفوا/يعدلوا بس مش يحذفوا)
+const DELETE_ALLOWED_USERNAMES = ['umar', 'mondy'];
+function canDelete() {
+  return !!(currentUser && currentUser.role === 'admin' && DELETE_ALLOWED_USERNAMES.includes(currentUser.username));
+}
 let currentPage = 1;
 const pageSize = 100;
 let totalRecordsCount = 0;
@@ -183,6 +189,10 @@ async function setupUserSession(profile) {
   document.getElementById('select-all-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
+  const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+  if (bulkDeleteBtn) bulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
+  const certBulkDeleteBtn = document.getElementById('cert-bulk-delete-btn');
+  if (certBulkDeleteBtn) certBulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('print-distribute-tab-btn').style.display = isAdmin ? 'block' : 'none';
@@ -433,7 +443,7 @@ function renderTable(orders) {
 
     const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
-    const adminCellHtml = isAdmin ? `<td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button></td>` : '';
+    const adminCellHtml = isAdmin ? `<td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button>` : ''}</td>` : '';
 
     tbody.innerHTML += `
       <tr>
@@ -694,6 +704,7 @@ async function executeBulkDateUpdate() {
 }
 
 async function executeBulkDelete() {
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
@@ -746,7 +757,7 @@ async function executeBulkReassign() {
 }
 
 async function deleteSingleOrder(orderNum) {
-  if (!currentUser || currentUser.role !== 'admin') { alert('هذا الإجراء متاح للأدمن فقط'); return; }
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
   if (!confirmDelete) return;
 
@@ -2607,7 +2618,7 @@ function renderCertTable(orders) {
       <tr>
         <td style="text-align:center;"><input type="checkbox" class="cert-row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleCertRowSelect(this, '${orderNum}')"></td>
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openCertEditModal('${orderNum}')">تحديث</button></td>
-        <td class="sticky-action-col"><button class="btn-delete-row" onclick="deleteSingleCertOrder('${orderNum}')">🗑️ مسح</button></td>
+        <td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleCertOrder('${orderNum}')">🗑️ مسح</button>` : ''}</td>
         <td class="order-no-cell">${orderNum}</td>
         <td ${layoutClass}>${layout}</td>
         <td><span class="badge ${badgeClass}">${status}</span></td>
@@ -2849,6 +2860,7 @@ async function executeCertBulkStatusUpdate() {
 }
 
 async function executeCertBulkDelete() {
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedCertOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
@@ -2871,7 +2883,7 @@ async function executeCertBulkDelete() {
 }
 
 async function deleteSingleCertOrder(orderNum) {
-  if (!currentUser || currentUser.role !== 'admin') { alert('هذا الإجراء متاح للأدمن فقط'); return; }
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
   if (!confirmDelete) return;
 

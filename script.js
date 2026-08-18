@@ -7,7 +7,7 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
-        
+       
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
@@ -381,6 +381,21 @@ function applyDateFiltering() {
 
 function onDateFilterChange() { currentPage = 1; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
 function resetDateToLatest() { document.getElementById('date-filter').value = ''; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
+
+// تحديث بيانات لوحة المراجعة والإحصائيات من Supabase من غير عمل ريفرش لكل الصفحة
+async function refreshDashboardData() {
+  const btn = document.getElementById('refresh-dashboard-btn');
+  const originalText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحديث...'; }
+
+  try {
+    await loadData();
+  } catch (err) {
+    alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
 
 function renderCurrentPage() {
   if (!window.visibleData) return;
@@ -2113,6 +2128,63 @@ function renderCompanyStats(data) {
 let chartsInstance = null;
 let currentChartView = 'overview';
 
+// بعض الشبكات أو إضافات المتصفح (Ad-blockers) بتمنع تحميل ملفات باسم "chart.js" من مصادر معينة (زي cdnjs).
+// عشان كده بنجرب أكتر من مصدر (CDN) واحد ورا التاني، وبنحمّل المكتبة بس وقت ما المستخدم يفتح شاشة الرسوم فعليًا (مش من أول ما الصفحة تفتح).
+const CHARTJS_SOURCES = [
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
+  'https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js'
+];
+
+let chartJsLoadPromise = null;
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      script.remove();
+      reject(new Error('انتهت المهلة أثناء تحميل: ' + src));
+    }, 8000);
+    script.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      script.remove();
+      reject(new Error('فشل تحميل: ' + src));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+function loadChartJsLibrary() {
+  if (typeof Chart !== 'undefined') return Promise.resolve();
+  if (chartJsLoadPromise) return chartJsLoadPromise;
+
+  chartJsLoadPromise = (async () => {
+    for (const src of CHARTJS_SOURCES) {
+      try {
+        await loadScriptOnce(src);
+        if (typeof Chart !== 'undefined') return;
+      } catch (e) { /* نجرب المصدر اللي بعده */ }
+    }
+    chartJsLoadPromise = null; // نسمح بإعادة المحاولة تاني لو المستخدم دوس "إعادة المحاولة"
+    throw new Error('تعذر تحميل مكتبة الرسوم البيانية من كل المصادر المتاحة.');
+  })();
+
+  return chartJsLoadPromise;
+}
+
 const CHART_COLORS = {
   'مقبول': '#34d399',
   'مرفوض': '#f87171',
@@ -2131,12 +2203,26 @@ function getChartsDataScope() {
   return window.visibleData || [];
 }
 
-function openChartsModal() {
-  if (typeof Chart === 'undefined') {
-    alert('تعذر تحميل مكتبة الرسوم البيانية، تأكد من اتصال الإنترنت وحاول تاني.');
+async function openChartsModal() {
+  document.getElementById('charts-modal').style.display = 'flex';
+  document.getElementById('charts-title').innerText = 'الرسوم البيانية';
+  document.getElementById('charts-subtitle').innerText = '';
+
+  const wrap = document.getElementById('charts-canvas-wrap');
+  wrap.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:var(--text-muted); font-size:13px;">⏳ جاري تحميل مكتبة الرسوم البيانية...</div>';
+
+  try {
+    await loadChartJsLibrary();
+  } catch (err) {
+    wrap.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:12px; color:var(--text-muted); font-size:13px; text-align:center; padding: 0 20px;">
+        <span>تعذر تحميل مكتبة الرسوم البيانية. تأكد من اتصال الإنترنت، أو جرّب توقف أي إضافة حظر إعلانات (Ad-blocker) لهذا الموقع، وحاول تاني.</span>
+        <button class="btn btn-secondary" style="width:auto; padding:6px 16px;" onclick="openChartsModal()">🔄 إعادة المحاولة</button>
+      </div>`;
     return;
   }
-  document.getElementById('charts-modal').style.display = 'flex';
+
+  wrap.innerHTML = '<canvas id="charts-canvas"></canvas>';
   showChartView('overview');
 }
 

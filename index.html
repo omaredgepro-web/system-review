@@ -151,6 +151,7 @@
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" id="sidebar-toggle-btn" onclick="toggleSidebar()">📊 إحصائيات المراجعين</button>
               <span id="active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
+              <button class="btn btn-secondary" onclick="exportMyOrdersToExcel()">📥 تحميل طلباتي (Excel)</button>
               <div id="admin-export-actions" style="display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <button class="btn btn-secondary" onclick="exportTodayOrdersToExcel()">📥 تصدير طلبات اليوم (Excel)</button>
                 <button class="btn btn-secondary" onclick="exportReviewerStatsToExcel()">📈 تصدير إحصائيات المراجعين (Excel)</button>
@@ -185,7 +186,6 @@
               <option value="مرفوض">مرفوض</option>
               <option value="معلق">معلق</option>
               <option value="Qc">Qc</option>
-
             </select>
           </div>
 

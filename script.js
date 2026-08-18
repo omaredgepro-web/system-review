@@ -1913,9 +1913,19 @@ async function saveOrderUpdate() {
   if ('سبب الرفض' in selectedOrder) updateData['سبب الرفض'] = finalReason;
 
   try {
-    const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).eq(matchColumn, matchValue);
-    if (error) alert('فشل التحديث: ' + error.message);
-    else {
+    const { data: updatedRows, error } = await supabaseClient
+      .from(TABLE_NAME)
+      .update(updateData)
+      .eq(matchColumn, matchValue)
+      .select();
+
+    if (error) {
+      alert('فشل التحديث: ' + error.message);
+    } else if (!updatedRows || updatedRows.length === 0) {
+      // الطلب رجع "نجاح" بدون error لكن مفيش أي صف اتعدل فعليًا -
+      // غالبًا صلاحيات (RLS) مانعة، أو الطلب ده مش موجود / اتغيّر بالفعل من حد تاني
+      alert('لم يتم حفظ التعديل. غالبًا الطلب ده مش متاح لك للتعديل (يمكن اتنقل لمراجع تاني، أو انت مش صاحب الصلاحية عليه). حدّث الصفحة وحاول تاني.');
+    } else {
       Object.assign(selectedOrder, updateData);
       updateKPIs(window.visibleData);
       renderReviewersStats(window.visibleData);

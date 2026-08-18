@@ -1362,6 +1362,12 @@ function getCsvRowOrderNumber(row) {
   return String(row.order_number || row['رقم الطلب'] || '').trim();
 }
 
+// بيرجّع بيانات الطلب (الشركة + المراجع + حالة المراجعة) من قاعدة البيانات لأي رقم طلب،
+// عشان نقدر نصدّرهم في شيت الإكسيل بتاع الأرقام المكررة.
+function getMasterOrderByNumber(orderNum) {
+  return (window.masterData || []).find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
+}
+
 function renderCsvDuplicatesPanel(data) {
   const container = document.getElementById('csv-duplicates-panel');
   if (!container) return;
@@ -1408,12 +1414,60 @@ function renderCsvDuplicatesPanel(data) {
   if (dupExisting.length > 0) {
     html += `<p style="color: var(--badge-hold-text); font-weight:700; margin-bottom:6px;">⚠️ ${dupExisting.length} رقم طلب موجود بالفعل في قاعدة البيانات:</p>`;
     html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">تنبيه: الرفع هيتم بدون معرف (id) مطابق، يعني لو رفعتهم هيتسجلوا كصفوف جديدة مكررة، مش هيستبدلوا القديمة.</p>`;
+    html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
+    html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="downloadDuplicateOrdersExcel()">⬇️ تحميل شيت إكسيل بالمكررة</button>`;
+    html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="removeDuplicateOrdersFromCsv()">🗑️ إزالتها من الملف/التوزيعة الجديدة</button>`;
+    html += `</div>`;
     html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px;">`;
     html += dupExisting.join('، ');
     html += `</div>`;
   }
 
+  // بنخزن آخر لستة أرقام مكررة موجودة بالفعل في قاعدة البيانات عشان زراير التحميل/الإزالة
+  // فوق تقدر تستخدمها من غير ما نعيد حساب الفلترة كلها تاني.
+  window.lastCsvDupExisting = dupExisting;
+
   container.innerHTML = html;
+}
+
+// بيحمّل شيت إكسيل بالطلبات المكررة (الموجودة بالفعل في قاعدة البيانات) مع اسم الشركة
+// والمراجع وحالة المراجعة (مقبول/مرفوض) بتاعتها زي ما هي مسجلة حاليًا.
+function downloadDuplicateOrdersExcel() {
+  const dupExisting = window.lastCsvDupExisting || [];
+  if (dupExisting.length === 0) { alert('لا توجد أرقام مكررة لتحميلها.'); return; }
+
+  const exportRows = dupExisting.map(num => {
+    const master = getMasterOrderByNumber(num);
+    return {
+      'رقم الطلب': num,
+      'اسم الشركة': master ? (master.company || master['الشركة'] || '-') : '-',
+      'المراجع': master ? (getDisplayName(master.reviewer || master['المراجع']) || '-') : '-',
+      'حالة المراجعة': master ? (master.review_status || master['حالة المراجعة'] || '-') : '-'
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 20 }, { wch: 16 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'الطلبات المكررة');
+
+  const dateLabel = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(workbook, `الطلبات_المكررة_${dateLabel}.xlsx`);
+}
+
+// بيشيل الطلبات المكررة (الموجودة بالفعل في قاعدة البيانات) من الملف المرفوع حاليًا،
+// عشان متتوزعش تاني ضمن التوزيعة الجديدة.
+function removeDuplicateOrdersFromCsv() {
+  const dupExisting = window.lastCsvDupExisting || [];
+  if (dupExisting.length === 0) { alert('لا توجد أرقام مكررة لإزالتها.'); return; }
+
+  const confirmRemove = confirm(`هل أنت متأكد من إزالة ${dupExisting.length} طلب مكرر من الملف؟ لن يتم تضمينهم في التوزيعة الجديدة.`);
+  if (!confirmRemove) return;
+
+  const dupSet = new Set(dupExisting.map(String));
+  parsedCsvData = parsedCsvData.filter(row => !dupSet.has(getCsvRowOrderNumber(row)));
+  renderCsvPreview(parsedCsvData);
 }
 
 // بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بتاريخ اليوم بالظبط

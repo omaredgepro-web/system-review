@@ -11,7 +11,7 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
- 
+
 function getUsernames() {
   return ALL_PROFILES.map(p => p.username);
 }
@@ -3065,4 +3065,56 @@ function exportCsvPreviewToExcel() {
   const now = new Date();
   const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   XLSX.writeFile(workbook, `معاينة_التوزيع_${stamp}.xlsx`);
+}
+
+// ============================================================
+// تحميل طلبات المراجع الحالي بس (باسم الحالة، تاريخ المراجعة، وسبب الرفض)
+// متاحة لأي حد مسجل دخول - مراجع أو أدمن - وبتاخد بس طلباته هو، حتى لو أدمن.
+// ============================================================
+function exportMyOrdersToExcel() {
+  if (!currentUser) {
+    alert('لازم تكون مسجل دخول الأول.');
+    return;
+  }
+  if (!window.allData || window.allData.length === 0) {
+    alert('لا يوجد طلبات محمّلة حاليًا في التاريخ المحدد.');
+    return;
+  }
+
+  const myOrders = window.allData.filter(order => {
+    const reviewerName = order.reviewer || order['المراجع'];
+    return reviewerName === currentUser.username || reviewerName === currentUser.name;
+  });
+
+  if (myOrders.length === 0) {
+    alert('لا يوجد طلبات موزّعة عليك في التاريخ المحدد حاليًا.');
+    return;
+  }
+
+  const dateLabel = document.getElementById('date-filter').value || 'غير محدد';
+
+  const rows = myOrders.map(order => {
+    const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
+    const company = order.company || order['الشركة'] || '-';
+    const progressStatus = order.status || order['الحالة'] || '-';
+    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
+    const date = order.date || extractDateString(order) || '-';
+    const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
+
+    return {
+      'رقم الطلب': orderNum,
+      'الشركة': company,
+      'حالة المراجعة': progressStatus,
+      'المراجعة': reviewStatus,
+      'التاريخ': date,
+      'سبب الرفض': rejectionReason
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 30 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'طلباتي');
+  XLSX.writeFile(workbook, `طلبات_${currentUser.name}_${dateLabel}.xlsx`);
 }

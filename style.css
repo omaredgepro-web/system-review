@@ -232,6 +232,7 @@ td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--card-bo
 .badge-unreviewed { background: rgba(234, 179, 8, 0.16); color: #eab308; }
 .badge-reprint { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
 .badge-error { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
+.badge-qc { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
 
 .btn-open { background-color: var(--accent-purple); color: white; padding: 5px 14px; font-size: 12px; border-radius: 6px; cursor: pointer; border: none; }
 .btn-delete-row { background-color: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 5px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; }
@@ -250,6 +251,7 @@ td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--card-bo
 
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
 .modal { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; width: 450px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+.modal-lg { width: 820px; max-width: 92vw; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .modal-header h3 { font-size: 18px; }
 .close-btn { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }

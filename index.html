@@ -22,6 +22,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   
   <!-- ربط ملف التنسيقات CSS -->
@@ -150,6 +151,7 @@
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" id="sidebar-toggle-btn" onclick="toggleSidebar()">📊 إحصائيات المراجعين</button>
+              <button class="btn btn-secondary" onclick="openChartsModal()">📈 الرسوم البيانية</button>
               <span id="active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
               <button class="btn btn-secondary" onclick="exportMyOrdersToExcel()">📥 تحميل طلباتي (Excel)</button>
               <div id="admin-export-actions" style="display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -660,10 +662,11 @@
           <option value="مقبول">مقبول</option>
           <option value="مرفوض">مرفوض</option>
           <option value="معلق">معلق</option>
+          <option value="Qc">Qc</option>
         </select>
       </div>
       <div class="form-group" id="rejection-reason-group">
-        <label>سبب الرفض <span style="color: #f87171;">*</span></label>
+        <label id="rejection-reason-label">سبب الرفض <span style="color: #f87171;">*</span></label>
         <textarea id="modal-rejection-reason" class="form-control" placeholder="اكتب سبب الرفض هنا..."></textarea>
       </div>
       <div class="modal-actions">
@@ -715,6 +718,25 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeCertModal()">إلغاء</button>
         <button class="btn btn-primary" id="cert-btn-save-modal" onclick="saveCertUpdate()" style="width: auto;">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal الرسوم البيانية -->
+  <div class="modal-overlay" id="charts-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3 id="charts-title">الرسوم البيانية</h3>
+        <button class="close-btn" onclick="closeChartsModal()">&times;</button>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+        <button class="btn btn-primary chart-view-btn" id="chart-view-btn-overview" onclick="showChartView('overview')" style="width: auto; padding: 8px 16px;">📊 نظرة عامة (مقبول/مرفوض)</button>
+        <button class="btn btn-secondary chart-view-btn" id="chart-view-btn-companies" onclick="showChartView('companies')" style="width: auto; padding: 8px 16px;">🏢 الشركات</button>
+        <button class="btn btn-secondary chart-view-btn" id="chart-view-btn-reviewers" onclick="showChartView('reviewers')" style="width: auto; padding: 8px 16px;">👤 المراجعين</button>
+      </div>
+      <p id="charts-subtitle" style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;"></p>
+      <div style="position: relative; width: 100%; height: 420px;">
+        <canvas id="charts-canvas"></canvas>
       </div>
     </div>
   </div>

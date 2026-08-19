@@ -7,7 +7,7 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
-        
+       
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
@@ -205,6 +205,44 @@ async function setupUserSession(profile) {
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
   loadData();
+  subscribeToLiveUpdates();
+}
+
+// اشتراك Realtime: أي إضافة/تعديل/حذف يحصل في الجداول دي (من أي حد، من أي مكان)
+// هيوصل هنا لحظيًا، ويحدث الشاشة تلقائيًا من غير ما حد يدوس زرار تحديث يدوي.
+// ملحوظة: التحديث بيتعمل بطريقة "مُهدّأة" (debounce) عشان لو حصلت أكتر من عملية
+// قريبة من بعض (زي رفع ملف فيه مية طلب مرة واحدة)، الشاشة تتحدث مرة واحدة بس مش مية مرة.
+let liveUpdateDebounceTimer = null;
+function scheduleLiveDataRefresh() {
+  clearTimeout(liveUpdateDebounceTimer);
+  liveUpdateDebounceTimer = setTimeout(() => {
+    loadData();
+  }, 700);
+}
+
+let liveUpdatesChannel = null;
+function subscribeToLiveUpdates() {
+  if (liveUpdatesChannel) return; // تجنب الاشتراك أكتر من مرة لو الفانكشن اتنادت تاني
+
+  liveUpdatesChannel = supabaseClient
+    .channel('live-orders-updates')
+    .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, () => {
+      scheduleLiveDataRefresh();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: CERT_TABLE_NAME }, () => {
+      scheduleLiveDataRefresh();
+    })
+    .subscribe((status) => {
+      const indicator = document.getElementById('live-status-indicator');
+      if (!indicator) return;
+      if (status === 'SUBSCRIBED') {
+        indicator.innerText = '🟢 مباشر';
+        indicator.title = 'التحديثات وصلاك لحظيًا الآن';
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        indicator.innerText = '🟡 غير متصل';
+        indicator.title = 'التحديث اللحظي مش شغال دلوقتي، استخدم زرار التحديث اليدوي';
+      }
+    });
 }
 
 function populateReviewerDropdowns() {

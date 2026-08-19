@@ -209,15 +209,41 @@ async function setupUserSession(profile) {
 }
 
 // اشتراك Realtime: أي إضافة/تعديل/حذف يحصل في الجداول دي (من أي حد، من أي مكان)
-// هيوصل هنا لحظيًا، ويحدث الشاشة تلقائيًا من غير ما حد يدوس زرار تحديث يدوي.
-// ملحوظة: التحديث بيتعمل بطريقة "مُهدّأة" (debounce) عشان لو حصلت أكتر من عملية
-// قريبة من بعض (زي رفع ملف فيه مية طلب مرة واحدة)، الشاشة تتحدث مرة واحدة بس مش مية مرة.
-let liveUpdateDebounceTimer = null;
-function scheduleLiveDataRefresh() {
-  clearTimeout(liveUpdateDebounceTimer);
-  liveUpdateDebounceTimer = setTimeout(() => {
-    loadData();
-  }, 700);
+// هيوصل هنا لحظيًا. بدل ما نعيد تحميل الجدول كله من الصفر في كل مرة (بطيء ومزعج)،
+// بناخد التغيير من رسالة الـ Realtime نفسها ونحدث بس الصف المتأثر في الذاكرة - تحديث فوري.
+function patchMasterDataRow(masterArray, eventType, newRow, oldRow) {
+  if (eventType === 'DELETE') {
+    const deletedId = oldRow && oldRow.id;
+    return masterArray.filter(row => row.id !== deletedId);
+  }
+
+  const incomingId = newRow && newRow.id;
+  const idx = masterArray.findIndex(row => row.id === incomingId);
+
+  if (eventType === 'INSERT') {
+    if (idx !== -1) return masterArray; // موجود بالفعل (تكرار رسالة)، تجاهل
+    return [...masterArray, newRow];
+  }
+
+  // UPDATE
+  if (idx === -1) return [...masterArray, newRow]; // مش موجود عندنا لأي سبب، ضيفه
+  const updated = masterArray.slice();
+  updated[idx] = newRow;
+  return updated;
+}
+
+function handleLiveChange(tableName, payload) {
+  const { eventType, new: newRow, old: oldRow } = payload;
+
+  if (tableName === TABLE_NAME) {
+    window.masterData = patchMasterDataRow(window.masterData || [], eventType, newRow, oldRow);
+    applyDateFiltering();
+  } else if (tableName === CERT_TABLE_NAME) {
+    certMasterData = patchMasterDataRow(certMasterData || [], eventType, newRow, oldRow);
+    if (typeof certDataLoaded !== 'undefined' && certDataLoaded) {
+      applyCertDateFiltering();
+    }
+  }
 }
 
 let liveUpdatesChannel = null;
@@ -226,11 +252,11 @@ function subscribeToLiveUpdates() {
 
   liveUpdatesChannel = supabaseClient
     .channel('live-orders-updates')
-    .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, () => {
-      scheduleLiveDataRefresh();
+    .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, (payload) => {
+      handleLiveChange(TABLE_NAME, payload);
     })
-    .on('postgres_changes', { event: '*', schema: 'public', table: CERT_TABLE_NAME }, () => {
-      scheduleLiveDataRefresh();
+    .on('postgres_changes', { event: '*', schema: 'public', table: CERT_TABLE_NAME }, (payload) => {
+      handleLiveChange(CERT_TABLE_NAME, payload);
     })
     .subscribe((status) => {
       const indicator = document.getElementById('live-status-indicator');

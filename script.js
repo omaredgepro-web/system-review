@@ -712,7 +712,12 @@ function applyCsvUploadDateToAllRows() {
 
   if (parsedCsvData && parsedCsvData.length > 0) {
     parsedCsvData.forEach(row => { row.date = dateInput.value; });
+
+    const cleanupResult = autoCleanCsvDuplicates();
     renderCsvPreview(parsedCsvData);
+
+    const report = buildDuplicateCleanupReport(cleanupResult);
+    if (report) alert(report);
   }
 
   statusEl.innerText = `✅ الطلبات هتتسجل بتاريخ: ${dateInput.value}`;
@@ -932,15 +937,15 @@ async function handleMultipleFiles(fileList) {
     });
 
     parsedCsvData = parsedCsvData.concat(allNewRows); // إضافة على اللي موجود بالفعل، مش استبدال
+
+    // ============ منع تكرار الطلب في نفس اليوم تلقائيًا (بدون الحاجة لأي زرار يدوي) ============
+    const cleanupResult = autoCleanCsvDuplicates();
+
     document.getElementById('file-name-display').innerText = `تم إضافة: ${namesLabel} (الإجمالي الآن ${parsedCsvData.length} طلب)`;
     renderCsvPreview(parsedCsvData);
 
-    // تنبيه منبثق فوري لو فيه طلبات من الملف اللي اترفع بس دلوقتي متسجلة بالفعل بتاريخ النهاردة
-    // (ده أخطر من التكرار العادي لأنه معناه إن الطلب ممكن يتراجع مرتين في نفس اليوم غلط)
-    const todayDupInNewRows = getTodayDuplicateOrderNumbers(allNewRows);
-    if (todayDupInNewRows.length > 0) {
-      alert(`🚨 تنبيه: ${todayDupInNewRows.length} رقم طلب من الملف اللي رفعته دلوقتي مسجل بالفعل بتاريخ النهاردة في قاعدة البيانات.\n\nممكن يكون الطلب ده اتراجع مرتين غلط. راجع قسم "🔁 فحص أرقام الطلبات المكررة" تحت قبل ما تكمل.`);
-    }
+    const report = buildDuplicateCleanupReport(cleanupResult);
+    if (report) alert(report);
   } catch (err) {
     alert('تعذّر قراءة أحد الملفات: ' + err.message);
   }
@@ -1071,6 +1076,114 @@ function handleFileDrop(event) {
 }
 
 // ============ توزيع طلبات الطباعة: رفع أرقام طلبات جديدة لجدول الطباعة (Layout) ============
+// ============ منع تكرار الطلب في نفس يوم الرفع (تلقائي) ============
+// النطاق: "نفس اليوم" = نفس التاريخ المحدد فوق لهذه الدفعة (أو تاريخ النهاردة لو لسه المستخدم مختارش تاريخ).
+function getCsvUploadTargetDateIso() {
+  const dateInput = document.getElementById('csv-upload-date-input');
+  return (dateInput && dateInput.value) ? dateInput.value : new Date().toISOString().split('T')[0];
+}
+
+// بيرجّع الطلب المسجل بالفعل في قاعدة البيانات بنفس رقم الطلب ونفس التاريخ بالظبط (مش أي تاريخ تاني)
+function getMasterOrderByNumberAndDate(orderNum, dateIso) {
+  return (window.masterData || []).find(o =>
+    String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum) &&
+    extractDateString(o) === dateIso
+  );
+}
+
+// بيشيل أي رقم طلب اتكرر أكتر من مرة داخل نفس الدفعة اللي بتترفع دلوقتي (نفس الملف أو أكتر من ملف مع بعض)،
+// ومسيب أول ظهور بس لكل رقم.
+function removeWithinBatchDuplicates(rows) {
+  const seen = new Set();
+  let removedCount = 0;
+  const kept = rows.filter(row => {
+    const num = getCsvRowOrderNumber(row);
+    if (!num) return true;
+    if (seen.has(num)) { removedCount++; return false; }
+    seen.add(num);
+    return true;
+  });
+  return { kept, removedCount };
+}
+
+// القاعدة الرسمية لمنع تكرار الطلب في نفس اليوم (بتتطبق على أي رقم طلب موجود بالفعل في قاعدة البيانات
+// بنفس تاريخ الدفعة الحالية):
+// - لو الطلب الموجود حالته "مقبول"  → الصف الجديد يتشال، ويفضل المقبول القديم زي ما هو من غير أي تغيير.
+// - لو الطلب الموجود حالته "مرفوض":
+//     • ولو الصف الجديد جاي من الملف معلّم بعمود "الحالة"/"حالة المراجعة" = "تم إعادة المراجعة"
+//       → يتسجل عادي (تكرار مقصود لإعادة المراجعة)، وياخد نفس المراجع اللي راجعه قبل كده.
+//     • غير كده (مفيش علامة إعادة مراجعة) → يتشال (يعتبر تكرار غير مبرر).
+// - أي حالة تانية للطلب الموجود (معلق/Qc/لسه ماخدش قرار) → الصف الجديد يتشال برضو، عشان منسمحش
+//   بنفس الطلب يبقى موجود مرتين وهو أصلاً لسه مقرّرش فيه حاجة.
+function applyDuplicateRuleToRows(rows) {
+  const targetDate = getCsvUploadTargetDateIso();
+  const log = { accepted: 0, rejectedNotFlagged: 0, stillPending: 0, allowedReReview: 0 };
+
+  const kept = rows.filter(row => {
+    const num = getCsvRowOrderNumber(row);
+    if (!num) return true;
+
+    const master = getMasterOrderByNumberAndDate(num, targetDate);
+    if (!master) return true; // مش موجود بنفس اليوم ده، مش تكرار أصلاً
+
+    const existingStatus = master.review_status || master['حالة المراجعة'];
+
+    if (existingStatus === 'مقبول') {
+      log.accepted++;
+      return false;
+    }
+
+    if (existingStatus === 'مرفوض') {
+      const incomingStatus = (row.status || row['الحالة'] || '').toString().trim();
+      if (incomingStatus === 'تم إعادة المراجعة') {
+        const prevReviewer = master.reviewer || master['المراجع'];
+        if (prevReviewer) { row.reviewer = prevReviewer; row['المراجع'] = prevReviewer; }
+        log.allowedReReview++;
+        return true;
+      }
+      log.rejectedNotFlagged++;
+      return false;
+    }
+
+    log.stillPending++;
+    return false;
+  });
+
+  return { kept, log, targetDate };
+}
+
+// بيشغّل قاعدة منع التكرار كاملة (تكرار داخل الدفعة + تكرار مع قاعدة البيانات بنفس اليوم) على parsedCsvData
+// الحالية، ويرجّع تقرير بكل حاجة اتشالت وليه، عشان يتعرض للمستخدم.
+function autoCleanCsvDuplicates() {
+  const beforeCount = parsedCsvData.length;
+
+  const batchResult = removeWithinBatchDuplicates(parsedCsvData);
+  parsedCsvData = batchResult.kept;
+
+  const dupResult = applyDuplicateRuleToRows(parsedCsvData);
+  parsedCsvData = dupResult.kept;
+
+  return {
+    totalRemoved: beforeCount - parsedCsvData.length,
+    withinBatchRemoved: batchResult.removedCount,
+    log: dupResult.log,
+    targetDate: dupResult.targetDate
+  };
+}
+
+function buildDuplicateCleanupReport(result) {
+  if (result.totalRemoved === 0) return null;
+  const log = result.log;
+  let msg = `🚫 تم منع تكرار الطلب في نفس اليوم (${result.targetDate}) تلقائيًا:\n\n`;
+  if (result.withinBatchRemoved > 0) msg += `• ${result.withinBatchRemoved} نسخة مكررة داخل الملف/الملفات نفسها.\n`;
+  if (log.accepted > 0) msg += `• ${log.accepted} طلب كان "مقبول" من قبل بنفس اليوم — اتشال، والمقبول القديم فاضل زي ما هو.\n`;
+  if (log.rejectedNotFlagged > 0) msg += `• ${log.rejectedNotFlagged} طلب كان "مرفوض" من قبل بنفس اليوم، بدون علامة "تم إعادة المراجعة" — اتشال كتكرار غير مبرر.\n`;
+  if (log.stillPending > 0) msg += `• ${log.stillPending} طلب موجود بالفعل بنفس اليوم ولسه معلّق/تحت المراجعة — اتشال.\n`;
+  if (log.allowedReReview > 0) msg += `\n✅ اتسمح بمرور ${log.allowedReReview} طلب "إعادة مراجعة" فعلي (كان مرفوض ومعلّم بإعادة المراجعة)، وهياخد نفس المراجع اللي راجعه قبل كده.\n`;
+  msg += `\nالإجمالي بعد التنظيف: ${parsedCsvData.length} طلب.`;
+  return msg;
+}
+
 // بيقرا العمود اللي فيه رقم الطلب بس، بغض النظر عن اسمه بالظبط في الملف
 // (رقم الطلب / order_number / requestnumber / request number ...إلخ) وبيتجاهل كل الأعمدة التانية.
 function normalizeHeaderKey(key) {
@@ -1532,11 +1645,11 @@ function renderCsvDuplicatesPanel(data) {
   }
 
   if (dupExisting.length > 0) {
-    html += `<p style="color: var(--badge-hold-text); font-weight:700; margin-bottom:6px;">⚠️ ${dupExisting.length} رقم طلب موجود بالفعل في قاعدة البيانات:</p>`;
-    html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">تنبيه: الرفع هيتم بدون معرف (id) مطابق، يعني لو رفعتهم هيتسجلوا كصفوف جديدة مكررة، مش هيستبدلوا القديمة.</p>`;
+    html += `<p style="color: var(--badge-hold-text); font-weight:700; margin-bottom:6px;">ℹ️ ${dupExisting.length} رقم طلب سبق وجوده في قاعدة البيانات (بأي تاريخ، مش بالضرورة نفس تاريخ الدفعة دي):</p>`;
+    html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">ملحوظة: التكرار في نفس تاريخ الدفعة الحالية بيتم التعامل معاه تلقائيًا أول ما ترفع الملف (يتشال، إلا لو "مرفوض" ومعلّم "تم إعادة المراجعة"). اللستة دي بتوريك أي رقم اتشاف قبل كده في تاريخ تاني برضو، للمراجعة فقط.</p>`;
     html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
     html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="downloadDuplicateOrdersExcel()">⬇️ تحميل شيت إكسيل بالمكررة</button>`;
-    html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="resolveExistingDuplicatesBySmartRule()">🤖 معالجة تلقائية (استبعاد المقبول + إبقاء المرفوض بنفس المراجع)</button>`;
+    html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="resolveExistingDuplicatesBySmartRule()">🤖 إعادة تطبيق قاعدة منع التكرار الآن</button>`;
     html += `</div>`;
     html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px;">`;
     html += dupExisting.join('، ');
@@ -1623,65 +1736,42 @@ function downloadDuplicateOrdersExcel() {
   XLSX.writeFile(workbook, `الطلبات_المكررة_${dateLabel}.xlsx`);
 }
 
-// بيفحص كل رقم طلب موجود بالفعل في قاعدة البيانات، وبيطبق القاعدة دي تلقائيًا:
-// - لو حالته "مقبول" من قبل → يتشال من الملف تمامًا (مش هيتضاف تاني، عشان متتكررش موافقة).
-// - لو حالته "مرفوض" من قبل → يفضل في الملف، لكن بياخد نفس اسم المراجع اللي راجعه قبل كده
-//   (بدل ما يتوزع على حد جديد عشوائي)، وده بيمنعه من الدخول في التوزيع التلقائي تاني.
-// - أي حالة تانية (معلق/Qc/لسه) → تفضل زي ما هي من غير أي تغيير.
+// زرار يدوي (للمراجعة/الطمأنينة بعد أي تعديل يدوي على الصفوف) — بيطبّق بالظبط نفس القاعدة اللي
+// بتتشغل تلقائيًا أول ما ترفع ملف أو تغيّر تاريخ الدفعة (applyDuplicateRuleToRows فوق).
 function resolveExistingDuplicatesBySmartRule() {
-  const dupExisting = window.lastCsvDupExisting || [];
-  if (dupExisting.length === 0) { alert('لا توجد أرقام مكررة موجودة بالفعل في قاعدة البيانات لمعالجتها.'); return; }
+  const targetDate = getCsvUploadTargetDateIso();
+  const preview = applyDuplicateRuleToRows(parsedCsvData);
 
+  if (preview.kept.length === parsedCsvData.length) {
+    alert(`لا توجد طلبات مكررة بنفس تاريخ الدفعة (${targetDate}) لمعالجتها.`);
+    return;
+  }
+
+  const log = preview.log;
   const confirmProcess = confirm(
-    `هيتم فحص ${dupExisting.length} رقم طلب موجودين بالفعل في قاعدة البيانات:\n` +
-    `- اللي حالته "مقبول" هيتشال من الملف تمامًا.\n` +
-    `- اللي حالته "مرفوض" هيفضل في الملف، وهيتحط عليه نفس اسم المراجع السابق.\n` +
-    `- أي حالة تانية (معلق/Qc/لسه) هتفضل زي ما هي.\n\nتأكيد؟`
+    `هيتم فحص الطلبات اللي موجودة بالفعل بنفس تاريخ الدفعة (${targetDate}):\n` +
+    `- اللي حالته "مقبول" هيتشال من الملف تمامًا (${log.accepted} طلب).\n` +
+    `- اللي حالته "مرفوض" ومعلّم "تم إعادة المراجعة" هيفضل، وهيتحط عليه نفس المراجع السابق (${log.allowedReReview} طلب).\n` +
+    `- اللي حالته "مرفوض" من غير علامة إعادة مراجعة هيتشال (${log.rejectedNotFlagged} طلب).\n` +
+    `- اللي لسه معلّق/تحت المراجعة هيتشال برضو (${log.stillPending} طلب).\n\nتأكيد؟`
   );
   if (!confirmProcess) return;
 
-  const dupSet = new Set(dupExisting.map(String));
-  let excludedCount = 0;
-  let carriedReviewerCount = 0;
-
-  parsedCsvData = parsedCsvData.filter(row => {
-    const num = getCsvRowOrderNumber(row);
-    if (!dupSet.has(num)) return true; // مش مكرر أصلاً، سيبه زي ما هو
-
-    const master = getMasterOrderByNumber(num);
-    const status = master ? (master.review_status || master['حالة المراجعة']) : null;
-
-    if (status === 'مقبول') {
-      excludedCount++;
-      return false; // استبعاد تمامًا من الملف
-    }
-
-    if (status === 'مرفوض' && master) {
-      const prevReviewer = master.reviewer || master['المراجع'];
-      if (prevReviewer) {
-        row.reviewer = prevReviewer;
-        row['المراجع'] = prevReviewer;
-        carriedReviewerCount++;
-      }
-      return true; // يفضل في الملف، هيترفع تاني بنفس المراجع
-    }
-
-    return true; // أي حالة تانية، سيبه زي ما هو من غير تغيير
-  });
-
+  const removedNow = parsedCsvData.length - preview.kept.length;
+  parsedCsvData = preview.kept;
   renderCsvPreview(parsedCsvData);
-  alert(`تم:\n- استبعاد ${excludedCount} طلب كان "مقبول" من قبل.\n- نقل نفس المراجع السابق لـ ${carriedReviewerCount} طلب كان "مرفوض" من قبل.`);
+  alert(buildDuplicateCleanupReport({ totalRemoved: removedNow, withinBatchRemoved: 0, log, targetDate }) || 'تم التنظيف.');
 }
 
-// بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بتاريخ اليوم بالظبط
+// بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بنفس تاريخ الدفعة الحالية بالظبط
 function getTodayDuplicateOrderNumbers(data) {
-  const todayIso = new Date().toISOString().split('T')[0];
-  const todaySet = new Set(
+  const targetDate = getCsvUploadTargetDateIso();
+  const targetSet = new Set(
     (window.masterData || [])
-      .filter(o => extractDateString(o) === todayIso)
+      .filter(o => extractDateString(o) === targetDate)
       .map(o => String(o.order_number || o.order_no || o['رقم الطلب']))
   );
-  return [...new Set(data.map(getCsvRowOrderNumber))].filter(num => num && todaySet.has(num));
+  return [...new Set(data.map(getCsvRowOrderNumber))].filter(num => num && targetSet.has(num));
 }
 
 // بيشيل كل طلبات شركة معينة من الملف المرفوع قبل التوزيع/الرفع لـ Supabase

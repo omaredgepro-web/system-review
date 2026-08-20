@@ -236,16 +236,31 @@ function patchMasterDataRow(masterArray, eventType, newRow, oldRow) {
   return updated;
 }
 
+// تحديث البيانات نفسها بيحصل فورًا مع كل رسالة توصل (عشان الدقة)، لكن تحديث الشاشة (إعادة الرسم)
+// بيتأجل شوية (250ms) عشان لو وصلت كذا رسالة قريبة من بعض (زي حذف/توزيع جماعي لعشرات الصفوف
+// دفعة واحدة)، الشاشة تتحدث مرة واحدة بس في الآخر، بدل ما تومض/تتحدث مع كل صف لوحده.
+let liveReviewRenderTimer = null;
+function scheduleLiveReviewRender() {
+  clearTimeout(liveReviewRenderTimer);
+  liveReviewRenderTimer = setTimeout(() => applyDateFiltering(), 250);
+}
+
+let liveCertRenderTimer = null;
+function scheduleLiveCertRender() {
+  clearTimeout(liveCertRenderTimer);
+  liveCertRenderTimer = setTimeout(() => applyCertDateFiltering(), 250);
+}
+
 function handleLiveChange(tableName, payload) {
   const { eventType, new: newRow, old: oldRow } = payload;
 
   if (tableName === TABLE_NAME) {
     window.masterData = patchMasterDataRow(window.masterData || [], eventType, newRow, oldRow);
-    applyDateFiltering();
+    scheduleLiveReviewRender();
   } else if (tableName === CERT_TABLE_NAME) {
     certMasterData = patchMasterDataRow(certMasterData || [], eventType, newRow, oldRow);
     if (typeof certDataLoaded !== 'undefined' && certDataLoaded) {
-      applyCertDateFiltering();
+      scheduleLiveCertRender();
     }
   }
 }

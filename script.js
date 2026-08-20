@@ -185,7 +185,9 @@ async function setupUserSession(profile) {
   document.getElementById('user-welcome-text').innerText = `مرحباً بك: ${profile.name} (${profile.role === 'admin' ? 'أدمن' : 'مراجع'})`;
 
   const isAdmin = profile.role === 'admin';
-  document.getElementById('admin-tab-btn').style.display = isAdmin ? 'block' : 'none';
+  // تابات التوزيع (رفع/توزيع طلبات المراجعة، وتوزيع طلبات الطباعة) بقت محصورة على عمر وموندي بس -
+  // باقي الأدمنز يقدروا يشوفوا كل حاجة تانية لكن مش يوزعوا طلبات جديدة.
+  document.getElementById('admin-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('select-all-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
@@ -193,9 +195,11 @@ async function setupUserSession(profile) {
   if (bulkDeleteBtn) bulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   const certBulkDeleteBtn = document.getElementById('cert-bulk-delete-btn');
   if (certBulkDeleteBtn) certBulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
+  const certReassignControls = document.getElementById('cert-reassign-controls');
+  if (certReassignControls) certReassignControls.style.display = canDelete() ? 'flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
-  document.getElementById('print-distribute-tab-btn').style.display = isAdmin ? 'block' : 'none';
+  document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
 
   // تغيير تاريخ الطلبات المعروضة متاح للأدمن بس؛ المراجع دايمًا شايف أحدث تاريخ متاح
   document.getElementById('date-filter-label').style.display = isAdmin ? 'inline' : 'none';
@@ -1177,6 +1181,7 @@ function selectAllPrintDistUsers(checked) {
 
 // توزيع تلقائي متساوي (Round-robin) على الأدمن المختارين، مع وقف عند التارجت لو محدد
 function runPrintBalancedDistribution() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
   if (parsedPrintOrderNumbers.length === 0) {
     alert('برجاء رفع ملف أولاً.');
     return;
@@ -1502,6 +1507,10 @@ function renderCsvDuplicatesPanel(data) {
 
   if (dupWithinFile.length > 0) {
     html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-bottom:6px;">⚠️ ${dupWithinFile.length} رقم طلب مكرر داخل نفس الملف (ظهر أكتر من مرة):</p>`;
+    html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
+    html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="downloadWithinFileDuplicatesExcel()">⬇️ تحميل شيت إكسيل بالمكرر (${dupWithinFile.length})</button>`;
+    html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="removeWithinFileDuplicatesFromCsv()">🗑️ إزالة النسخ الزيادة (الإبقاء على نسخة واحدة)</button>`;
+    html += `</div>`;
     html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-bottom:14px;">`;
     html += dupWithinFile.map(num => `${num} <span style="color: var(--badge-reject-text);">(×${seenCounts[num]})</span>`).join('، ');
     html += `</div>`;
@@ -1512,18 +1521,65 @@ function renderCsvDuplicatesPanel(data) {
     html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">تنبيه: الرفع هيتم بدون معرف (id) مطابق، يعني لو رفعتهم هيتسجلوا كصفوف جديدة مكررة، مش هيستبدلوا القديمة.</p>`;
     html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
     html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="downloadDuplicateOrdersExcel()">⬇️ تحميل شيت إكسيل بالمكررة</button>`;
-    html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="removeDuplicateOrdersFromCsv()">🗑️ إزالتها من الملف/التوزيعة الجديدة</button>`;
+    html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="resolveExistingDuplicatesBySmartRule()">🤖 معالجة تلقائية (استبعاد المقبول + إبقاء المرفوض بنفس المراجع)</button>`;
     html += `</div>`;
     html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px;">`;
     html += dupExisting.join('، ');
     html += `</div>`;
   }
 
-  // بنخزن آخر لستة أرقام مكررة موجودة بالفعل في قاعدة البيانات عشان زراير التحميل/الإزالة
-  // فوق تقدر تستخدمها من غير ما نعيد حساب الفلترة كلها تاني.
+  // بنخزن آخر لستة أرقام مكررة (بنوعيها) عشان زراير التحميل/المعالجة فوق تقدر تستخدمها
+  // من غير ما نعيد حساب الفلترة كلها تاني.
   window.lastCsvDupExisting = dupExisting;
+  window.lastCsvDupWithinFile = dupWithinFile;
+  window.lastCsvDupWithinFileCounts = seenCounts;
 
   container.innerHTML = html;
+}
+
+// بيحمّل شيت إكسيل بالأرقام المكررة داخل نفس الملف المرفوع (مش الموجودة في قاعدة البيانات)
+function downloadWithinFileDuplicatesExcel() {
+  const dupNums = window.lastCsvDupWithinFile || [];
+  const counts = window.lastCsvDupWithinFileCounts || {};
+  if (dupNums.length === 0) { alert('لا توجد أرقام مكررة داخل الملف لتحميلها.'); return; }
+
+  const exportRows = dupNums.map(num => ({
+    'رقم الطلب': num,
+    'عدد مرات التكرار داخل الملف': counts[num] || 2
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 28 }, { wch: 26 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'مكرر داخل الملف');
+
+  const dateLabel = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(workbook, `مكرر_داخل_الملف_${dateLabel}.xlsx`);
+}
+
+// بيسيب نسخة واحدة بس من كل رقم طلب مكرر داخل نفس الملف، ويشيل النسخ الزيادة
+function removeWithinFileDuplicatesFromCsv() {
+  const dupNums = window.lastCsvDupWithinFile || [];
+  if (dupNums.length === 0) { alert('لا توجد نسخ مكررة داخل الملف لإزالتها.'); return; }
+
+  const confirmRemove = confirm(`هيتم الإبقاء على نسخة واحدة بس من كل رقم من الـ ${dupNums.length} رقم مكرر داخل الملف، والباقي هيتشال. تأكيد؟`);
+  if (!confirmRemove) return;
+
+  const dupSet = new Set(dupNums.map(String));
+  const seen = new Set();
+  const before = parsedCsvData.length;
+
+  parsedCsvData = parsedCsvData.filter(row => {
+    const num = getCsvRowOrderNumber(row);
+    if (!dupSet.has(num)) return true; // مش من المكررين، سيبه زي ما هو
+    if (seen.has(num)) return false; // ده نسخة زيادة من رقم اتشاف قبل كده، شيله
+    seen.add(num);
+    return true; // أول ظهور للرقم ده، سيبه
+  });
+
+  renderCsvPreview(parsedCsvData);
+  alert(`تم إزالة ${before - parsedCsvData.length} نسخة زيادة. باقي ${parsedCsvData.length} صف.`);
 }
 
 // بيحمّل شيت إكسيل بالطلبات المكررة (الموجودة بالفعل في قاعدة البيانات) مع اسم الشركة
@@ -1552,18 +1608,54 @@ function downloadDuplicateOrdersExcel() {
   XLSX.writeFile(workbook, `الطلبات_المكررة_${dateLabel}.xlsx`);
 }
 
-// بيشيل الطلبات المكررة (الموجودة بالفعل في قاعدة البيانات) من الملف المرفوع حاليًا،
-// عشان متتوزعش تاني ضمن التوزيعة الجديدة.
-function removeDuplicateOrdersFromCsv() {
+// بيفحص كل رقم طلب موجود بالفعل في قاعدة البيانات، وبيطبق القاعدة دي تلقائيًا:
+// - لو حالته "مقبول" من قبل → يتشال من الملف تمامًا (مش هيتضاف تاني، عشان متتكررش موافقة).
+// - لو حالته "مرفوض" من قبل → يفضل في الملف، لكن بياخد نفس اسم المراجع اللي راجعه قبل كده
+//   (بدل ما يتوزع على حد جديد عشوائي)، وده بيمنعه من الدخول في التوزيع التلقائي تاني.
+// - أي حالة تانية (معلق/Qc/لسه) → تفضل زي ما هي من غير أي تغيير.
+function resolveExistingDuplicatesBySmartRule() {
   const dupExisting = window.lastCsvDupExisting || [];
-  if (dupExisting.length === 0) { alert('لا توجد أرقام مكررة لإزالتها.'); return; }
+  if (dupExisting.length === 0) { alert('لا توجد أرقام مكررة موجودة بالفعل في قاعدة البيانات لمعالجتها.'); return; }
 
-  const confirmRemove = confirm(`هل أنت متأكد من إزالة ${dupExisting.length} طلب مكرر من الملف؟ لن يتم تضمينهم في التوزيعة الجديدة.`);
-  if (!confirmRemove) return;
+  const confirmProcess = confirm(
+    `هيتم فحص ${dupExisting.length} رقم طلب موجودين بالفعل في قاعدة البيانات:\n` +
+    `- اللي حالته "مقبول" هيتشال من الملف تمامًا.\n` +
+    `- اللي حالته "مرفوض" هيفضل في الملف، وهيتحط عليه نفس اسم المراجع السابق.\n` +
+    `- أي حالة تانية (معلق/Qc/لسه) هتفضل زي ما هي.\n\nتأكيد؟`
+  );
+  if (!confirmProcess) return;
 
   const dupSet = new Set(dupExisting.map(String));
-  parsedCsvData = parsedCsvData.filter(row => !dupSet.has(getCsvRowOrderNumber(row)));
+  let excludedCount = 0;
+  let carriedReviewerCount = 0;
+
+  parsedCsvData = parsedCsvData.filter(row => {
+    const num = getCsvRowOrderNumber(row);
+    if (!dupSet.has(num)) return true; // مش مكرر أصلاً، سيبه زي ما هو
+
+    const master = getMasterOrderByNumber(num);
+    const status = master ? (master.review_status || master['حالة المراجعة']) : null;
+
+    if (status === 'مقبول') {
+      excludedCount++;
+      return false; // استبعاد تمامًا من الملف
+    }
+
+    if (status === 'مرفوض' && master) {
+      const prevReviewer = master.reviewer || master['المراجع'];
+      if (prevReviewer) {
+        row.reviewer = prevReviewer;
+        row['المراجع'] = prevReviewer;
+        carriedReviewerCount++;
+      }
+      return true; // يفضل في الملف، هيترفع تاني بنفس المراجع
+    }
+
+    return true; // أي حالة تانية، سيبه زي ما هو من غير تغيير
+  });
+
   renderCsvPreview(parsedCsvData);
+  alert(`تم:\n- استبعاد ${excludedCount} طلب كان "مقبول" من قبل.\n- نقل نفس المراجع السابق لـ ${carriedReviewerCount} طلب كان "مرفوض" من قبل.`);
 }
 
 // بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بتاريخ اليوم بالظبط
@@ -1696,8 +1788,39 @@ function renderCustomDistRulesList() {
 }
 
 // بيطبّق كل القواعد بالترتيب: كل قاعدة بتاخد العدد الإجمالي المطلوب وتقسّمه نسبيًا بين الشركات
+// بياخد عدد "count" من صفوف الـ pool، بس بالتساوي بين حالات المراجعة المختلفة الموجودة
+// جوه الـ pool ده (زي "جاري مراجعة" و"تم إعادة المراجعة") - مش بنفس نسبتهم الأصلية.
+// مثال: لو الشركة فيها 70 "جاري مراجعة" و30 "تم إعادة المراجعة"، ومطلوب ناخد 50،
+// هياخد 25 من كل حالة (مش 35/15 حسب النسبة الأصلية).
+function pickBalancedByStatus(pool, count) {
+  const groups = {};
+  const order = [];
+  pool.forEach(row => {
+    const statusKey = row.status || row['الحالة'] || row['حالة المراجعة'] || 'غير محدد';
+    if (!groups[statusKey]) { groups[statusKey] = []; order.push(statusKey); }
+    groups[statusKey].push(row);
+  });
+  order.sort(); // ترتيب ثابت عشان التوزيع يكون متسق كل مرة
+
+  const picked = [];
+  let i = 0;
+  let emptyStreak = 0;
+  while (picked.length < count && emptyStreak < order.length) {
+    const key = order[i % order.length];
+    if (groups[key].length > 0) {
+      picked.push(groups[key].shift());
+      emptyStreak = 0;
+    } else {
+      emptyStreak++;
+    }
+    i++;
+  }
+  return picked;
+}
+
 // المختارة حسب نصيب كل شركة الفعلي من الطلبات غير الموزّعة بينهم (Largest Remainder Method لدقة أعلى)
 function applyCustomDistRules() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
   if (!ensureCsvUploadDateSelected()) return;
   if (!customDistRules || customDistRules.length === 0) {
     alert('لسه معملتش أي قاعدة توزيع مخصص. ضيف قاعدة الأول من فوق.');
@@ -1742,7 +1865,8 @@ function applyCustomDistRules() {
       }
 
       targets.forEach(t => {
-        const taken = companyPools[t.company].splice(0, Math.min(t.count, companyPools[t.company].length));
+        const wanted = Math.min(t.count, companyPools[t.company].length);
+        const taken = pickBalancedByStatus(companyPools[t.company], wanted);
         taken.forEach(row => { row[reviewerColKey] = rule.reviewer; row.reviewer = rule.reviewer; });
         if (taken.length > 0) companyBreakdown[t.company] = taken.length;
       });
@@ -1847,6 +1971,7 @@ function selectAllCsvDistUsers(checked) {
 // توزيع متوازن: كل الطلبات بيتم خلطها بالتبادل بين الشركات أولاً (عشان كل مراجع ياخد خليط من كل الشركات)،
 // بعدين بتتوزع بالتساوي (Round-robin) على المراجعين المختارين، مع وقف عند التارجت لو محدد.
 function runBalancedCsvDistribution() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
   if (!ensureCsvUploadDateSelected()) return;
   if (!parsedCsvData || parsedCsvData.length === 0) {
     alert('برجاء رفع ملف CSV أولاً.');
@@ -1863,9 +1988,14 @@ function runBalancedCsvDistribution() {
   const targetPerPerson = parseInt(targetInput.value, 10) || 0; // 0 = بدون تارجت، توزيع متساوي بس
 
   const getCompany = getCsvRowCompany;
+  // الصفوف اللي معاها مراجع متعيّن بالفعل (زي الطلبات اللي كانت مرفوضة قبل كده واتنقل لها
+  // نفس المراجع السابق تلقائيًا) بنسيبها زي ما هي، ومش بندخلها في التوزيع الجديد خالص.
+  const distributableRows = parsedCsvData.filter(row => !row.reviewer && !(row['المراجع']));
+  const alreadyAssignedCount = parsedCsvData.length - distributableRows.length;
+
   const pools = {};
   const poolOrder = [];
-  parsedCsvData.forEach(row => {
+  distributableRows.forEach(row => {
     const company = getCompany(row);
     if (!pools[company]) { pools[company] = []; poolOrder.push(company); }
     pools[company].push(row);
@@ -1875,7 +2005,7 @@ function runBalancedCsvDistribution() {
   // (زي "تم المراجعة" و"جاري المراجعة") لو موجود أكتر من حالة جوه نفس الشركة، عشان كل مراجع
   // ياخد خليط متوازن مش بس من الشركات لكن من الحالات كمان.
   const companyStatusPools = {};
-  parsedCsvData.forEach(row => {
+  distributableRows.forEach(row => {
     const company = getCompany(row);
     const statusKey = row.status || row['الحالة'] || row['حالة المراجعة'] || 'غير محدد';
     if (!companyStatusPools[company]) companyStatusPools[company] = {};
@@ -1926,7 +2056,7 @@ function runBalancedCsvDistribution() {
 
   sortParsedCsvDataByReviewer(selectedUsers);
   renderCsvPreview(parsedCsvData);
-  renderCsvDistSummary(counts, parsedCsvData.length - assignedCount);
+  renderCsvDistSummary(counts, distributableRows.length - assignedCount + alreadyAssignedCount);
 }
 
 function renderCsvDistSummary(counts, leftoverCount) {
@@ -1958,6 +2088,7 @@ function renderCsvDistSummary(counts, leftoverCount) {
 const ALLOWED_ORDER_COLUMNS = ['order_number', 'company', 'reviewer', 'date', 'status', 'review_status', 'rejection_reason'];
 
 async function uploadCsvToSupabase() {
+  if (!canDelete()) { alert('رفع/توزيع الطلبات متاح لعمر وموندي فقط'); return; }
   if (parsedCsvData.length === 0) return;
   if (!ensureCsvUploadDateSelected()) return;
 
@@ -3169,6 +3300,7 @@ function exportSelectedCertOrderNumbersTxt() {
 
 
 async function executeCertBulkReassign() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
   const newLayout = document.getElementById('cert-bulk-reassign-select').value;
   if (!newLayout) { alert('برجاء اختيار المسؤول من القائمة'); return; }
   if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتوزيع'); return; }

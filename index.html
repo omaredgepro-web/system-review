@@ -190,6 +190,12 @@
               <button class="btn btn-secondary" onclick="executeBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التغيير</button>
               <input type="date" id="bulk-date-input" class="date-input" style="padding: 4px 8px; font-size: 12px;">
               <button class="btn btn-secondary" onclick="executeBulkDateUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق التاريخ</button>
+              <select id="bulk-status-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
+                <option value="">تغيير حالة المراجعة إلى...</option>
+                <option value="جاري مراجعة">جاري مراجعة</option>
+                <option value="تم اعادة المراجعة">تم اعادة المراجعة</option>
+              </select>
+              <button class="btn btn-secondary" onclick="executeBulkStatusUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق الحالة</button>
               <button id="bulk-delete-btn" class="btn btn-danger" onclick="executeBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
             </div>
           </div>
@@ -243,6 +249,38 @@
           <button class="btn btn-secondary" onclick="document.getElementById('csv-file-input').click()">اختيار ملف أو أكتر (CSV أو Excel)</button>
           <button class="btn btn-danger" onclick="resetCsvUploadData()" style="margin-right: 8px;">🗑️ مسح الكل والبدء من جديد</button>
           <p id="file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
+        </div>
+
+        <!-- ⚡ إضافة سريعة: لإضافة عدد بسيط من الطلبات (زي 5) من غير رفع ملف كامل -->
+        <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleQuickAddPanel()">
+            <h3 style="font-size: 15px;">⚡ إضافة سريعة (بدون ملف)</h3>
+            <span id="quick-add-toggle-icon" style="color: var(--text-muted);">▼</span>
+          </div>
+          <div id="quick-add-panel" style="display: none; margin-top: 14px;">
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">لإضافة عدد بسيط من الطلبات (زي 5 طلبات) من غير ما تجهز ملف كامل. لو رقم الطلب مسجل بالفعل بنفس التاريخ المحدد، هيسألك تحدث المراجع بتاعه بدل ما يتكرر.</p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+              <div style="flex: 1; min-width: 180px;">
+                <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">الشركة</label>
+                <input type="text" id="quick-add-company" class="form-control" placeholder="اسم الشركة" list="quick-add-company-list">
+                <datalist id="quick-add-company-list"></datalist>
+              </div>
+              <div style="flex: 1; min-width: 180px;">
+                <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">المراجع</label>
+                <select id="quick-add-reviewer" class="filter-select" style="width: 100%;"><option value="">اختر مراجع</option></select>
+              </div>
+              <div style="flex: 1; min-width: 150px;">
+                <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">التاريخ</label>
+                <input type="date" id="quick-add-date" class="date-input" style="width: 100%;">
+              </div>
+            </div>
+            <textarea id="quick-add-textarea" class="form-control" rows="4" placeholder="ألصق أو اكتب أرقام الطلبات هنا، رقم في كل سطر (أو مفصولين بفاصلة)..." style="margin-bottom: 12px;"></textarea>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-primary" style="width: auto; padding: 8px 20px;" onclick="submitQuickAddOrders()">➕ إضافة الطلبات</button>
+              <button class="btn btn-secondary" style="width: auto; padding: 8px 20px;" onclick="selectQuickAddOrders()">🎯 تحديد فقط في الجدول (بدون إضافة)</button>
+              <button class="btn btn-secondary" onclick="document.getElementById('quick-add-textarea').value=''">مسح النص</button>
+            </div>
+          </div>
         </div>
 
         <!-- تاريخ إجباري للطلبات دي: لازم يتحدد قبل أي توزيع أو رفع لـ Supabase -->
@@ -720,9 +758,16 @@
           <button class="btn btn-secondary stats-view-btn" id="stats-view-btn-teams" onclick="showStatsView('teams')" style="width: auto; padding: 8px 16px;">👥 التيمات</button>
         </div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <select id="stats-modal-person-select" class="filter-select" onchange="selectStatsPerson(this.value)" style="width: 180px;">
-            <option value="">الكل</option>
-          </select>
+          <div style="position: relative;">
+            <button type="button" id="stats-multiselect-btn" class="filter-select" style="width: 180px; text-align: right; cursor: pointer;" onclick="toggleStatsMultiSelectPanel()">الكل ⌄</button>
+            <div id="stats-multiselect-panel" style="display: none; position: absolute; top: 110%; left: 0; z-index: 50; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; width: 220px; max-height: 260px; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.4);">
+              <div id="stats-multiselect-list" style="padding: 8px;"></div>
+              <div style="display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--card-border); position: sticky; bottom: 0; background: var(--card-bg);">
+                <button type="button" class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 12px;" onclick="clearStatsMultiSelect()">مسح</button>
+                <button type="button" class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" onclick="applyStatsMultiSelect()">تطبيق</button>
+              </div>
+            </div>
+          </div>
           <input type="text" id="stats-modal-search" class="search-input" placeholder="ابحث بالاسم..." oninput="filterStatsCards(this.value)" style="width: 200px;">
         </div>
       </div>

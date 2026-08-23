@@ -118,10 +118,21 @@ function toggleCompanySidebar() {
   openStatsModal('companies');
 }
 
-// ============ Modal إحصائيات المراجعين/الشركات ============
+// ============ Modal إحصائيات المراجعين/الشركات/التيمات ============
 let currentStatsView = 'reviewers';
 let lastReviewerStats = null;
 let lastCompanyStats = null;
+
+// تعريف التيمات: كل تيم مربوط بيوزرنيم قائدها (اللي بيسجل بيه دخول)، وأسماء أعضاءه
+// زي ما بتظهر في إحصائيات المراجعين (نفس الاسم اللي بيرجعه getDisplayName).
+const TEAMS_CONFIG = {
+  'sarhan':   { leadName: 'سرحان',   members: ['كريم', 'علي', 'نيره', 'مريم', 'ادم', 'الشيماء'] },
+  'aboheiba': { leadName: 'ابو هيبة', members: ['عمر جابر', 'عمرو', 'ايه', 'حجازي', 'زبادي'] },
+  'dina':     { leadName: 'دينا',     members: ['ايمان', 'يوسف', 'ادهم', 'رحمه', 'الشيخ'] }
+};
+
+// اليوزرنيمز دول بالذات بيشوفوا كل التيمات مع بعض (مش تيم واحد بس) بغض النظر عن أي حاجة تانية
+const TEAMS_FULL_VISIBILITY_USERNAMES = ['umar', 'mondy', 'sara', 'momen'];
 
 function openStatsModal(view) {
   document.getElementById('stats-modal').style.display = 'flex';
@@ -135,21 +146,58 @@ function closeStatsModal() {
 
 function showStatsView(view) {
   currentStatsView = view;
-  document.getElementById('stats-modal-title').innerText = view === 'reviewers' ? 'إحصائيات المراجعين' : 'إحصائيات الشركات';
+  const titles = { reviewers: 'إحصائيات المراجعين', companies: 'إحصائيات الشركات', teams: 'إحصائيات التيمات' };
+  document.getElementById('stats-modal-title').innerText = titles[view];
   document.getElementById('stats-view-btn-reviewers').className = 'btn stats-view-btn ' + (view === 'reviewers' ? 'btn-primary' : 'btn-secondary');
   document.getElementById('stats-view-btn-companies').className = 'btn stats-view-btn ' + (view === 'companies' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('stats-view-btn-teams').className = 'btn stats-view-btn ' + (view === 'teams' ? 'btn-primary' : 'btn-secondary');
   document.getElementById('stats-modal-search').value = '';
+  populateStatsPersonSelect();
   renderStatsCards();
 }
 
+// بتملأ قائمة "اسلك على شخص/شركة معينة" بأسماء التاب الحالي، عشان تقدر تختار واحد بس
+// بدل ما تدور عليه بالكتابة.
+function populateStatsPersonSelect() {
+  const select = document.getElementById('stats-modal-person-select');
+  select.innerHTML = '<option value="">الكل</option>';
+
+  if (currentStatsView === 'teams') {
+    select.style.display = 'none'; // مش محتاجينها في تاب التيمات، العدد صغير أصلاً
+    return;
+  }
+  select.style.display = '';
+
+  const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
+  if (!stats) return;
+  const names = Object.keys(stats).sort();
+  names.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.innerText = name;
+    select.appendChild(opt);
+  });
+}
+
+function selectStatsPerson(name) {
+  document.getElementById('stats-modal-search').value = '';
+  renderStatsCards(name ? name.toLowerCase() : '', !!name);
+}
+
 function filterStatsCards(query) {
+  document.getElementById('stats-modal-person-select').value = '';
   renderStatsCards(query.trim().toLowerCase());
 }
 
 // بيبني كروت الإحصائيات (كبيرة وواضحة، بشريط تقدم بصري) لأي مجموعة بيانات - مراجعين أو شركات
-function buildStatsCardsHtml(stats, filterQuery) {
+// exactMatch: لو true (جاي من قائمة الاختيار) بيدور على تطابق تام للاسم، مش بحث جزئي
+function buildStatsCardsHtml(stats, filterQuery, exactMatch) {
   let keys = Object.keys(stats);
-  if (filterQuery) keys = keys.filter(name => name.toLowerCase().includes(filterQuery));
+  if (filterQuery) {
+    keys = exactMatch
+      ? keys.filter(name => name.toLowerCase() === filterQuery)
+      : keys.filter(name => name.toLowerCase().includes(filterQuery));
+  }
   keys = keys.sort((a, b) => stats[b].total - stats[a].total);
 
   if (keys.length === 0) {
@@ -158,7 +206,8 @@ function buildStatsCardsHtml(stats, filterQuery) {
 
   return keys.map(name => {
     const item = stats[name];
-    const pending = Math.max(item.total - item.accepted - item.rejected, 0);
+    const reviewed = item.accepted + item.rejected;
+    const pending = Math.max(item.total - reviewed, 0);
     const acceptedPct = item.total > 0 ? (item.accepted / item.total) * 100 : 0;
     const rejectedPct = item.total > 0 ? (item.rejected / item.total) * 100 : 0;
     const pendingPct = item.total > 0 ? (pending / item.total) * 100 : 0;
@@ -175,6 +224,7 @@ function buildStatsCardsHtml(stats, filterQuery) {
         <div class="stat-legend">
           <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span>مقبول</span><b>${item.accepted}</b></div>
           <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span>مرفوض</span><b>${item.rejected}</b></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--accent-purple);"></span>تم المراجعة</span><b>${reviewed}</b></div>
           <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-pending-text);"></span>لم تتم المراجعة</span><b>${pending}</b></div>
         </div>
       </div>
@@ -182,12 +232,76 @@ function buildStatsCardsHtml(stats, filterQuery) {
   }).join('');
 }
 
-function renderStatsCards(filterQuery) {
+// بيبني كروت التيمات: كل تيم = كارت واحد بإجمالي أرقامه + تفصيل كل عضو تحته.
+// لو المستخدم الحالي هو قائد أحد التيمات، بيشوف تيمه بس مش كل التيمات.
+function buildTeamsCardsHtml(filterQuery) {
+  if (!lastReviewerStats) return `<div class="stat-empty-msg">جاري التحميل...</div>`;
+
+  let teamKeys = Object.keys(TEAMS_CONFIG);
+  const isFullVisibility = currentUser && TEAMS_FULL_VISIBILITY_USERNAMES.includes(currentUser.username);
+  if (!isFullVisibility && currentUser && TEAMS_CONFIG[currentUser.username]) {
+    teamKeys = [currentUser.username];
+  }
+  if (filterQuery) {
+    teamKeys = teamKeys.filter(key => TEAMS_CONFIG[key].leadName.toLowerCase().includes(filterQuery));
+  }
+
+  if (teamKeys.length === 0) {
+    return `<div class="stat-empty-msg">لا يوجد نتائج${filterQuery ? ' تطابق البحث' : ''}</div>`;
+  }
+
+  return teamKeys.map(key => {
+    const team = TEAMS_CONFIG[key];
+    let total = 0, accepted = 0, rejected = 0;
+
+    const memberRows = team.members.map(memberName => {
+      const s = lastReviewerStats[memberName] || { total: 0, accepted: 0, rejected: 0 };
+      total += s.total; accepted += s.accepted; rejected += s.rejected;
+      const memberReviewed = s.accepted + s.rejected;
+      return `<div class="row" style="font-size:12px;"><span class="label">${memberName}</span><b>${s.total} (تم مراجعة ${memberReviewed})</b></div>`;
+    }).join('');
+
+    const reviewed = accepted + rejected;
+    const pending = Math.max(total - reviewed, 0);
+    const acceptedPct = total > 0 ? (accepted / total) * 100 : 0;
+    const rejectedPct = total > 0 ? (rejected / total) * 100 : 0;
+    const pendingPct = total > 0 ? (pending / total) * 100 : 0;
+
+    return `
+      <div class="stat-card">
+        <div class="stat-name">فريق ${team.leadName}</div>
+        <div class="stat-total">إجمالي عدد الطلبات: ${total}</div>
+        <div class="stat-bar">
+          <div class="stat-bar-accepted" style="width:${acceptedPct}%"></div>
+          <div class="stat-bar-rejected" style="width:${rejectedPct}%"></div>
+          <div class="stat-bar-pending" style="width:${pendingPct}%"></div>
+        </div>
+        <div class="stat-legend">
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span>مقبول</span><b>${accepted}</b></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span>مرفوض</span><b>${rejected}</b></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--accent-purple);"></span>تم المراجعة</span><b>${reviewed}</b></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-pending-text);"></span>لم تتم المراجعة</span><b>${pending}</b></div>
+        </div>
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--card-border); display:flex; flex-direction:column; gap:6px;">
+          ${memberRows}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderStatsCards(filterQuery, exactMatch) {
   const container = document.getElementById('stats-cards-grid');
   if (!container) return;
+
+  if (currentStatsView === 'teams') {
+    container.innerHTML = buildTeamsCardsHtml(filterQuery);
+    return;
+  }
+
   const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
   if (!stats) { container.innerHTML = `<div class="stat-empty-msg">جاري التحميل...</div>`; return; }
-  container.innerHTML = buildStatsCardsHtml(stats, filterQuery);
+  container.innerHTML = buildStatsCardsHtml(stats, filterQuery, exactMatch);
 }
 
 async function handleLogin() {
@@ -2429,7 +2543,7 @@ function renderReviewersStats(data) {
   });
 
   lastReviewerStats = stats;
-  if (document.getElementById('stats-modal').style.display === 'flex' && currentStatsView === 'reviewers') {
+  if (document.getElementById('stats-modal').style.display === 'flex' && (currentStatsView === 'reviewers' || currentStatsView === 'teams')) {
     renderStatsCards(document.getElementById('stats-modal-search').value.trim().toLowerCase());
   }
 }

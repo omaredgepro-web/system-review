@@ -7,7 +7,7 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
-         
+       
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
@@ -110,6 +110,130 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// ============ ⚡ إضافة سريعة (بدون ملف) - تاب توزيع الطلبات ============
+function toggleQuickAddPanel() {
+  const panel = document.getElementById('quick-add-panel');
+  const icon = document.getElementById('quick-add-toggle-icon');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  icon.innerText = isHidden ? '▲' : '▼';
+  if (isHidden) populateQuickAddDropdowns();
+}
+
+function populateQuickAddDropdowns() {
+  const reviewerSelect = document.getElementById('quick-add-reviewer');
+  const currentValue = reviewerSelect.value;
+  reviewerSelect.innerHTML = '<option value="">اختر مراجع</option>';
+  (ALL_PROFILES || []).filter(p => p.role === 'reviewer' || p.role === 'admin').forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.username;
+    opt.innerText = p.name || p.username;
+    reviewerSelect.appendChild(opt);
+  });
+  if (currentValue) reviewerSelect.value = currentValue;
+
+  const companyList = document.getElementById('quick-add-company-list');
+  companyList.innerHTML = '';
+  const companies = new Set((window.masterData || []).map(o => o.company || o['الشركة']).filter(Boolean));
+  companies.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    companyList.appendChild(opt);
+  });
+
+  if (!document.getElementById('quick-add-date').value) {
+    document.getElementById('quick-add-date').value = new Date().toISOString().split('T')[0];
+  }
+}
+
+// بيضيف الطلبات المكتوبة يدويًا: لو الرقم مسجل بالفعل بنفس التاريخ، بيسأل لو عايز يغير
+// المراجع بتاعه بدل ما يتكرر. لو مش مسجل، بيضيفه كصف جديد بالبيانات المحددة فوق.
+async function submitQuickAddOrders() {
+  if (!canDelete()) { alert('الإضافة السريعة متاحة لعمر وموندي فقط'); return; }
+
+  const company = document.getElementById('quick-add-company').value.trim();
+  const reviewer = document.getElementById('quick-add-reviewer').value;
+  const date = document.getElementById('quick-add-date').value;
+  const raw = document.getElementById('quick-add-textarea').value;
+
+  if (!company) { alert('برجاء كتابة اسم الشركة'); return; }
+  if (!reviewer) { alert('برجاء اختيار المراجع'); return; }
+  if (!date) { alert('برجاء تحديد التاريخ'); return; }
+
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
+  if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
+
+  const toInsert = [];
+  const toUpdateIds = [];
+  let skippedSameReviewer = 0;
+  let skippedDeclined = 0;
+
+  for (const num of orderNumbers) {
+    const existing = getMasterOrderByNumberAndDate(num, date);
+    if (existing) {
+      const prevReviewer = existing.reviewer || existing['المراجع'] || 'غير معروف';
+      if (prevReviewer === reviewer) { skippedSameReviewer++; continue; }
+      const confirmChange = confirm(`رقم الطلب ${num} مسجل بالفعل بتاريخ ${date} على المراجع "${prevReviewer}".\nهل تريد تغييره للمراجع "${reviewer}"؟`);
+      if (confirmChange) toUpdateIds.push(existing.id);
+      else skippedDeclined++;
+    } else {
+      toInsert.push({ order_number: num, company: company, reviewer: reviewer, date: date });
+    }
+  }
+
+  if (toInsert.length === 0 && toUpdateIds.length === 0) {
+    alert(`مفيش أي طلب جديد للإضافة أو التحديث.\n(${skippedSameReviewer} كانوا بالفعل عند نفس المراجع، ${skippedDeclined} رفضت تغييرهم)`);
+    return;
+  }
+
+  suppressLiveRender = true;
+  try {
+    let insertError = null, updateError = null;
+    if (toInsert.length > 0) insertError = await runBatchedUpsert(TABLE_NAME, toInsert);
+    if (toUpdateIds.length > 0) updateError = await runBatchedSupabaseAction(TABLE_NAME, 'id', toUpdateIds, 'update', { reviewer: reviewer });
+
+    if (insertError || updateError) {
+      alert('حصل خطأ: ' + ((insertError && insertError.message) || (updateError && updateError.message)));
+    } else {
+      alert(`تم بنجاح!\n- طلبات جديدة اتضافت: ${toInsert.length}\n- طلبات اتغير مراجعها: ${toUpdateIds.length}`);
+      document.getElementById('quick-add-textarea').value = '';
+      await loadData();
+    }
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    finishLiveSuppressedAction();
+  }
+}
+
+// بيحدد (يعلّم checkbox) الطلبات اللي أرقامها مكتوبة في نفس خانة "الإضافة السريعة"، من غير
+// ما يضيف أو يعدل أي حاجة - عشان تقدر تطبّق عليهم أي إجراء تاني موجود فوق (حذف/تغيير مراجع/تاريخ)
+// يدويًا بنفسك، زي "تحديد" عادي بس بالأرقام اللي انت كاتبها بدل التحديد التلقائي.
+function selectQuickAddOrders() {
+  const raw = document.getElementById('quick-add-textarea').value;
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
+  if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل في الخانة أولاً'); return; }
+
+  const numsSet = new Set(orderNumbers);
+  let foundCount = 0;
+  (window.masterData || []).forEach(o => {
+    const num = o.order_number || o.order_no || o['رقم الطلب'];
+    if (numsSet.has(String(num))) {
+      selectedOrderNumbers.add(num);
+      foundCount++;
+    }
+  });
+
+  updateSelectedCount();
+  switchTab('dashboard');
+  renderCurrentPage();
+
+  const notFoundCount = orderNumbers.length - foundCount;
+  let msg = `تم تحديد ${foundCount} طلب من أصل ${orderNumbers.length} في الجدول.`;
+  if (notFoundCount > 0) msg += `\n(${notFoundCount} رقم مش موجود أصلاً في قاعدة البيانات)`;
+  alert(msg);
+}
+
 function toggleSidebar() {
   openStatsModal('reviewers');
 }
@@ -122,6 +246,7 @@ function toggleCompanySidebar() {
 let currentStatsView = 'reviewers';
 let lastReviewerStats = null;
 let lastCompanyStats = null;
+let selectedStatsNames = new Set(); // الأسماء المختارة من قائمة الاختيار المتعدد (مراجعين/شركات)
 
 // تعريف التيمات: كل تيم مربوط بيوزرنيم قائدها (اللي بيسجل بيه دخول)، وأسماء أعضاءه
 // زي ما بتظهر في إحصائيات المراجعين (نفس الاسم اللي بيرجعه getDisplayName).
@@ -156,47 +281,88 @@ function showStatsView(view) {
   renderStatsCards();
 }
 
-// بتملأ قائمة "اسلك على شخص/شركة معينة" بأسماء التاب الحالي، عشان تقدر تختار واحد بس
-// بدل ما تدور عليه بالكتابة.
+// بتملأ قائمة الاختيار المتعدد بأسماء التاب الحالي، عشان تقدر تختار 3 أو 4 أشخاص مع بعض
 function populateStatsPersonSelect() {
-  const select = document.getElementById('stats-modal-person-select');
-  select.innerHTML = '<option value="">الكل</option>';
+  const wrapper = document.getElementById('stats-multiselect-btn')?.parentElement;
+  if (!wrapper) return;
+
+  selectedStatsNames.clear();
+  updateStatsMultiSelectBtnLabel();
+  document.getElementById('stats-multiselect-panel').style.display = 'none';
 
   if (currentStatsView === 'teams') {
-    select.style.display = 'none'; // مش محتاجينها في تاب التيمات، العدد صغير أصلاً
+    wrapper.style.display = 'none'; // مش محتاجينها في تاب التيمات، العدد صغير أصلاً
     return;
   }
-  select.style.display = '';
+  wrapper.style.display = '';
 
   const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
+  const list = document.getElementById('stats-multiselect-list');
+  list.innerHTML = '';
   if (!stats) return;
+
   const names = Object.keys(stats).sort();
   names.forEach(name => {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.innerText = name;
-    select.appendChild(opt);
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px 4px; font-size:13px; cursor:pointer;';
+    const safeName = name.replace(/'/g, "\\'");
+    row.innerHTML = `<input type="checkbox" value="${name}" onchange="toggleStatsNameCheckbox('${safeName}', this.checked)"> <span>${name}</span>`;
+    list.appendChild(row);
   });
 }
 
-function selectStatsPerson(name) {
+function toggleStatsMultiSelectPanel() {
+  const panel = document.getElementById('stats-multiselect-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('stats-multiselect-panel');
+  const btn = document.getElementById('stats-multiselect-btn');
+  if (!panel || panel.style.display === 'none') return;
+  if (!panel.contains(e.target) && e.target !== btn) {
+    panel.style.display = 'none';
+  }
+});
+
+function toggleStatsNameCheckbox(name, checked) {
+  if (checked) selectedStatsNames.add(name);
+  else selectedStatsNames.delete(name);
+}
+
+function clearStatsMultiSelect() {
+  selectedStatsNames.clear();
+  document.querySelectorAll('#stats-multiselect-list input[type=checkbox]').forEach(cb => cb.checked = false);
+  applyStatsMultiSelect();
+}
+
+function applyStatsMultiSelect() {
+  document.getElementById('stats-multiselect-panel').style.display = 'none';
+  updateStatsMultiSelectBtnLabel();
   document.getElementById('stats-modal-search').value = '';
-  renderStatsCards(name ? name.toLowerCase() : '', !!name);
+  renderStatsCards();
+}
+
+function updateStatsMultiSelectBtnLabel() {
+  const btn = document.getElementById('stats-multiselect-btn');
+  if (!btn) return;
+  btn.innerText = selectedStatsNames.size === 0 ? 'الكل ⌄' : `محدد: ${selectedStatsNames.size} ⌄`;
 }
 
 function filterStatsCards(query) {
-  document.getElementById('stats-modal-person-select').value = '';
+  selectedStatsNames.clear();
+  document.querySelectorAll('#stats-multiselect-list input[type=checkbox]').forEach(cb => cb.checked = false);
+  updateStatsMultiSelectBtnLabel();
   renderStatsCards(query.trim().toLowerCase());
 }
 
 // بيبني كروت الإحصائيات (كبيرة وواضحة، بشريط تقدم بصري) لأي مجموعة بيانات - مراجعين أو شركات
-// exactMatch: لو true (جاي من قائمة الاختيار) بيدور على تطابق تام للاسم، مش بحث جزئي
-function buildStatsCardsHtml(stats, filterQuery, exactMatch) {
+function buildStatsCardsHtml(stats, filterQuery) {
   let keys = Object.keys(stats);
-  if (filterQuery) {
-    keys = exactMatch
-      ? keys.filter(name => name.toLowerCase() === filterQuery)
-      : keys.filter(name => name.toLowerCase().includes(filterQuery));
+  if (selectedStatsNames.size > 0) {
+    keys = keys.filter(name => selectedStatsNames.has(name));
+  } else if (filterQuery) {
+    keys = keys.filter(name => name.toLowerCase().includes(filterQuery));
   }
   keys = keys.sort((a, b) => stats[b].total - stats[a].total);
 
@@ -290,7 +456,7 @@ function buildTeamsCardsHtml(filterQuery) {
   }).join('');
 }
 
-function renderStatsCards(filterQuery, exactMatch) {
+function renderStatsCards(filterQuery) {
   const container = document.getElementById('stats-cards-grid');
   if (!container) return;
 
@@ -1005,6 +1171,35 @@ async function executeBulkDateUpdate() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
+// تغيير حالة المراجعة (جاري مراجعة / تم اعادة المراجعة) لكل الطلبات المحددة دفعة واحدة -
+// بنفس أسلوب تغيير التاريخ والمراجع بالظبط، بس على عمود "status" (حالة المراجعة).
+async function executeBulkStatusUpdate() {
+  const newStatus = document.getElementById('bulk-status-select').value;
+  if (!newStatus) { alert('برجاء اختيار الحالة الجديدة أولاً'); return; }
+  if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const confirmChange = confirm(`هل أنت تأكد من تغيير حالة المراجعة لـ (${selectedOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  if (targetOrders.length === 0) return;
+  const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+  const matchValues = targetOrders.map(o => o[matchColumn]);
+
+  try {
+    const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'update', { status: newStatus });
+    if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); }
+    else {
+      alert(`تم تغيير حالة المراجعة لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
+      targetOrders.forEach(o => { o.status = newStatus; });
+      selectedOrderNumbers.clear();
+      updateSelectedCount();
+      document.getElementById('bulk-status-select').value = '';
+      await loadData();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 async function executeBulkDelete() {
   if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
@@ -1292,9 +1487,9 @@ function removeWithinBatchDuplicates(rows) {
 // بنفس تاريخ الدفعة الحالية):
 // - لو الطلب الموجود حالته "مقبول"  → الصف الجديد يتشال، ويفضل المقبول القديم زي ما هو من غير أي تغيير.
 // - لو الطلب الموجود حالته "مرفوض":
-//     • ولو الصف الجديد جاي من الملف معلّم بعمود "الحالة"/"حالة المراجعة" = "تم إعادة المراجعة"
+//     • ولو الصف الجديد جاي من الملف معلّم بعمود "الحالة"/"حالة المراجعة" = "تم اعادة المراجعة"
 //       → يتسجل عادي (تكرار مقصود لإعادة المراجعة)، وياخد نفس المراجع اللي راجعه قبل كده.
-//     • غير كده (مفيش علامة إعادة مراجعة) → يتشال (يعتبر تكرار غير مبرر).
+//     • غير كده (مفيش علامة اعادة مراجعة) → يتشال (يعتبر تكرار غير مبرر).
 // - أي حالة تانية للطلب الموجود (معلق/Qc/لسه ماخدش قرار) → الصف الجديد يتشال برضو، عشان منسمحش
 //   بنفس الطلب يبقى موجود مرتين وهو أصلاً لسه مقرّرش فيه حاجة.
 function applyDuplicateRuleToRows(rows) {

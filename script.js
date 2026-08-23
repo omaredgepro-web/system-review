@@ -281,13 +281,12 @@ function showStatsView(view) {
   renderStatsCards();
 }
 
-// بتملأ قائمة الاختيار المتعدد بأسماء التاب الحالي، عشان تقدر تختار 3 أو 4 أشخاص مع بعض
+// بتملأ قائمة الاختيار المتعدد بأسماء التاب الحالي، وبتبدأ دايمًا بكل الأسماء محددة (ظاهرة)
+// عشان أول ما تفتح تلاقي كل المراجعين/الشركات ظاهرين تلقائيًا.
 function populateStatsPersonSelect() {
   const wrapper = document.getElementById('stats-multiselect-btn')?.parentElement;
   if (!wrapper) return;
 
-  selectedStatsNames.clear();
-  updateStatsMultiSelectBtnLabel();
   document.getElementById('stats-multiselect-panel').style.display = 'none';
 
   if (currentStatsView === 'teams') {
@@ -299,14 +298,22 @@ function populateStatsPersonSelect() {
   const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
   const list = document.getElementById('stats-multiselect-list');
   list.innerHTML = '';
-  if (!stats) return;
+  if (!stats) { selectedStatsNames = new Set(); return; }
 
   const names = Object.keys(stats).sort();
+  selectedStatsNames = new Set(names); // افتراضيًا: الكل محدد وظاهر
+  updateStatsMultiSelectBtnLabel();
+
+  const selectAllRow = document.createElement('label');
+  selectAllRow.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px 4px; font-size:13px; font-weight:700; cursor:pointer; border-bottom:1px solid var(--card-border); margin-bottom:6px;';
+  selectAllRow.innerHTML = `<input type="checkbox" id="stats-select-all-checkbox" checked onchange="toggleSelectAllStatsNames(this.checked)"> <span>تحديد الكل</span>`;
+  list.appendChild(selectAllRow);
+
   names.forEach(name => {
     const row = document.createElement('label');
     row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px 4px; font-size:13px; cursor:pointer;';
     const safeName = name.replace(/'/g, "\\'");
-    row.innerHTML = `<input type="checkbox" value="${name}" onchange="toggleStatsNameCheckbox('${safeName}', this.checked)"> <span>${name}</span>`;
+    row.innerHTML = `<input type="checkbox" value="${name}" checked onchange="toggleStatsNameCheckbox('${safeName}', this.checked)"> <span>${name}</span>`;
     list.appendChild(row);
   });
 }
@@ -328,40 +335,53 @@ document.addEventListener('click', (e) => {
 function toggleStatsNameCheckbox(name, checked) {
   if (checked) selectedStatsNames.add(name);
   else selectedStatsNames.delete(name);
-}
-
-function clearStatsMultiSelect() {
-  selectedStatsNames.clear();
-  document.querySelectorAll('#stats-multiselect-list input[type=checkbox]').forEach(cb => cb.checked = false);
-  applyStatsMultiSelect();
-}
-
-function applyStatsMultiSelect() {
-  document.getElementById('stats-multiselect-panel').style.display = 'none';
+  updateSelectAllCheckboxState();
   updateStatsMultiSelectBtnLabel();
-  document.getElementById('stats-modal-search').value = '';
-  renderStatsCards();
+  renderStatsCards(document.getElementById('stats-modal-search').value.trim().toLowerCase());
+}
+
+// بيحدد/يشيل كل الأسماء مرة واحدة لما تدوس على "تحديد الكل"
+function toggleSelectAllStatsNames(checked) {
+  const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
+  const names = stats ? Object.keys(stats) : [];
+  selectedStatsNames = checked ? new Set(names) : new Set();
+  document.querySelectorAll('#stats-multiselect-list input[type=checkbox]').forEach(cb => {
+    if (cb.id !== 'stats-select-all-checkbox') cb.checked = checked;
+  });
+  updateStatsMultiSelectBtnLabel();
+  renderStatsCards(document.getElementById('stats-modal-search').value.trim().toLowerCase());
+}
+
+// بيظبط شكل تشك بوكس "تحديد الكل" نفسه: متعلم لو الكل محدد، فاضي لو محدش، ونص علامة (indeterminate) لو جزء بس
+function updateSelectAllCheckboxState() {
+  const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
+  const totalNames = stats ? Object.keys(stats).length : 0;
+  const selectAllCb = document.getElementById('stats-select-all-checkbox');
+  if (!selectAllCb) return;
+  if (selectedStatsNames.size === 0) { selectAllCb.checked = false; selectAllCb.indeterminate = false; }
+  else if (selectedStatsNames.size === totalNames) { selectAllCb.checked = true; selectAllCb.indeterminate = false; }
+  else { selectAllCb.checked = false; selectAllCb.indeterminate = true; }
 }
 
 function updateStatsMultiSelectBtnLabel() {
   const btn = document.getElementById('stats-multiselect-btn');
   if (!btn) return;
-  btn.innerText = selectedStatsNames.size === 0 ? 'الكل ⌄' : `محدد: ${selectedStatsNames.size} ⌄`;
+  const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
+  const totalNames = stats ? Object.keys(stats).length : 0;
+  if (selectedStatsNames.size === 0) btn.innerText = 'محدد: لا أحد ⌄';
+  else if (selectedStatsNames.size === totalNames) btn.innerText = 'الكل ⌄';
+  else btn.innerText = `محدد: ${selectedStatsNames.size} ⌄`;
 }
 
+// البحث بيضيّق داخل الأسماء المحددة بالتيك بوكس بس، مش بيلغي التحديد
 function filterStatsCards(query) {
-  selectedStatsNames.clear();
-  document.querySelectorAll('#stats-multiselect-list input[type=checkbox]').forEach(cb => cb.checked = false);
-  updateStatsMultiSelectBtnLabel();
   renderStatsCards(query.trim().toLowerCase());
 }
 
 // بيبني كروت الإحصائيات (كبيرة وواضحة، بشريط تقدم بصري) لأي مجموعة بيانات - مراجعين أو شركات
 function buildStatsCardsHtml(stats, filterQuery) {
-  let keys = Object.keys(stats);
-  if (selectedStatsNames.size > 0) {
-    keys = keys.filter(name => selectedStatsNames.has(name));
-  } else if (filterQuery) {
+  let keys = Object.keys(stats).filter(name => selectedStatsNames.has(name));
+  if (filterQuery) {
     keys = keys.filter(name => name.toLowerCase().includes(filterQuery));
   }
   keys = keys.sort((a, b) => stats[b].total - stats[a].total);
@@ -467,7 +487,7 @@ function renderStatsCards(filterQuery) {
 
   const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
   if (!stats) { container.innerHTML = `<div class="stat-empty-msg">جاري التحميل...</div>`; return; }
-  container.innerHTML = buildStatsCardsHtml(stats, filterQuery, exactMatch);
+  container.innerHTML = buildStatsCardsHtml(stats, filterQuery);
 }
 
 async function handleLogin() {

@@ -760,12 +760,8 @@
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <div style="position: relative;">
             <button type="button" id="stats-multiselect-btn" class="filter-select" style="width: 180px; text-align: right; cursor: pointer;" onclick="toggleStatsMultiSelectPanel()">الكل ⌄</button>
-            <div id="stats-multiselect-panel" style="display: none; position: absolute; top: 110%; left: 0; z-index: 50; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; width: 220px; max-height: 260px; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.4);">
+            <div id="stats-multiselect-panel" style="display: none; position: absolute; top: 110%; left: 0; z-index: 50; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; width: 220px; max-height: 280px; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.4);">
               <div id="stats-multiselect-list" style="padding: 8px;"></div>
-              <div style="display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--card-border); position: sticky; bottom: 0; background: var(--card-bg);">
-                <button type="button" class="btn btn-secondary" style="flex: 1; padding: 6px; font-size: 12px;" onclick="clearStatsMultiSelect()">مسح</button>
-                <button type="button" class="btn btn-primary" style="flex: 1; padding: 6px; font-size: 12px;" onclick="applyStatsMultiSelect()">تطبيق</button>
-              </div>
             </div>
           </div>
           <input type="text" id="stats-modal-search" class="search-input" placeholder="ابحث بالاسم..." oninput="filterStatsCards(this.value)" style="width: 200px;">

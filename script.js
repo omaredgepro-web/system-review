@@ -111,15 +111,83 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function toggleSidebar() {
-  const sidebar = document.getElementById('reviewer-sidebar');
-  document.getElementById('company-sidebar').classList.remove('active');
-  sidebar.classList.toggle('active');
+  openStatsModal('reviewers');
 }
 
 function toggleCompanySidebar() {
-  const sidebar = document.getElementById('company-sidebar');
-  document.getElementById('reviewer-sidebar').classList.remove('active');
-  sidebar.classList.toggle('active');
+  openStatsModal('companies');
+}
+
+// ============ Modal إحصائيات المراجعين/الشركات ============
+let currentStatsView = 'reviewers';
+let lastReviewerStats = null;
+let lastCompanyStats = null;
+
+function openStatsModal(view) {
+  document.getElementById('stats-modal').style.display = 'flex';
+  document.getElementById('stats-modal-search').value = '';
+  showStatsView(view || 'reviewers');
+}
+
+function closeStatsModal() {
+  document.getElementById('stats-modal').style.display = 'none';
+}
+
+function showStatsView(view) {
+  currentStatsView = view;
+  document.getElementById('stats-modal-title').innerText = view === 'reviewers' ? 'إحصائيات المراجعين' : 'إحصائيات الشركات';
+  document.getElementById('stats-view-btn-reviewers').className = 'btn stats-view-btn ' + (view === 'reviewers' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('stats-view-btn-companies').className = 'btn stats-view-btn ' + (view === 'companies' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('stats-modal-search').value = '';
+  renderStatsCards();
+}
+
+function filterStatsCards(query) {
+  renderStatsCards(query.trim().toLowerCase());
+}
+
+// بيبني كروت الإحصائيات (كبيرة وواضحة، بشريط تقدم بصري) لأي مجموعة بيانات - مراجعين أو شركات
+function buildStatsCardsHtml(stats, filterQuery) {
+  let keys = Object.keys(stats);
+  if (filterQuery) keys = keys.filter(name => name.toLowerCase().includes(filterQuery));
+  keys = keys.sort((a, b) => stats[b].total - stats[a].total);
+
+  if (keys.length === 0) {
+    return `<div class="stat-empty-msg">لا يوجد نتائج${filterQuery ? ' تطابق البحث' : ''}</div>`;
+  }
+
+  return keys.map(name => {
+    const item = stats[name];
+    const pending = Math.max(item.total - item.accepted - item.rejected, 0);
+    const acceptedPct = item.total > 0 ? (item.accepted / item.total) * 100 : 0;
+    const rejectedPct = item.total > 0 ? (item.rejected / item.total) * 100 : 0;
+    const pendingPct = item.total > 0 ? (pending / item.total) * 100 : 0;
+
+    return `
+      <div class="stat-card">
+        <div class="stat-name">${name}</div>
+        <div class="stat-total">${item.total} طلب إجمالاً</div>
+        <div class="stat-bar">
+          <div class="stat-bar-accepted" style="width:${acceptedPct}%"></div>
+          <div class="stat-bar-rejected" style="width:${rejectedPct}%"></div>
+          <div class="stat-bar-pending" style="width:${pendingPct}%"></div>
+        </div>
+        <div class="stat-legend">
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span>مقبول</span><b>${item.accepted}</b></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span>مرفوض</span><b>${item.rejected}</b></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-pending-text);"></span>لم تتم المراجعة</span><b>${pending}</b></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderStatsCards(filterQuery) {
+  const container = document.getElementById('stats-cards-grid');
+  if (!container) return;
+  const stats = currentStatsView === 'reviewers' ? lastReviewerStats : lastCompanyStats;
+  if (!stats) { container.innerHTML = `<div class="stat-empty-msg">جاري التحميل...</div>`; return; }
+  container.innerHTML = buildStatsCardsHtml(stats, filterQuery);
 }
 
 async function handleLogin() {
@@ -2360,31 +2428,10 @@ function renderReviewersStats(data) {
     if (revStatus === 'مرفوض') stats[name].rejected++;
   });
 
-  const container = document.getElementById('reviewers-list');
-  container.innerHTML = '';
-  const keys = Object.keys(stats);
-  if (keys.length === 0) {
-    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد مراجعين</p>';
-    return;
+  lastReviewerStats = stats;
+  if (document.getElementById('stats-modal').style.display === 'flex' && currentStatsView === 'reviewers') {
+    renderStatsCards(document.getElementById('stats-modal-search').value.trim().toLowerCase());
   }
-
-  keys.forEach(name => {
-    const item = stats[name];
-    const reviewed = item.accepted + item.rejected;
-    container.innerHTML += `
-      <div class="reviewer-stat">
-        <div class="reviewer-info">
-          <div class="name">${name}</div>
-          <div class="total">${item.total} طلب</div>
-        </div>
-        <div class="reviewer-counts">
-          <div class="count-accepted">مقبول: ${item.accepted}</div>
-          <div class="count-rejected">مرفوض: ${item.rejected}</div>
-          <div style="color: var(--text-muted); margin-top: 4px;">تم المراجعة: ${reviewed}</div>
-        </div>
-      </div>
-    `;
-  });
 }
 
 function renderCompanyStats(data) {
@@ -2399,29 +2446,10 @@ function renderCompanyStats(data) {
     if (revStatus === 'مرفوض') stats[name].rejected++;
   });
 
-  const container = document.getElementById('companies-list');
-  container.innerHTML = '';
-  const keys = Object.keys(stats).sort((a, b) => stats[b].total - stats[a].total);
-  if (keys.length === 0) {
-    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد شركات</p>';
-    return;
+  lastCompanyStats = stats;
+  if (document.getElementById('stats-modal').style.display === 'flex' && currentStatsView === 'companies') {
+    renderStatsCards(document.getElementById('stats-modal-search').value.trim().toLowerCase());
   }
-
-  keys.forEach(name => {
-    const item = stats[name];
-    container.innerHTML += `
-      <div class="reviewer-stat">
-        <div class="reviewer-info">
-          <div class="name">${name}</div>
-          <div class="total">${item.total} طلب</div>
-        </div>
-        <div class="reviewer-counts">
-          <div class="count-accepted">مقبول: ${item.accepted}</div>
-          <div class="count-rejected">مرفوض: ${item.rejected}</div>
-        </div>
-      </div>
-    `;
-  });
 }
 
 // ============ الرسوم البيانية (Overview / Companies / Reviewers) ============

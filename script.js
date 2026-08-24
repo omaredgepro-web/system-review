@@ -574,6 +574,13 @@ async function setupUserSession(profile) {
   document.getElementById('date-filter').style.display = isAdmin ? 'inline-block' : 'none';
   document.getElementById('reset-date-btn').style.display = isAdmin ? 'inline-flex' : 'none';
 
+  // تاب "التيمات" في مودال الإحصائيات: يظهر بس لقادة التيمات (يشوفوا تيمهم هما بس) أو
+  // للأدمن المحددين في TEAMS_FULL_VISIBILITY_USERNAMES (يشوفوا كل التيمات) - أي مراجع عادي تاني
+  // ميشوفش التاب ده خالص.
+  const canSeeTeamsStats = !!(currentUser && (TEAMS_CONFIG[currentUser.username] || TEAMS_FULL_VISIBILITY_USERNAMES.includes(currentUser.username)));
+  const teamsStatsBtn = document.getElementById('stats-view-btn-teams');
+  if (teamsStatsBtn) teamsStatsBtn.style.display = canSeeTeamsStats ? 'inline-flex' : 'none';
+
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
   loadData();

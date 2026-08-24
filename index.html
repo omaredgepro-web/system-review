@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
-      
+  
   <!-- منع المتصفح من تخزين نسخة قديمة من الصفحة نفسها (HTML)، عشان أي تحديث جديد يوصل فورًا من غير Hard Refresh -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -344,7 +344,10 @@
               <button class="btn btn-secondary" onclick="addCustomDistRule()" style="padding: 6px 14px; font-size: 12px;">➕ إضافة قاعدة</button>
             </div>
 
-            <p style="font-size: 12px; font-weight: 700; margin-bottom: 6px;">اختر شركة واحدة أو أكتر (هتتقسم النسبة بينهم تلقائي):</p>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
+              <p style="font-size: 12px; font-weight: 700; margin: 0;">اختر شركة واحدة أو أكتر (هتتقسم النسبة بينهم تلقائي):</p>
+              <button type="button" class="btn btn-secondary" id="custom-dist-select-all-btn" onclick="toggleSelectAllCustomDistCompanies()" style="padding: 5px 12px; font-size: 12px;">تحديد الكل</button>
+            </div>
             <div id="custom-dist-companies-checklist" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 160px; overflow-y: auto; padding: 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; margin-bottom: 8px;"></div>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">الإجمالي المتاح (غير موزّع) في الشركات المحددة: <span id="custom-dist-companies-total" style="font-weight: 700; color: var(--text-main);">0</span> طلب</p>
 

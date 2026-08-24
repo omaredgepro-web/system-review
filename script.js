@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RZz9pDGfJXNtZYc7wADlHg_uMffms_6';
 const TABLE_NAME = 'system_review1';
-  
+
 // ⚠️ عدّل اسم الجدول ده لو مختلف عندك في Supabase (استنتجته من اسم ملف الـ CSV اللي بعتهولي)
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
@@ -2235,12 +2235,31 @@ function getSelectedCustomDistCompanies() {
   return Array.from(document.querySelectorAll('.custom-dist-company-checkbox:checked')).map(cb => cb.value);
 }
 
+// زرار "تحديد الكل" / "إلغاء تحديد الكل" بالتبديل: دوسة تحدد كل الشركات، دوسة تانية تشيل التحديد كله
+function toggleSelectAllCustomDistCompanies() {
+  const checkboxes = document.querySelectorAll('.custom-dist-company-checkbox');
+  if (checkboxes.length === 0) return;
+  const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+  checkboxes.forEach(cb => { cb.checked = !allChecked; });
+  updateCustomDistCompaniesTotal();
+}
+
+function updateCustomDistSelectAllBtnLabel() {
+  const btn = document.getElementById('custom-dist-select-all-btn');
+  if (!btn) return;
+  const checkboxes = document.querySelectorAll('.custom-dist-company-checkbox');
+  if (checkboxes.length === 0) { btn.innerText = 'تحديد الكل'; return; }
+  const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+  btn.innerText = allChecked ? 'إلغاء تحديد الكل' : 'تحديد الكل';
+}
+
 function updateCustomDistCompaniesTotal() {
   const counts = getUnassignedCountsByCompany(parsedCsvData);
   const selected = getSelectedCustomDistCompanies();
   const total = selected.reduce((sum, c) => sum + (counts[c] || 0), 0);
   const totalEl = document.getElementById('custom-dist-companies-total');
   if (totalEl) totalEl.innerText = total;
+  updateCustomDistSelectAllBtnLabel();
 }
 
 function addCustomDistRule() {

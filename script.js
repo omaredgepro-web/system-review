@@ -97,6 +97,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   applyThemeIcon();
 
+  // دوس Enter في خانة اليوزرنيم أو الباسورد في شاشة تسجيل الدخول = تسجيل دخول مباشرة
+  const loginUsernameEl = document.getElementById('login-username');
+  const loginPasswordEl = document.getElementById('login-password');
+  if (loginUsernameEl) {
+    loginUsernameEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); handleLogin(); }
+    });
+  }
+  if (loginPasswordEl) {
+    loginPasswordEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); handleLogin(); }
+    });
+  }
+
   // Supabase بيحتفظ بالجلسة (session) لوحده - مش محتاجين نخزن يوزر/باسورد في localStorage تاني
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session && session.user) {
@@ -715,6 +729,77 @@ function populateCompanyFilter() {
 async function handleLogout() {
   await supabaseClient.auth.signOut();
   location.reload();
+}
+
+// ============ تغيير كلمة المرور (المستخدم بيغيّر كلمة مروره هو بس) ============
+function openChangePasswordModal() {
+  document.getElementById('new-password-input').value = '';
+  document.getElementById('confirm-password-input').value = '';
+  document.getElementById('change-password-error').style.display = 'none';
+  document.getElementById('change-password-success').style.display = 'none';
+  document.getElementById('change-password-modal').style.display = 'flex';
+}
+
+function closeChangePasswordModal() {
+  document.getElementById('change-password-modal').style.display = 'none';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const newPassEl = document.getElementById('new-password-input');
+  const confirmPassEl = document.getElementById('confirm-password-input');
+  [newPassEl, confirmPassEl].forEach(el => {
+    if (el) el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); submitChangePassword(); }
+    });
+  });
+});
+
+async function submitChangePassword() {
+  const newPass = document.getElementById('new-password-input').value;
+  const confirmPass = document.getElementById('confirm-password-input').value;
+  const errEl = document.getElementById('change-password-error');
+  const successEl = document.getElementById('change-password-success');
+  const saveBtn = document.getElementById('btn-save-change-password');
+
+  errEl.style.display = 'none';
+  successEl.style.display = 'none';
+
+  if (!newPass || newPass.length < 6) {
+    errEl.innerText = 'كلمة المرور لازم تكون 6 أحرف على الأقل';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (newPass !== confirmPass) {
+    errEl.innerText = 'كلمة المرور وتأكيدها مش متطابقين';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.innerText = 'جاري الحفظ...';
+
+  try {
+    // updateUser بتغيّر باسورد المستخدم اللي مسجل دخول حاليًا بس (currentUser)،
+    // مفيش أي طريقة إن المستخدم يغيّر باسورد حد تاني من هنا.
+    const { error } = await supabaseClient.auth.updateUser({ password: newPass });
+    if (error) {
+      errEl.innerText = 'حصل خطأ: ' + error.message;
+      errEl.style.display = 'block';
+      return;
+    }
+    successEl.innerText = 'تم تغيير كلمة المرور بنجاح ✅';
+    successEl.style.display = 'block';
+    document.getElementById('new-password-input').value = '';
+    document.getElementById('confirm-password-input').value = '';
+    setTimeout(closeChangePasswordModal, 1500);
+  } catch (e) {
+    console.error(e);
+    errEl.innerText = 'حصل خطأ غير متوقع';
+    errEl.style.display = 'block';
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.innerText = 'حفظ كلمة المرور';
+  }
 }
 
 function switchTab(tabName) {

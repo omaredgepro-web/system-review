@@ -86,6 +86,9 @@ let selectedOrderNumbers = new Set();
 // ============ حالة تاب طباعة الشهادات ============
 let certMasterData = [];
 let certAllData = [];
+// نوع الشهادات المعروض حاليًا: 'عادي' (تاب طباعة الشهادات) أو 'تعمير' (تاب طباعة شهادات التعمير)
+// الاتنين بيستخدموا نفس الجدول (layout) ونفس عناصر الصفحة، وبس بيتفلتروا حسب عمود cert_type
+let activeCertType = 'عادي';
 let certCurrentPage = 1;
 const certPageSize = 100;
 let certTotalRecordsCount = 0;
@@ -581,6 +584,7 @@ async function setupUserSession(profile) {
   if (certReassignControls) certReassignControls.style.display = canDelete() ? 'flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
+  document.getElementById('certificates-renovation-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
 
   // تغيير تاريخ الطلبات المعروضة متاح للأدمن بس؛ المراجع دايمًا شايف أحدث تاريخ متاح
@@ -667,15 +671,21 @@ function subscribeToLiveUpdates() {
       handleLiveChange(CERT_TABLE_NAME, payload);
     })
     .subscribe((status) => {
-      const indicator = document.getElementById('live-status-indicator');
-      if (!indicator) return;
-      if (status === 'SUBSCRIBED') {
-        indicator.innerText = '🟢 مباشر';
-        indicator.title = 'التحديثات وصلاك لحظيًا الآن';
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        indicator.innerText = '🟡 غير متصل';
-        indicator.title = 'التحديث اللحظي مش شغال دلوقتي، استخدم زرار التحديث اليدوي';
-      }
+      // بنحدث مؤشر تاب المراجعة ومؤشر تاب الشهادات مع بعض، لأنهم على نفس قناة الـ Realtime الواحدة
+      const indicators = [
+        document.getElementById('live-status-indicator'),
+        document.getElementById('cert-live-status-indicator')
+      ].filter(Boolean);
+      if (indicators.length === 0) return;
+      indicators.forEach(indicator => {
+        if (status === 'SUBSCRIBED') {
+          indicator.innerText = '🟢 مباشر';
+          indicator.title = 'التحديثات وصلاك لحظيًا الآن';
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          indicator.innerText = '🟡 غير متصل';
+          indicator.title = 'التحديث اللحظي مش شغال دلوقتي، استخدم زرار التحديث اليدوي';
+        }
+      });
     });
 }
 
@@ -816,10 +826,18 @@ function switchTab(tabName) {
   } else if (tabName === 'admin') {
     document.getElementById('admin-tab-btn').classList.add('active');
     document.getElementById('tab-admin').style.display = 'block';
-  } else if (tabName === 'certificates') {
-    document.getElementById('certificates-tab-btn').classList.add('active');
+  } else if (tabName === 'certificates' || tabName === 'certificates-renovation') {
+    // التابين بيستخدموا نفس الجدول والعناصر بالظبط، وبس بيتفلتروا حسب نوع الشهادة (عادي/تعمير)
+    const isRenovation = tabName === 'certificates-renovation';
+    activeCertType = isRenovation ? 'تعمير' : 'عادي';
+    document.getElementById(isRenovation ? 'certificates-renovation-tab-btn' : 'certificates-tab-btn').classList.add('active');
     document.getElementById('tab-certificates').style.display = 'block';
+    document.getElementById('cert-page-heading').innerText = isRenovation ? '🏗️ قائمة شهادات التعمير' : '🖨️ قائمة حالات الشهادات';
+    document.getElementById('cert-date-filter').value = ''; // كل نوع له تاريخه الأحدث المستقل
+    selectedCertOrderNumbers.clear();
+    updateCertSelectedCount();
     if (!certDataLoaded) loadCertificatesData();
+    else applyCertDateFiltering();
   } else if (tabName === 'rejections') {
     document.getElementById('rejections-tab-btn').classList.add('active');
     document.getElementById('tab-rejections').style.display = 'block';
@@ -828,6 +846,8 @@ function switchTab(tabName) {
   } else if (tabName === 'print-distribute') {
     document.getElementById('print-distribute-tab-btn').classList.add('active');
     document.getElementById('tab-print-distribute').style.display = 'block';
+    // نحمّل بيانات جدول الطباعة مقدمًا (لو لسه معملهاش) عشان فحص التكرار يقدر يشتغل فورًا
+    if (!certDataLoaded) loadCertificatesData().then(() => renderPrintDuplicatesPanel());
   }
 }
 
@@ -1699,6 +1719,150 @@ function extractOrderNumbersFromRows(rows) {
     .filter(v => v !== '');
 }
 
+// ============ ⚡ توزيع سريع بالأرقام (بدون ملف) - تاب توزيع طلبات الطباعة ============
+function toggleQuickPrintPanel() {
+  const panel = document.getElementById('quick-print-panel');
+  const icon = document.getElementById('quick-print-toggle-icon');
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  icon.innerText = isHidden ? '▲' : '▼';
+  if (isHidden) populateQuickPrintDropdown();
+}
+
+function populateQuickPrintDropdown() {
+  const select = document.getElementById('quick-print-layout');
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = '<option value="">بدون توزيع الآن</option>';
+  (ALL_PROFILES || []).filter(p => p.role === 'admin').forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.username;
+    opt.innerText = p.name || p.username;
+    select.appendChild(opt);
+  });
+  if (currentValue) select.value = currentValue;
+}
+
+// بياخد أرقام الطلبات المكتوبة يدويًا، بيضيفها لنفس قايمة parsedPrintOrderNumbers اللي بيستخدمها
+// رفع الملف بالظبط (نفس المعاينة، نفس فحص التكرار، نفس زرار الرفع بعد كده)، واختياريًا بيوزعها
+// كلها على مسؤول واحد على طول لو محدد.
+function submitQuickPrintOrders() {
+  const raw = document.getElementById('quick-print-textarea').value;
+  const layoutValue = document.getElementById('quick-print-layout').value;
+
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
+  if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
+
+  const beforeSet = new Set(parsedPrintOrderNumbers);
+  const newOnes = orderNumbers.filter(num => !beforeSet.has(num));
+  const alreadyInBatch = orderNumbers.length - newOnes.length;
+
+  parsedPrintOrderNumbers = [...new Set(parsedPrintOrderNumbers.concat(orderNumbers))];
+
+  if (layoutValue) {
+    orderNumbers.forEach(num => { printOrderAssignments[num] = layoutValue; });
+  }
+
+  document.getElementById('quick-print-textarea').value = '';
+  document.getElementById('print-file-name-display').innerText = `تمت الإضافة السريعة (الإجمالي الآن ${parsedPrintOrderNumbers.length} رقم طلب)`;
+  renderPrintPreview();
+
+  const note = alreadyInBatch > 0 ? `\n(${alreadyInBatch} رقم كان مضاف بالفعل في المعاينة الحالية، اتجاهل التكرار الداخلي)` : '';
+  alert(`تمت إضافة ${newOnes.length} رقم طلب جديد للمعاينة.${layoutValue ? ` تم توزيعهم على ${getDisplayName(layoutValue)}.` : ''}${note}`);
+}
+
+// بيدور على أي رقم من parsedPrintOrderNumbers الحالية موجود بالفعل قبل كده في جدول الطباعة (certMasterData)،
+// بغض النظر عن تاريخه أو نوعه، ويعرضهم في لوحة تحذير مع تفاصيل حالتهم/مسؤولهم/نوعهم الحاليين.
+function renderPrintDuplicatesPanel() {
+  const area = document.getElementById('print-duplicates-area');
+  const container = document.getElementById('print-duplicates-panel');
+  if (!area || !container) return;
+
+  if (!parsedPrintOrderNumbers || parsedPrintOrderNumbers.length === 0) {
+    area.style.display = 'none';
+    container.innerHTML = '';
+    window.lastPrintDupNums = [];
+    return;
+  }
+
+  const existingMap = {};
+  (certMasterData || []).forEach(o => { existingMap[String(o.order_number)] = o; });
+
+  const dupNums = parsedPrintOrderNumbers.filter(num => existingMap[String(num)]);
+  window.lastPrintDupNums = dupNums;
+  area.style.display = 'block';
+
+  if (dupNums.length === 0) {
+    container.innerHTML = `<p style="color: var(--badge-accept-text);">✅ مفيش أي رقم من اللي دخلتهم موجود قبل كده في جدول الطباعة.</p>`;
+    return;
+  }
+
+  let html = `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚨 ${dupNums.length} رقم طلب موجود بالفعل في جدول الطباعة من قبل — هيتجاهلوا تلقائيًا عند الرفع (مش هيتضافوا مرة تانية):</p>`;
+  html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
+  html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="exportPrintDuplicatesExcel()">⬇️ تحميل شيت إكسيل بالمكرر (${dupNums.length})</button>`;
+  html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="removePrintDuplicatesFromBatch()">🗑️ إزالتهم من المعاينة الحالية</button>`;
+  html += `</div>`;
+
+  html += `<div style="max-height:220px; overflow-y:auto; border: 1px solid var(--badge-reject-text); border-radius: 6px;">`;
+  html += `<table style="width:100%; font-size:12px;"><thead><tr>
+    <th style="padding:6px;">رقم الطلب</th><th style="padding:6px;">النوع الحالي</th>
+    <th style="padding:6px;">المسؤول الحالي</th><th style="padding:6px;">الحالة الحالية</th><th style="padding:6px;">التاريخ الحالي</th>
+  </tr></thead><tbody>`;
+  dupNums.forEach(num => {
+    const o = existingMap[String(num)];
+    html += `<tr>
+      <td style="padding:6px; text-align:center;">${num}</td>
+      <td style="padding:6px; text-align:center;">${o.cert_type || 'عادي'}</td>
+      <td style="padding:6px; text-align:center;">${getDisplayName(o.Layout || o.layout) || '⛔ غير موزّع'}</td>
+      <td style="padding:6px; text-align:center;">${o.status || '⛔ لم يتم الطباعة'}</td>
+      <td style="padding:6px; text-align:center;">${extractDateString(o) || '-'}</td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+
+  container.innerHTML = html;
+}
+
+function exportPrintDuplicatesExcel() {
+  const dupNums = window.lastPrintDupNums || [];
+  if (dupNums.length === 0) { alert('لا توجد أرقام مكررة لتحميلها.'); return; }
+
+  const existingMap = {};
+  (certMasterData || []).forEach(o => { existingMap[String(o.order_number)] = o; });
+
+  const exportRows = dupNums.map(num => {
+    const o = existingMap[String(num)];
+    return {
+      'رقم الطلب': num,
+      'النوع الحالي': o ? (o.cert_type || 'عادي') : '-',
+      'المسؤول الحالي': o ? (getDisplayName(o.Layout || o.layout) || '-') : '-',
+      'الحالة الحالية': o ? (o.status || '-') : '-',
+      'التاريخ الحالي': o ? (extractDateString(o) || '-') : '-'
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 16 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'مكرر في جدول الطباعة');
+
+  const dateLabel = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(workbook, `طباعة_مكرر_${dateLabel}.xlsx`);
+}
+
+function removePrintDuplicatesFromBatch() {
+  const dupNums = window.lastPrintDupNums || [];
+  if (dupNums.length === 0) { alert('لا توجد أرقام مكررة لإزالتها.'); return; }
+
+  const confirmRemove = confirm(`هيتم إزالة ${dupNums.length} رقم مكرر من المعاينة الحالية (هما نفسهم لسه موجودين زي ما هم في جدول الطباعة، بس مش هيترفعوا تاني). تأكيد؟`);
+  if (!confirmRemove) return;
+
+  const dupSet = new Set(dupNums.map(String));
+  parsedPrintOrderNumbers = parsedPrintOrderNumbers.filter(num => !dupSet.has(String(num)));
+  renderPrintPreview();
+}
+
 function handlePrintFileSelect(event) {
   const files = event.target.files;
   if (!files || files.length === 0) return;
@@ -1749,6 +1913,7 @@ function renderPrintPreview() {
   document.getElementById('print-count').innerText = parsedPrintOrderNumbers.length;
 
   if (hasData) populatePrintDistUsersList();
+  renderPrintDuplicatesPanel();
 
   const tbody = document.getElementById('print-preview-tbody');
   const PREVIEW_LIMIT = 500;
@@ -1870,6 +2035,8 @@ function resetPrintUploadData() {
   document.getElementById('print-total-banner').style.display = 'none';
   document.getElementById('print-dist-panel').style.display = 'none';
   document.getElementById('print-dist-summary').innerHTML = '';
+  document.getElementById('print-duplicates-area').style.display = 'none';
+  document.getElementById('print-duplicates-panel').innerHTML = '';
 }
 
 function handlePrintDragOver(event) {
@@ -1904,11 +2071,12 @@ async function uploadPrintOrdersToSupabase() {
   try {
     // استبعاد أي رقم طلب موجود بالفعل في جدول الطباعة عشان نتفادى التكرار
     if (!certDataLoaded) await loadCertificatesData();
+    const certTypeForBatch = document.getElementById('print-cert-type-select').value || 'عادي';
     const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
     const newRows = parsedPrintOrderNumbers
       .filter(num => !existingNumbers.has(String(num)))
       .map(num => {
-        const row = { order_number: num };
+        const row = { order_number: num, cert_type: certTypeForBatch };
         if (printOrderAssignments[num]) row.Layout = printOrderAssignments[num];
         return row;
       });
@@ -1941,7 +2109,7 @@ async function uploadPrintOrdersToSupabase() {
 
     certDataLoaded = false;
     await loadCertificatesData();
-    switchTab('certificates');
+    switchTab(certTypeForBatch === 'تعمير' ? 'certificates-renovation' : 'certificates');
   } catch (err) {
     alert('خطأ: ' + err.message);
   } finally {
@@ -3282,6 +3450,22 @@ async function loadCertificatesData() {
   }
 }
 
+// تحديث بيانات تاب الشهادات (عادي/تعمير) من Supabase يدويًا، من غير ريفرش لكل الصفحة
+async function refreshCertDashboardData() {
+  const btn = document.getElementById('refresh-cert-btn');
+  const originalText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحديث...'; }
+
+  try {
+    certDataLoaded = false;
+    await loadCertificatesData();
+  } catch (err) {
+    alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
+
 function populateCertLayoutFilter() {
   const filterSelect = document.getElementById('cert-layout-filter');
   const modalSelect = document.getElementById('cert-modal-layout');
@@ -3502,8 +3686,15 @@ function renderRejectionsReviewerStats() {
   `).join('');
 }
 
+// بيرجّع صفوف certMasterData الخاصة بالنوع المعروض حاليًا بس (عادي أو تعمير)
+function getCertMasterDataForActiveType() {
+  return (certMasterData || []).filter(o => (o.cert_type || 'عادي') === activeCertType);
+}
+
 function applyCertDateFiltering() {
-  if (!certMasterData || certMasterData.length === 0) {
+  const scopedMasterData = getCertMasterDataForActiveType();
+
+  if (!scopedMasterData || scopedMasterData.length === 0) {
     certAllData = [];
     renderCertKpis([]);
     renderCertPage();
@@ -3515,12 +3706,12 @@ function applyCertDateFiltering() {
   let targetDate = dateInput;
 
   if (!targetDate) {
-    const dates = certMasterData.map(extractDateString).filter(Boolean).sort().reverse();
+    const dates = scopedMasterData.map(extractDateString).filter(Boolean).sort().reverse();
     targetDate = dates[0] || '';
     if (targetDate) document.getElementById('cert-date-filter').value = targetDate;
   }
 
-  certAllData = certMasterData.filter(item => {
+  certAllData = scopedMasterData.filter(item => {
     const d = extractDateString(item);
     return d === targetDate || !d;
   });

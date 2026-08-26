@@ -11,7 +11,7 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
 let ALL_PROFILES = []; // [{ id, username, name, role }] - من غير باسورد أو إيميل خالص
-   
+ 
 function getUsernames() {
   return ALL_PROFILES.map(p => p.username);
 }
@@ -838,7 +838,7 @@ function switchTab(tabName) {
     activeCertType = isRenovation ? 'تعمير' : 'عادي';
     document.getElementById(isRenovation ? 'certificates-renovation-tab-btn' : 'certificates-tab-btn').classList.add('active');
     document.getElementById('tab-certificates').style.display = 'block';
-    document.getElementById('cert-page-heading').innerText = isRenovation ? '🏗️ قائمة شهادات التعمير' : '🖨️ قائمة حالات الشهادات';
+    document.getElementById('cert-page-heading').innerText = isRenovation ? '📠 قائمة شهادات التعمير' : '🖨️ قائمة حالات الشهادات';
     document.getElementById('cert-date-filter').value = ''; // كل نوع له تاريخه الأحدث المستقل
     selectedCertOrderNumbers.clear();
     updateCertSelectedCount();
@@ -3552,11 +3552,15 @@ function getFilteredRejectionsRows() {
   const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
   const reviewerValue = document.getElementById('rejections-reviewer-filter').value;
   const substatusValue = document.getElementById('rejections-substatus-filter').value;
+  const typeValue = document.getElementById('rejections-type-filter').value;
 
   let rows = rejectionsAllData || [];
 
   if (reviewerValue && reviewerValue !== 'ALL') {
     rows = rows.filter(o => o.reviewer === reviewerValue || getDisplayName(o.reviewer) === getDisplayName(reviewerValue));
+  }
+  if (typeValue && typeValue !== 'ALL') {
+    rows = rows.filter(o => (o.cert_type || 'عادي') === typeValue);
   }
   if (substatusValue === 'PENDING') {
     rows = rows.filter(o => !o.reviewer_action);
@@ -3611,7 +3615,7 @@ function renderRejectionsTab() {
       return `
         <tr>
           <td class="order-no-cell">${orderNum}</td>
-          <td>${o.cert_type === 'تعمير' ? '🏗️ تعمير' : '🖨️ عادي'}</td>
+          <td>${o.cert_type === 'تعمير' ? '📠 تعمير' : '🖨️ عادي'}</td>
           <td>${layout}</td>
           <td>${reviewerName}</td>
           <td>${reason}</td>

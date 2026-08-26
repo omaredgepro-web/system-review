@@ -4129,6 +4129,32 @@ async function executeCertBulkDateUpdate() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
+async function executeCertBulkTypeUpdate() {
+  const newType = document.getElementById('cert-bulk-type-select').value;
+  if (!newType) { alert('برجاء اختيار النوع من القائمة'); return; }
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetLabel = newType === 'تعمير' ? 'تاب طباعة شهادات التعمير' : 'تاب طباعة الشهادات العادي';
+  const confirmChange = confirm(`هل أنت متأكد من نقل (${selectedCertOrderNumbers.size}) طلب إلى "${targetLabel}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'update', { cert_type: newType });
+    if (error) { alert('حدث خطأ أثناء تغيير النوع: ' + error.message); }
+    else {
+      alert(`تم نقل ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${targetLabel}"!`);
+      targetOrders.forEach(o => { o.cert_type = newType; });
+      selectedCertOrderNumbers.clear();
+      updateCertSelectedCount();
+      applyCertDateFiltering(); // الطلبات اللي اتغير نوعها هتختفي من القايمة الحالية فورًا لأنها بقت من النوع التاني
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 async function executeCertBulkStatusUpdate() {
   const newStatus = document.getElementById('cert-bulk-status-select').value;
   if (!newStatus) { alert('برجاء اختيار الحالة من القائمة'); return; }
@@ -4216,6 +4242,7 @@ function openCertEditModal(orderNum) {
   document.getElementById('cert-modal-date').value = extractDateString(selectedCertOrder) || '';
   document.getElementById('cert-modal-status').value = CERT_STATUSES.includes(selectedCertOrder.status) ? selectedCertOrder.status : 'معلق';
   document.getElementById('cert-modal-layout').value = selectedCertOrder.Layout || selectedCertOrder.layout || '';
+  document.getElementById('cert-modal-type').value = selectedCertOrder.cert_type || 'عادي';
   document.getElementById('cert-modal-reason').value = selectedCertOrder.reason && selectedCertOrder.reason !== '-' ? selectedCertOrder.reason : '';
   document.getElementById('cert-modal-reviewer').value = selectedCertOrder.reviewer || '';
   toggleCertReasonField();
@@ -4238,6 +4265,7 @@ async function saveCertUpdate() {
 
   const newStatus = document.getElementById('cert-modal-status').value;
   const newLayout = document.getElementById('cert-modal-layout').value;
+  const newType = document.getElementById('cert-modal-type').value;
   const newReason = document.getElementById('cert-modal-reason').value.trim();
   const newReviewer = document.getElementById('cert-modal-reviewer').value;
   const newDate = document.getElementById('cert-modal-date').value;
@@ -4259,6 +4287,7 @@ async function saveCertUpdate() {
   const updateData = {
     status: newStatus,
     Layout: newLayout,
+    cert_type: newType,
     reason: CERT_REASON_REQUIRED_STATUSES.includes(newStatus) ? newReason : '-',
     reviewer: CERT_REVIEWER_REQUIRED_STATUSES.includes(newStatus) ? newReviewer : null,
     reviewer_action: null,

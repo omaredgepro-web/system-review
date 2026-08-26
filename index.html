@@ -98,7 +98,7 @@
       <button class="tab-btn active" id="dashboard-tab-btn" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
       <button class="tab-btn" id="admin-tab-btn" style="display: none;" onclick="switchTab('admin')">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
       <button class="tab-btn" id="certificates-tab-btn" style="display: none;" onclick="switchTab('certificates')">🖨️ طباعة الشهادات</button>
-      <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none;" onclick="switchTab('certificates-renovation')">🏗️ طباعة شهادات التعمير</button>
+      <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none;" onclick="switchTab('certificates-renovation')">📠 طباعة شهادات التعمير</button>
       <button class="tab-btn" id="rejections-tab-btn" onclick="switchTab('rejections')">🚫 مرفوضات</button>
       <button class="tab-btn" id="print-distribute-tab-btn" style="display: none;" onclick="switchTab('print-distribute')">📦 توزيع طلبات الطباعة</button>
     </div>
@@ -573,6 +573,13 @@
               <option value="ALL">كل المراجعين</option>
             </select>
 
+            <label style="font-size: 13px; color: var(--text-muted);">النوع:</label>
+            <select id="rejections-type-filter" class="filter-select" onchange="renderRejectionsTab()">
+              <option value="ALL">الكل</option>
+              <option value="عادي">🖨️ عادي</option>
+              <option value="تعمير">📠 تعمير</option>
+            </select>
+
             <label style="font-size: 13px; color: var(--text-muted);">حالة المراجعة:</label>
             <select id="rejections-substatus-filter" class="filter-select" onchange="renderRejectionsTab()">
               <option value="ALL">الكل</option>
@@ -628,10 +635,10 @@
         <!-- نوع الشهادة: بيحدد الدفعة دي (سواء متضافة بالملف أو بالتوزيع السريع) هتروح لأنهي تاب بعد كده -->
         <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px; background: rgba(99, 102, 241, 0.08); border-color: var(--accent-purple);">
           <h3 style="font-size: 14px; margin-bottom: 8px;">🗂️ نوع الشهادة لهذه الدفعة</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">حدد نوع الشهادة قبل الرفع أو الإضافة السريعة — ده اللي بيحدد الطلبات دي هتظهر في تاب "🖨️ طباعة الشهادات" العادي ولا تاب "🏗️ طباعة شهادات التعمير".</p>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">حدد نوع الشهادة قبل الرفع أو الإضافة السريعة — ده اللي بيحدد الطلبات دي هتظهر في تاب "🖨️ طباعة الشهادات" العادي ولا تاب "📠 طباعة شهادات التعمير".</p>
           <select id="print-cert-type-select" class="filter-select" style="width: 240px;">
             <option value="عادي">🖨️ عادي (طباعة الشهادات)</option>
-            <option value="تعمير">🏗️ تعمير</option>
+            <option value="تعمير">📠 تعمير</option>
           </select>
         </div>
 

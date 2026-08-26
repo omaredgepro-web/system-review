@@ -9,7 +9,7 @@
   <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>نظام مراجعة الطلبات المباشر</title>
-     
+    
   <!-- تفعيل الوضع الداكن/الفاتح المحفوظ قبل ظهور الصفحة لتفادي وميض الشاشة -->
   <script>
     (function () {
@@ -568,7 +568,7 @@
           <div class="table-filters">
             <input type="text" id="rejections-search-input" class="search-input" placeholder="ابحث برقم الطلب..." oninput="renderRejectionsTab()">
 
-            <label style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
+            <label id="rejections-reviewer-filter-label" style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
             <select id="rejections-reviewer-filter" class="filter-select" onchange="renderRejectionsTab()">
               <option value="ALL">كل المراجعين</option>
             </select>
@@ -591,6 +591,7 @@
               <thead>
                 <tr>
                   <th>رقم الطلب</th>
+                  <th>النوع</th>
                   <th>المسؤول</th>
                   <th>المراجع</th>
                   <th>السبب</th>
@@ -600,7 +601,7 @@
                 </tr>
               </thead>
               <tbody id="rejections-tbody">
-                <tr><td colspan="7" style="text-align: center;">جاري التحميل...</td></tr>
+                <tr><td colspan="8" style="text-align: center;">جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>

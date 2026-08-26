@@ -599,6 +599,12 @@ async function setupUserSession(profile) {
   const teamsStatsBtn = document.getElementById('stats-view-btn-teams');
   if (teamsStatsBtn) teamsStatsBtn.style.display = canSeeTeamsStats ? 'inline-flex' : 'none';
 
+  // تاب "مرفوضات": فلتر اختيار المراجع مفيد للأدمن بس (يشوف الكل)، المراجع العادي أصلاً بيشوف طلباته هو بس
+  const rejFilterLabel = document.getElementById('rejections-reviewer-filter-label');
+  const rejFilterSelect = document.getElementById('rejections-reviewer-filter');
+  if (rejFilterLabel) rejFilterLabel.style.display = isAdmin ? 'inline' : 'none';
+  if (rejFilterSelect) rejFilterSelect.style.display = isAdmin ? 'inline-block' : 'none';
+
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
   loadData();
@@ -3494,7 +3500,8 @@ function populateCertLayoutFilter() {
   }
 }
 
-// ============ تاب مرفوضات (يظهر للكل - مراجع وأدمن) ============
+// ============ تاب مرفوضات ============
+// المراجع العادي يشوف طلباته المرفوضة هو بس (وإحصائياته هو بس)، والأدمن يشوف كل المرفوضات زي ما هي.
 let rejectionsAllData = [];
 
 function toggleRejectionsStatsSidebar() {
@@ -3502,7 +3509,10 @@ function toggleRejectionsStatsSidebar() {
 }
 
 function getRejectedCertRows() {
-  return (certMasterData || []).filter(o => o.status === 'مرفوض');
+  const rejected = (certMasterData || []).filter(o => o.status === 'مرفوض');
+  const isAdmin = currentUser && currentUser.role === 'admin';
+  if (isAdmin) return rejected;
+  return rejected.filter(o => currentUser && o.reviewer === currentUser.username);
 }
 
 function applyRejectionsDateFiltering() {
@@ -3601,6 +3611,7 @@ function renderRejectionsTab() {
       return `
         <tr>
           <td class="order-no-cell">${orderNum}</td>
+          <td>${o.cert_type === 'تعمير' ? '🏗️ تعمير' : '🖨️ عادي'}</td>
           <td>${layout}</td>
           <td>${reviewerName}</td>
           <td>${reason}</td>

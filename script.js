@@ -4671,14 +4671,24 @@ function clearMawaqefStatusFilter() {
   renderMawaqefPage();
 }
 
+// ألوان احتياطية للحالات اللي مش من الحالات المعروفة عندنا مسبقًا (زي أي حالة جديدة اتضافت من الداتا نفسها)
+const MAWAQEF_FALLBACK_COLORS = ['#38bdf8', '#f472b6', '#facc15', '#4ade80', '#c084fc', '#fb7185', '#22d3ee', '#818cf8'];
+
 function renderMawaqefKpis(rows) {
+  // بنجمع حسب القيمة الفعلية لعمود status في الداتا - أي حالة موجودة بالفعل بتاخد كارت لوحدها،
+  // مش بس الـ 7 حالات المعروفة عندنا مسبقًا (MAWAQEF_STATUSES). الفاضي/الغير محدد بيتحسب "بدون موقف".
   const counts = {};
-  MAWAQEF_STATUSES.forEach(s => counts[s] = 0);
-  let unknownCount = 0;
   rows.forEach(o => {
-    if (counts[o.status] !== undefined) counts[o.status]++;
-    else unknownCount++;
+    const status = (o.status && String(o.status).trim()) || 'بدون موقف';
+    counts[status] = (counts[status] || 0) + 1;
   });
+
+  // الحالات المعروفة الأول بترتيبها المعتاد (حتى لو عددها صفر دلوقتي)، وبعدها أي حالة تانية
+  // موجودة في الداتا فعليًا ومش من ضمن قائمتنا، مرتبة حسب الأكتر عددًا
+  const extraStatuses = Object.keys(counts)
+    .filter(s => !MAWAQEF_STATUSES.includes(s))
+    .sort((a, b) => counts[b] - counts[a]);
+  const orderedStatuses = [...MAWAQEF_STATUSES, ...extraStatuses];
 
   const container = document.getElementById('mawaqef-kpi-container');
   if (!container) return;
@@ -4694,13 +4704,13 @@ function renderMawaqefKpis(rows) {
     </div>
   `;
 
-  MAWAQEF_STATUSES.forEach(status => {
-    const meta = MAWAQEF_STATUS_META[status] || { icon: '📍', color: '#94a3b8' };
+  orderedStatuses.forEach((status, idx) => {
+    const meta = MAWAQEF_STATUS_META[status] || { icon: '📍', color: MAWAQEF_FALLBACK_COLORS[idx % MAWAQEF_FALLBACK_COLORS.length] };
     const count = counts[status] || 0;
     const pct = total > 0 ? Math.round((count / total) * 100) : 0;
     const isActive = activeStatus === status;
     html += `
-      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterMawaqefByStatus('${status}')">
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterMawaqefByStatus('${status.replace(/'/g, "\\'")}')">
         <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${status}</div>
         <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
         <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
@@ -4710,15 +4720,6 @@ function renderMawaqefKpis(rows) {
       </div>
     `;
   });
-
-  if (unknownCount > 0) {
-    html += `
-      <div class="stat-card" style="border-right: 4px solid #64748b;">
-        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">❔ حالة غير معروفة</div>
-        <div style="font-size:28px; font-weight:800;">${unknownCount.toLocaleString('ar-EG')}</div>
-      </div>
-    `;
-  }
 
   container.innerHTML = html;
 }

@@ -7,6 +7,17 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
+
+// ============ جدول المواقف (مقصور على 5 أدمن بالاسم، والحذف على umar/mondy بس) ============
+const MAWAQEF_TABLE_NAME = 'mawaqef';
+const MAWAQEF_ALLOWED_USERNAMES = ['umar', 'mondy', 'sara', 'momen', 'rawan'];
+const MAWAQEF_STATUSES = ['تم الرفع', 'جاري التعديل', 'خطأ جهة ولاية', 'مشكلة في بيانات الطلب', 'غير موجود', 'محجوز', 'بدون موقف'];
+function canViewMawaqef() {
+  return !!(currentUser && currentUser.role === 'admin' && MAWAQEF_ALLOWED_USERNAMES.includes(currentUser.username));
+}
+function canDeleteMawaqef() {
+  return !!(currentUser && currentUser.role === 'admin' && DELETE_ALLOWED_USERNAMES.includes(currentUser.username));
+}
        
 // ⚠️ USERS_DB اتشالت بالكامل من هنا. اليوزرات والباسوردات بقت متخزنة في Supabase Auth،
 // مش في كود الجافا سكريبت. القايمة دي بتتحمّل بعد تسجيل الدخول من جدول profiles.
@@ -82,6 +93,15 @@ let parsedPrintOrderNumbers = [];
 let printOrderAssignments = {}; // order_number -> اسم الأدمن المخصص ليه (من التوزيع التلقائي)
 let printDistUserSelection = null;
 let selectedOrderNumbers = new Set();
+
+// ============ حالة تاب المواقف وتاب جهة الولاية ============
+let mawaqefMasterData = [];
+let mawaqefAllData = [];
+let mawaqefDataLoaded = false;
+let mawaqefCurrentPage = 1;
+const mawaqefPageSize = 100;
+let selectedMawaqefOrderNumbers = new Set();
+let parsedGehatWlayaRows = []; // الصفوف المستخرجة من ملف إكسيل "جهة الولاية"
 
 // ============ حالة تاب طباعة الشهادات ============
 let certMasterData = [];
@@ -586,6 +606,8 @@ async function setupUserSession(profile) {
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('certificates-renovation-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
+  document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
+  document.getElementById('gehat-wlaya-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
 
   // تغيير تاريخ الطلبات المعروضة متاح للأدمن بس؛ المراجع دايمًا شايف أحدث تاريخ متاح
   document.getElementById('date-filter-label').style.display = isAdmin ? 'inline' : 'none';
@@ -607,8 +629,18 @@ async function setupUserSession(profile) {
 
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
+  populateMawaqefStatusDropdowns();
   loadData();
   subscribeToLiveUpdates();
+}
+
+// بيملأ قوايم الحالة الخاصة بتاب المواقف (فلتر الجدول + نافذة التعديل + التعديل الجماعي)
+function populateMawaqefStatusDropdowns() {
+  const optionsHtml = MAWAQEF_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('');
+  const modalStatus = document.getElementById('mawaqef-modal-status');
+  if (modalStatus) modalStatus.innerHTML = optionsHtml;
+  const bulkStatus = document.getElementById('mawaqef-bulk-status-select');
+  if (bulkStatus) bulkStatus.innerHTML = '<option value="">تغيير الحالة إلى...</option>' + optionsHtml;
 }
 
 // اشتراك Realtime: أي إضافة/تعديل/حذف يحصل في الجداول دي (من أي حد، من أي مكان)
@@ -650,6 +682,12 @@ function scheduleLiveCertRender() {
   liveCertRenderTimer = setTimeout(() => applyCertDateFiltering(), 250);
 }
 
+let liveMawaqefRenderTimer = null;
+function scheduleLiveMawaqefRender() {
+  clearTimeout(liveMawaqefRenderTimer);
+  liveMawaqefRenderTimer = setTimeout(() => applyMawaqefDateFiltering(), 250);
+}
+
 function handleLiveChange(tableName, payload) {
   const { eventType, new: newRow, old: oldRow } = payload;
 
@@ -661,6 +699,9 @@ function handleLiveChange(tableName, payload) {
     if (typeof certDataLoaded !== 'undefined' && certDataLoaded) {
       scheduleLiveCertRender();
     }
+  } else if (tableName === MAWAQEF_TABLE_NAME) {
+    mawaqefMasterData = patchMasterDataRow(mawaqefMasterData || [], eventType, newRow, oldRow);
+    if (mawaqefDataLoaded) scheduleLiveMawaqefRender();
   }
 }
 
@@ -676,11 +717,15 @@ function subscribeToLiveUpdates() {
     .on('postgres_changes', { event: '*', schema: 'public', table: CERT_TABLE_NAME }, (payload) => {
       handleLiveChange(CERT_TABLE_NAME, payload);
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: MAWAQEF_TABLE_NAME }, (payload) => {
+      handleLiveChange(MAWAQEF_TABLE_NAME, payload);
+    })
     .subscribe((status) => {
-      // بنحدث مؤشر تاب المراجعة ومؤشر تاب الشهادات مع بعض، لأنهم على نفس قناة الـ Realtime الواحدة
+      // بنحدث مؤشر تاب المراجعة ومؤشر تاب الشهادات ومؤشر تاب المواقف مع بعض، لأنهم على نفس قناة الـ Realtime الواحدة
       const indicators = [
         document.getElementById('live-status-indicator'),
-        document.getElementById('cert-live-status-indicator')
+        document.getElementById('cert-live-status-indicator'),
+        document.getElementById('mawaqef-live-status-indicator')
       ].filter(Boolean);
       if (indicators.length === 0) return;
       indicators.forEach(indicator => {
@@ -825,6 +870,8 @@ function switchTab(tabName) {
   document.getElementById('tab-certificates').style.display = 'none';
   document.getElementById('tab-print-distribute').style.display = 'none';
   document.getElementById('tab-rejections').style.display = 'none';
+  document.getElementById('tab-mawaqef').style.display = 'none';
+  document.getElementById('tab-gehat-wlaya').style.display = 'none';
 
   if (tabName === 'dashboard') {
     document.getElementById('dashboard-tab-btn').classList.add('active');
@@ -854,6 +901,16 @@ function switchTab(tabName) {
     document.getElementById('tab-print-distribute').style.display = 'block';
     // نحمّل بيانات جدول الطباعة مقدمًا (لو لسه معملهاش) عشان فحص التكرار يقدر يشتغل فورًا
     if (!certDataLoaded) loadCertificatesData().then(() => renderPrintDuplicatesPanel());
+  } else if (tabName === 'mawaqef') {
+    document.getElementById('mawaqef-tab-btn').classList.add('active');
+    document.getElementById('tab-mawaqef').style.display = 'block';
+    selectedMawaqefOrderNumbers.clear();
+    if (!mawaqefDataLoaded) loadMawaqefData();
+    else applyMawaqefDateFiltering();
+  } else if (tabName === 'gehat-wlaya') {
+    document.getElementById('gehat-wlaya-tab-btn').classList.add('active');
+    document.getElementById('tab-gehat-wlaya').style.display = 'block';
+    if (!mawaqefDataLoaded) loadMawaqefData();
   }
 }
 
@@ -1752,12 +1809,17 @@ function populateQuickPrintDropdown() {
 // بياخد أرقام الطلبات المكتوبة يدويًا، بيضيفها لنفس قايمة parsedPrintOrderNumbers اللي بيستخدمها
 // رفع الملف بالظبط (نفس المعاينة، نفس فحص التكرار، نفس زرار الرفع بعد كده)، واختياريًا بيوزعها
 // كلها على مسؤول واحد على طول لو محدد.
-function submitQuickPrintOrders() {
+function submitQuickPrintOrders(forceCertType) {
   const raw = document.getElementById('quick-print-textarea').value;
   const layoutValue = document.getElementById('quick-print-layout').value;
 
   const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
+
+  // لو الزرار المستخدم هو "إرسال مباشرة للتعمير"، نغيّر نوع الشهادة بتاع الدفعة كلها لـ "تعمير" تلقائيًا
+  if (forceCertType) {
+    document.getElementById('print-cert-type-select').value = forceCertType;
+  }
 
   const beforeSet = new Set(parsedPrintOrderNumbers);
   const newOnes = orderNumbers.filter(num => !beforeSet.has(num));
@@ -1774,7 +1836,8 @@ function submitQuickPrintOrders() {
   renderPrintPreview();
 
   const note = alreadyInBatch > 0 ? `\n(${alreadyInBatch} رقم كان مضاف بالفعل في المعاينة الحالية، اتجاهل التكرار الداخلي)` : '';
-  alert(`تمت إضافة ${newOnes.length} رقم طلب جديد للمعاينة.${layoutValue ? ` تم توزيعهم على ${getDisplayName(layoutValue)}.` : ''}${note}`);
+  const typeNote = forceCertType ? ` (النوع اتحدد "${forceCertType}" لكل الدفعة الحالية — هتشوفهم بعد الرفع في تاب ${forceCertType === 'تعمير' ? '📠 طباعة شهادات التعمير' : '🖨️ طباعة الشهادات'})` : '';
+  alert(`تمت إضافة ${newOnes.length} رقم طلب جديد للمعاينة.${layoutValue ? ` تم توزيعهم على ${getDisplayName(layoutValue)}.` : ''}${typeNote}${note}`);
 }
 
 // بيدور على أي رقم من parsedPrintOrderNumbers الحالية موجود بالفعل قبل كده في جدول الطباعة (certMasterData)،
@@ -4463,4 +4526,557 @@ function exportMyOrdersToExcel() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'طلباتي');
   XLSX.writeFile(workbook, `طلبات_${currentUser.name}_${dateLabel}.xlsx`);
+}
+
+// ============================================================
+// ============ تاب 🅿️ المواقف (mawaqef) ============
+// ============================================================
+
+async function loadMawaqefData() {
+  const tbody = document.getElementById('mawaqef-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
+
+  try {
+    let allFetched = [];
+    let from = 0, step = 1000, hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
+      if (error) throw error;
+      if (data && data.length > 0) {
+        allFetched = allFetched.concat(data);
+        from += step;
+        if (data.length < step) hasMore = false;
+      } else { hasMore = false; }
+    }
+
+    mawaqefMasterData = allFetched;
+    mawaqefDataLoaded = true;
+    populateMawaqefStatusFilter();
+    applyMawaqefDateFiltering();
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+  }
+}
+
+async function refreshMawaqefData() {
+  const btn = document.getElementById('refresh-mawaqef-btn');
+  const originalText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحديث...'; }
+  try {
+    mawaqefDataLoaded = false;
+    await loadMawaqefData();
+  } catch (err) {
+    alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
+
+function populateMawaqefStatusFilter() {
+  const select = document.getElementById('mawaqef-status-filter');
+  if (!select) return;
+  const currentValue = select.value;
+  const statusesInData = [...new Set((mawaqefMasterData || []).map(o => o.status).filter(Boolean))];
+  const allStatuses = [...new Set([...MAWAQEF_STATUSES, ...statusesInData])];
+  select.innerHTML = '<option value="ALL">كل الحالات</option>' + allStatuses.map(s => `<option value="${s}">${s}</option>`).join('');
+  if (currentValue) select.value = currentValue;
+}
+
+function applyMawaqefDateFiltering() {
+  if (!mawaqefMasterData || mawaqefMasterData.length === 0) {
+    mawaqefAllData = [];
+    renderMawaqefKpis([]);
+    renderMawaqefPage();
+    const label = document.getElementById('mawaqef-active-date-label');
+    if (label) label.innerText = 'لا يوجد بيانات';
+    return;
+  }
+
+  const dateInput = document.getElementById('mawaqef-date-filter').value;
+  let targetDate = dateInput;
+
+  if (!targetDate) {
+    const dates = mawaqefMasterData.map(extractDateString).filter(Boolean).sort().reverse();
+    targetDate = dates[0] || '';
+    if (targetDate) document.getElementById('mawaqef-date-filter').value = targetDate;
+  }
+
+  mawaqefAllData = mawaqefMasterData.filter(item => {
+    const d = extractDateString(item);
+    return d === targetDate || !d;
+  });
+
+  const label = document.getElementById('mawaqef-active-date-label');
+  if (label) label.innerText = targetDate ? `يعرض مواقف تاريخ: ${targetDate}` : 'كل الطلبات (بدون تاريخ)';
+
+  renderMawaqefKpis(mawaqefAllData);
+  mawaqefCurrentPage = 1;
+  renderMawaqefPage();
+}
+
+function showAllMawaqefDates() {
+  document.getElementById('mawaqef-date-filter').value = '';
+  mawaqefAllData = mawaqefMasterData || [];
+  const label = document.getElementById('mawaqef-active-date-label');
+  if (label) label.innerText = 'عرض كل التواريخ';
+  renderMawaqefKpis(mawaqefAllData);
+  mawaqefCurrentPage = 1;
+  renderMawaqefPage();
+}
+
+function renderMawaqefKpis(rows) {
+  const counts = {};
+  MAWAQEF_STATUSES.forEach(s => counts[s] = 0);
+  rows.forEach(o => { counts[o.status] = (counts[o.status] || 0) + 1; });
+  const container = document.getElementById('mawaqef-kpi-container');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="kpi-card"><div class="kpi-title">إجمالي المواقف (للتاريخ المحدد)</div><div class="kpi-value">${rows.length}</div></div>
+  ` + MAWAQEF_STATUSES.map(s => `
+    <div class="kpi-card"><div class="kpi-title">${s}</div><div class="kpi-value" style="font-size: 22px;">${counts[s] || 0}</div></div>
+  `).join('');
+}
+
+function getFilteredMawaqefRows() {
+  const searchValue = (document.getElementById('mawaqef-search-input').value || '').trim().toLowerCase();
+  const statusValue = document.getElementById('mawaqef-status-filter').value;
+
+  let rows = mawaqefAllData || [];
+  if (statusValue && statusValue !== 'ALL') rows = rows.filter(o => o.status === statusValue);
+  if (searchValue) {
+    rows = rows.filter(o =>
+      String(o.order_number || '').toLowerCase().includes(searchValue) ||
+      String(o.tanzeen_number || '').toLowerCase().includes(searchValue)
+    );
+  }
+  return rows;
+}
+
+function renderMawaqefPage() {
+  const rows = getFilteredMawaqefRows();
+  const tbody = document.getElementById('mawaqef-tbody');
+  if (!tbody) return;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    document.getElementById('mawaqef-pagination-info').innerText = '';
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / mawaqefPageSize));
+  if (mawaqefCurrentPage > totalPages) mawaqefCurrentPage = totalPages;
+  const startIdx = (mawaqefCurrentPage - 1) * mawaqefPageSize;
+  const pageRows = rows.slice(startIdx, startIdx + mawaqefPageSize);
+
+  tbody.innerHTML = pageRows.map(o => {
+    const isChecked = selectedMawaqefOrderNumbers.has(o.order_number) ? 'checked' : '';
+    return `
+      <tr>
+        <td><input type="checkbox" class="mawaqef-row-checkbox" value="${o.order_number}" ${isChecked} onchange="toggleMawaqefSelection('${o.order_number}', this.checked)"></td>
+        <td class="order-no-cell">${o.order_number || '-'}</td>
+        <td>${o.tanzeen_number || '-'}</td>
+        <td>${o.status || '-'}</td>
+        <td>${o.notes || '-'}</td>
+        <td>${extractDateString(o) || '-'}</td>
+        <td style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="openMawaqefEditModal('${o.id}')">تحديث</button>
+          ${canDeleteMawaqef() ? `<button class="btn-delete-row" onclick="deleteSingleMawaqefRow('${o.id}')">🗑️ مسح</button>` : ''}
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('mawaqef-pagination-info').innerText = `صفحة ${mawaqefCurrentPage} من ${totalPages} (${rows.length} نتيجة)`;
+  updateMawaqefSelectedCount();
+}
+
+function changeMawaqefPage(delta) {
+  const rows = getFilteredMawaqefRows();
+  const totalPages = Math.max(1, Math.ceil(rows.length / mawaqefPageSize));
+  mawaqefCurrentPage = Math.min(totalPages, Math.max(1, mawaqefCurrentPage + delta));
+  renderMawaqefPage();
+}
+
+function toggleMawaqefSelection(orderNumber, checked) {
+  if (checked) selectedMawaqefOrderNumbers.add(orderNumber);
+  else selectedMawaqefOrderNumbers.delete(orderNumber);
+  updateMawaqefSelectedCount();
+}
+
+function toggleSelectAllMawaqefOnPage(checked) {
+  document.querySelectorAll('.mawaqef-row-checkbox').forEach(cb => {
+    cb.checked = checked;
+    toggleMawaqefSelection(cb.value, checked);
+  });
+}
+
+function clearMawaqefSelection() {
+  selectedMawaqefOrderNumbers.clear();
+  document.querySelectorAll('.mawaqef-row-checkbox').forEach(cb => cb.checked = false);
+  updateMawaqefSelectedCount();
+}
+
+function updateMawaqefSelectedCount() {
+  const el = document.getElementById('mawaqef-selected-count');
+  if (el) el.innerText = selectedMawaqefOrderNumbers.size;
+}
+
+// ============ إجراءات جماعية على المواقف ============
+async function executeMawaqefBulkStatusUpdate() {
+  const newStatus = document.getElementById('mawaqef-bulk-status-select').value;
+  if (!newStatus) { alert('برجاء اختيار الحالة من القائمة'); return; }
+  if (selectedMawaqefOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const confirmChange = confirm(`هل أنت متأكد من تغيير حالة (${selectedMawaqefOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(MAWAQEF_TABLE_NAME, 'id', matchValues, 'update', { status: newStatus });
+    if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); }
+    else {
+      alert(`تم تغيير حالة ${selectedMawaqefOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
+      targetOrders.forEach(o => { o.status = newStatus; });
+      selectedMawaqefOrderNumbers.clear();
+      applyMawaqefDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+async function executeMawaqefBulkDelete() {
+  if (!canDeleteMawaqef()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+  if (selectedMawaqefOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
+  const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedMawaqefOrderNumbers.size}) طلب محدد نهائياً؟`);
+  if (!confirmDelete) return;
+
+  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(MAWAQEF_TABLE_NAME, 'id', matchValues, 'delete');
+    if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); }
+    else {
+      alert(`تم حذف ${selectedMawaqefOrderNumbers.size} طلب بنجاح.`);
+      const idsToRemove = new Set(matchValues);
+      mawaqefMasterData = mawaqefMasterData.filter(o => !idsToRemove.has(o.id));
+      selectedMawaqefOrderNumbers.clear();
+      applyMawaqefDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+async function deleteSingleMawaqefRow(id) {
+  if (!canDeleteMawaqef()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+  if (!confirm('هل أنت متأكد من حذف الطلب ده نهائيًا؟')) return;
+  try {
+    const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).delete().eq('id', id);
+    if (error) { alert('حصل خطأ: ' + error.message); return; }
+    mawaqefMasterData = mawaqefMasterData.filter(o => o.id !== id);
+    applyMawaqefDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// ============ نافذة تعديل موقف واحد ============
+let selectedMawaqefOrder = null;
+function openMawaqefEditModal(id) {
+  selectedMawaqefOrder = (mawaqefMasterData || []).find(o => String(o.id) === String(id));
+  if (!selectedMawaqefOrder) return;
+  document.getElementById('mawaqef-modal-order-no').value = selectedMawaqefOrder.order_number || '';
+  document.getElementById('mawaqef-modal-tanzeen').value = selectedMawaqefOrder.tanzeen_number || '';
+  document.getElementById('mawaqef-modal-status').value = selectedMawaqefOrder.status || '';
+  document.getElementById('mawaqef-modal-notes').value = selectedMawaqefOrder.notes || '';
+  document.getElementById('mawaqef-modal-date').value = extractDateString(selectedMawaqefOrder) || '';
+  document.getElementById('mawaqef-edit-modal').style.display = 'flex';
+}
+
+function closeMawaqefModal() {
+  document.getElementById('mawaqef-edit-modal').style.display = 'none';
+  selectedMawaqefOrder = null;
+}
+
+async function saveMawaqefUpdate() {
+  if (!selectedMawaqefOrder) return;
+  const updateData = {
+    tanzeen_number: document.getElementById('mawaqef-modal-tanzeen').value || null,
+    status: document.getElementById('mawaqef-modal-status').value || null,
+    notes: document.getElementById('mawaqef-modal-notes').value || null,
+    date: document.getElementById('mawaqef-modal-date').value || null
+  };
+
+  try {
+    const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).update(updateData).eq('id', selectedMawaqefOrder.id);
+    if (error) { alert('حصل خطأ أثناء الحفظ: ' + error.message); return; }
+    Object.assign(selectedMawaqefOrder, updateData);
+    closeMawaqefModal();
+    applyMawaqefDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+function exportMawaqefExcel() {
+  const rows = getFilteredMawaqefRows();
+  if (rows.length === 0) { alert('لا توجد بيانات لتصديرها'); return; }
+  const exportRows = rows.map(o => ({
+    'رقم الطلب': o.order_number || '-',
+    'رقم طلب التقنين': o.tanzeen_number || '-',
+    'الحالة': o.status || '-',
+    'ملاحظات': o.notes || '-',
+    'التاريخ': extractDateString(o) || '-'
+  }));
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 20 }, { wch: 30 }, { wch: 14 }];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'المواقف');
+  XLSX.writeFile(workbook, `مواقف_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+// ============================================================
+// ============ تاب 🏛️ جهة الولاية: رفع إكسيل وتصدير للمواقف ============
+// ============================================================
+
+function handleGehatWlayaFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  handleGehatWlayaFile(file);
+  event.target.value = '';
+}
+
+function handleGehatWlayaDragOver(e) { e.preventDefault(); document.getElementById('gehat-upload-box').style.borderColor = 'var(--accent-purple)'; }
+function handleGehatWlayaDragLeave(e) { document.getElementById('gehat-upload-box').style.borderColor = ''; }
+function handleGehatWlayaFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('gehat-upload-box').style.borderColor = '';
+  const file = e.dataTransfer.files[0];
+  if (file) handleGehatWlayaFile(file);
+}
+
+async function handleGehatWlayaFile(file) {
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+    alert('برجاء اختيار ملف CSV أو Excel بس');
+    return;
+  }
+
+  document.getElementById('gehat-file-name-display').innerText = `جاري قراءة: ${file.name} ...`;
+
+  try {
+    const rawRows = await parseFileToRows(file);
+    const normalized = normalizeGehatWlayaRows(rawRows);
+    if (normalized.length === 0) {
+      alert('معرفتش ألاقي عمود "رقم الطلب" (requestnumber) أو عمود "جهة الولاية" (gehat_wlaya) في الملف. راجع أسماء الأعمدة.');
+      document.getElementById('gehat-file-name-display').innerText = '';
+      return;
+    }
+    parsedGehatWlayaRows = normalized;
+    document.getElementById('gehat-file-name-display').innerText = `تم تحميل: ${file.name} (${normalized.length} صف)`;
+    renderGehatWlayaPreview();
+  } catch (err) {
+    alert('تعذّر قراءة الملف: ' + err.message);
+  }
+}
+
+// بيوحّد أسماء أعمدة ملف "جهة الولاية" بغض النظر عن الاسم بالظبط المكتوب بيه العمود
+function normalizeGehatWlayaRows(rows) {
+  if (!rows || rows.length === 0) return [];
+
+  const aliases = {
+    order_number: ['requestnumber', 'request number', 'رقم الطلب', 'order_number'],
+    gehat_wlaya: ['gehat_wlaya', 'جهة الولاية', 'الحالة'],
+    gov_name: ['gov_name_ar', 'اسم المحافظة', 'المحافظة'],
+    tanseeq: ['geht_tanseeq', 'جهة التنسيق'],
+    city: ['name_city', 'المدينة'],
+    name: ['name', 'الاسم']
+  };
+
+  const sampleRow = rows[0];
+  const keyMap = {};
+  Object.keys(sampleRow).forEach(origKey => {
+    const normalizedKey = origKey.trim().toLowerCase();
+    for (const canonical in aliases) {
+      if (aliases[canonical].some(alias => alias.toLowerCase() === normalizedKey)) {
+        keyMap[origKey] = canonical;
+      }
+    }
+  });
+
+  if (!Object.values(keyMap).includes('order_number') || !Object.values(keyMap).includes('gehat_wlaya')) {
+    return [];
+  }
+
+  return rows.map(row => {
+    const newRow = {};
+    Object.keys(row).forEach(origKey => {
+      const canonical = keyMap[origKey];
+      if (canonical) newRow[canonical] = String(row[origKey] || '').trim();
+    });
+    return newRow;
+  }).filter(r => r.order_number && r.gehat_wlaya);
+}
+
+function renderGehatWlayaPreview() {
+  const hasData = parsedGehatWlayaRows.length > 0;
+  document.getElementById('gehat-preview-area').style.display = hasData ? 'block' : 'none';
+  if (!hasData) return;
+
+  // بنبني فلتر جهة الولاية ديناميكيًا من قيم gehat_wlaya الموجودة فعليًا في الملف
+  const uniqueTypes = [...new Set(parsedGehatWlayaRows.map(r => r.gehat_wlaya))].sort();
+  const filterContainer = document.getElementById('gehat-type-filter-list');
+  filterContainer.innerHTML = uniqueTypes.map(type => {
+    const count = parsedGehatWlayaRows.filter(r => r.gehat_wlaya === type).length;
+    return `
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor:pointer;">
+        <input type="checkbox" class="gehat-type-checkbox" value="${type}" checked onchange="renderGehatWlayaFilteredPreview()">
+        ${type} (${count})
+      </label>`;
+  }).join('');
+
+  renderGehatWlayaFilteredPreview();
+}
+
+function selectAllGehatTypes(checked) {
+  document.querySelectorAll('.gehat-type-checkbox').forEach(cb => cb.checked = checked);
+  renderGehatWlayaFilteredPreview();
+}
+
+function getSelectedGehatTypes() {
+  return [...document.querySelectorAll('.gehat-type-checkbox:checked')].map(cb => cb.value);
+}
+
+function renderGehatWlayaFilteredPreview() {
+  const selectedTypes = new Set(getSelectedGehatTypes());
+  const filteredRows = parsedGehatWlayaRows.filter(r => selectedTypes.has(r.gehat_wlaya));
+  const remainderRows = parsedGehatWlayaRows.filter(r => !selectedTypes.has(r.gehat_wlaya));
+
+  document.getElementById('gehat-filtered-count').innerText = filteredRows.length;
+  const remainderCountEl = document.getElementById('gehat-remainder-count');
+  if (remainderCountEl) remainderCountEl.innerText = remainderRows.length;
+
+  const tbody = document.getElementById('gehat-preview-tbody');
+  const PREVIEW_LIMIT = 300;
+  tbody.innerHTML = filteredRows.slice(0, PREVIEW_LIMIT).map(r => `
+    <tr>
+      <td class="order-no-cell">${r.order_number}</td>
+      <td>${r.gehat_wlaya}</td>
+      <td>${r.gov_name || '-'}</td>
+      <td>${r.city || '-'}</td>
+    </tr>
+  `).join('');
+  if (filteredRows.length > PREVIEW_LIMIT) {
+    tbody.innerHTML += `<tr><td colspan="4" style="text-align:center; color: var(--text-muted);">... و ${filteredRows.length - PREVIEW_LIMIT} صف إضافي (معروضين جزئيًا هنا بس هيتصدروا كلهم)</td></tr>`;
+  }
+}
+
+async function exportGehatWlayaToMawaqef() {
+  const selectedTypes = new Set(getSelectedGehatTypes());
+  if (selectedTypes.size === 0) { alert('برجاء اختيار نوع واحد على الأقل من جهة الولاية'); return; }
+
+  const filteredRows = parsedGehatWlayaRows.filter(r => selectedTypes.has(r.gehat_wlaya));
+  if (filteredRows.length === 0) { alert('لا توجد صفوف مطابقة للتصدير'); return; }
+
+  if (!mawaqefDataLoaded) await loadMawaqefData();
+  const existingNumbers = new Set((mawaqefMasterData || []).map(o => String(o.order_number)));
+
+  const newRows = filteredRows
+    .filter(r => !existingNumbers.has(String(r.order_number)))
+    .map(r => ({
+      order_number: r.order_number,
+      status: r.gehat_wlaya,
+      notes: [r.gov_name, r.city].filter(Boolean).join(' - ') || null,
+      date: new Date().toISOString().split('T')[0]
+    }));
+
+  const skippedCount = filteredRows.length - newRows.length;
+
+  if (newRows.length === 0) {
+    alert(`كل الـ ${filteredRows.length} طلب المحددين موجودين بالفعل في جدول المواقف، مفيش حاجة جديدة تتضاف.`);
+    return;
+  }
+
+  const confirmExport = confirm(`هيتم إضافة ${newRows.length} طلب جديد لجدول المواقف${skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`);
+  if (!confirmExport) return;
+
+  const btn = document.getElementById('gehat-export-btn');
+  btn.disabled = true;
+  btn.innerText = '⏳ جاري التصدير...';
+
+  try {
+    const batches = chunkArray(newRows, 150);
+    let firstError = null;
+    for (const batch of batches) {
+      const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).insert(batch);
+      if (error) { firstError = error; break; }
+    }
+    if (firstError) { alert('حصل خطأ أثناء التصدير: ' + firstError.message); return; }
+    alert(`تم تصدير ${newRows.length} طلب بنجاح إلى تاب المواقف!`);
+    mawaqefDataLoaded = false;
+    await loadMawaqefData();
+    switchTab('mawaqef');
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '📤 تصدير المحدد إلى المواقف';
+  }
+}
+
+// بيصدّر باقي الطلبات (اللي "جهة الولاية" بتاعتها مش متحددة في الفلتر فوق) مباشرة لجدول الطباعة (layout)،
+// مع تجاهل تلقائي لأي رقم موجود بالفعل هناك (زي فحص التكرار في تاب توزيع طلبات الطباعة).
+async function exportGehatWlayaRemainderToPrint() {
+  const selectedTypes = new Set(getSelectedGehatTypes());
+  const remainderRows = parsedGehatWlayaRows.filter(r => !selectedTypes.has(r.gehat_wlaya));
+
+  if (remainderRows.length === 0) { alert('لا توجد طلبات "باقية" حاليًا (كل الأنواع متحددة فوق بالفعل).'); return; }
+
+  const certTypeForBatch = document.getElementById('gehat-remainder-cert-type').value || 'عادي';
+
+  if (!certDataLoaded) await loadCertificatesData();
+  const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
+
+  const newRows = remainderRows
+    .filter(r => !existingNumbers.has(String(r.order_number)))
+    .map(r => ({ order_number: r.order_number, cert_type: certTypeForBatch }));
+
+  const skippedCount = remainderRows.length - newRows.length;
+
+  if (newRows.length === 0) {
+    alert(`كل الـ ${remainderRows.length} طلب "الباقية" موجودين بالفعل في جدول الطباعة، مفيش جديد يتضاف.`);
+    return;
+  }
+
+  const targetLabel = certTypeForBatch === 'تعمير' ? 'تاب طباعة شهادات التعمير' : 'تاب طباعة الشهادات العادي';
+  const confirmExport = confirm(`هيتم إضافة ${newRows.length} طلب جديد لـ "${targetLabel}"${skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`);
+  if (!confirmExport) return;
+
+  const btn = document.getElementById('gehat-remainder-export-btn');
+  btn.disabled = true;
+  btn.innerText = '⏳ جاري التصدير...';
+
+  try {
+    const batches = chunkArray(newRows, 150);
+    let firstError = null;
+    for (const batch of batches) {
+      const { error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch);
+      if (error) { firstError = error; break; }
+    }
+    if (firstError) { alert('حصل خطأ أثناء التصدير: ' + firstError.message); return; }
+    alert(`تم تصدير ${newRows.length} طلب بنجاح إلى "${targetLabel}"!`);
+    certDataLoaded = false;
+    await loadCertificatesData();
+    switchTab(certTypeForBatch === 'تعمير' ? 'certificates-renovation' : 'certificates');
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '📨 تصدير الباقي إلى الطباعة';
+  }
+}
+
+function resetGehatWlayaData() {
+  if (parsedGehatWlayaRows.length > 0 && !confirm('هل تريد مسح البيانات المرفوعة حاليًا والبدء من جديد؟')) return;
+  parsedGehatWlayaRows = [];
+  document.getElementById('gehat-file-name-display').innerText = '';
+  document.getElementById('gehat-preview-area').style.display = 'none';
 }

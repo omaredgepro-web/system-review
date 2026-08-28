@@ -5105,7 +5105,19 @@ async function exportGehatWlayaToMawaqef() {
   if (!mawaqefDataLoaded) await loadMawaqefData();
   const existingNumbers = new Set((mawaqefMasterData || []).map(o => String(o.order_number)));
 
-  const newRows = filteredRows
+  // بنشيل أي رقم طلب مكرر جوه الملف المرفوع نفسه (نسيب أول ظهور بس) قبل ما نقارنه بالداتا الموجودة أصلاً،
+  // عشان مايتسجلش نفس الرقم مرتين في نفس عملية التصدير
+  const seenInFile = new Set();
+  const dedupedFromFile = [];
+  let duplicateWithinFileCount = 0;
+  filteredRows.forEach(r => {
+    const key = String(r.order_number);
+    if (seenInFile.has(key)) { duplicateWithinFileCount++; return; }
+    seenInFile.add(key);
+    dedupedFromFile.push(r);
+  });
+
+  const newRows = dedupedFromFile
     .filter(r => !existingNumbers.has(String(r.order_number)))
     .map(r => ({
       order_number: r.order_number,
@@ -5114,14 +5126,19 @@ async function exportGehatWlayaToMawaqef() {
       date: new Date().toISOString().split('T')[0]
     }));
 
-  const skippedCount = filteredRows.length - newRows.length;
+  const skippedCount = filteredRows.length - newRows.length - duplicateWithinFileCount;
 
   if (newRows.length === 0) {
     alert(`كل الـ ${filteredRows.length} طلب المحددين موجودين بالفعل في جدول المواقف، مفيش حاجة جديدة تتضاف.`);
     return;
   }
 
-  const confirmExport = confirm(`هيتم إضافة ${newRows.length} طلب جديد لجدول المواقف${skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`);
+  const confirmExport = confirm(
+    `هيتم إضافة ${newRows.length} طلب جديد لجدول المواقف` +
+    (skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : '') +
+    (duplicateWithinFileCount > 0 ? ` (${duplicateWithinFileCount} كان مكرر جوه الملف نفسه هيتجاهل)` : '') +
+    `. تأكيد؟`
+  );
   if (!confirmExport) return;
 
   const btn = document.getElementById('gehat-export-btn');

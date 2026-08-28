@@ -11,7 +11,24 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ============ جدول المواقف (مقصور على 5 أدمن بالاسم، والحذف على umar/mondy بس) ============
 const MAWAQEF_TABLE_NAME = 'mawaqef';
 const MAWAQEF_ALLOWED_USERNAMES = ['umar', 'mondy', 'sara', 'momen', 'rawan'];
-const MAWAQEF_STATUSES = ['تم الرفع', 'جاري التعديل', 'خطأ جهة ولاية', 'مشكلة في بيانات الطلب', 'غير موجود', 'محجوز', 'بدون موقف'];
+const MAWAQEF_STATUSES = [
+  'تم الرفع',
+  'تم الطباعة',
+  'جاري التعديل',
+  'متداخل مع أكثر من جهة ولاية',
+  'خطأ جهة ولاية',
+  'خطأ محافظة',
+  'بدون موقف',
+  'هيئة المجتمعات العمرانية الجديدة',
+  'وزارة قطاع الأعمال العام',
+  'وزارة النقل',
+  'وزارة الداخلية',
+  'وزارة الكهرباء',
+  'محجوز',
+  'مشكلة في رقم التقنين',
+  'مشكلة في بيانات الطلب',
+  'غير موجود'
+];
 function canViewMawaqef() {
   return !!(currentUser && currentUser.role === 'admin' && MAWAQEF_ALLOWED_USERNAMES.includes(currentUser.username));
 }

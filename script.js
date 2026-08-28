@@ -4792,6 +4792,14 @@ function renderMawaqefPage() {
 
   document.getElementById('mawaqef-pagination-info').innerText = `صفحة ${mawaqefCurrentPage} من ${totalPages} (${rows.length} نتيجة)`;
   updateMawaqefSelectedCount();
+
+  const headerCb = document.getElementById('mawaqef-select-all-header-checkbox');
+  if (headerCb) {
+    const selectedInFilter = rows.filter(o => selectedMawaqefOrderNumbers.has(o.order_number)).length;
+    if (selectedInFilter === 0) { headerCb.checked = false; headerCb.indeterminate = false; }
+    else if (selectedInFilter === rows.length) { headerCb.checked = true; headerCb.indeterminate = false; }
+    else { headerCb.checked = false; headerCb.indeterminate = true; }
+  }
 }
 
 function changeMawaqefPage(delta) {
@@ -4807,6 +4815,20 @@ function toggleMawaqefSelection(orderNumber, checked) {
   updateMawaqefSelectedCount();
 }
 
+// بيحدد/يشيل كل الصفوف المطابقة للفلتر الحالي (مش بس اللي ظاهرة في الصفحة دي) -
+// عشان "تحديد الكل" يطابق فعليًا الإجمالي الظاهر في كارت "إجمالي المواقف"
+function selectAllFilteredMawaqef(checked) {
+  const rows = getFilteredMawaqefRows();
+  if (checked) {
+    rows.forEach(o => selectedMawaqefOrderNumbers.add(o.order_number));
+  } else {
+    selectedMawaqefOrderNumbers.clear();
+  }
+  renderMawaqefPage();
+}
+
+// (قديمة) بتحدد بس صفوف الصفحة الحالية الظاهرة على الشاشة - سايبنها موجودة
+// لو أي زرار تاني لسه بيستخدمها، بس زرار الهيدر بقى بيستخدم النسخة اللي فوق
 function toggleSelectAllMawaqefOnPage(checked) {
   document.querySelectorAll('.mawaqef-row-checkbox').forEach(cb => {
     cb.checked = checked;

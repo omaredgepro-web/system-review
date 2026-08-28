@@ -360,6 +360,25 @@ function toggleStatsMultiSelectPanel() {
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 }
 
+// ============ قائمة "لوحة الأدمن" المنسدلة (بدل ما التابات الإدارية تكون كلها جنب بعض) ============
+function toggleAdminTabsMenu() {
+  const dropdown = document.getElementById('admin-tabs-dropdown');
+  dropdown.style.display = dropdown.style.display === 'none' ? 'flex' : 'none';
+}
+
+function closeAdminTabsMenu() {
+  document.getElementById('admin-tabs-dropdown').style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('admin-tabs-dropdown');
+  const btn = document.getElementById('admin-menu-toggle-btn');
+  if (!dropdown || dropdown.style.display === 'none') return;
+  if (!dropdown.contains(e.target) && e.target !== btn) {
+    dropdown.style.display = 'none';
+  }
+});
+
 document.addEventListener('click', (e) => {
   const panel = document.getElementById('stats-multiselect-panel');
   const btn = document.getElementById('stats-multiselect-btn');
@@ -608,6 +627,9 @@ async function setupUserSession(profile) {
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   document.getElementById('gehat-wlaya-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
+
+  // زرار "لوحة الأدمن" المنسدل نفسه يظهر بس لو فيه عنصر واحد على الأقل جواه هيظهر للمستخدم ده
+  document.getElementById('admin-menu-toggle-btn').style.display = (canDelete() || isAdmin || canViewMawaqef()) ? 'inline-flex' : 'none';
 
   // تغيير تاريخ الطلبات المعروضة متاح للأدمن بس؛ المراجع دايمًا شايف أحدث تاريخ متاح
   document.getElementById('date-filter-label').style.display = isAdmin ? 'inline' : 'none';
@@ -872,6 +894,11 @@ function switchTab(tabName) {
   document.getElementById('tab-rejections').style.display = 'none';
   document.getElementById('tab-mawaqef').style.display = 'none';
   document.getElementById('tab-gehat-wlaya').style.display = 'none';
+
+  const adminSubTabs = ['admin', 'certificates', 'certificates-renovation', 'print-distribute', 'mawaqef', 'gehat-wlaya'];
+  if (adminSubTabs.includes(tabName)) {
+    document.getElementById('admin-menu-toggle-btn').classList.add('active');
+  }
 
   if (tabName === 'dashboard') {
     document.getElementById('dashboard-tab-btn').classList.add('active');
@@ -4593,22 +4620,15 @@ function applyMawaqefDateFiltering() {
     return;
   }
 
-  const dateInput = document.getElementById('mawaqef-date-filter').value;
-  let targetDate = dateInput;
+  const targetDate = document.getElementById('mawaqef-date-filter').value;
 
-  if (!targetDate) {
-    const dates = mawaqefMasterData.map(extractDateString).filter(Boolean).sort().reverse();
-    targetDate = dates[0] || '';
-    if (targetDate) document.getElementById('mawaqef-date-filter').value = targetDate;
-  }
-
-  mawaqefAllData = mawaqefMasterData.filter(item => {
-    const d = extractDateString(item);
-    return d === targetDate || !d;
-  });
+  // من غير ما يحدد تاريخ بنفسه، نعرض كل المواقف بكل التواريخ (مش بس أحدث تاريخ زي قبل كده)
+  mawaqefAllData = targetDate
+    ? mawaqefMasterData.filter(item => { const d = extractDateString(item); return d === targetDate || !d; })
+    : mawaqefMasterData;
 
   const label = document.getElementById('mawaqef-active-date-label');
-  if (label) label.innerText = targetDate ? `يعرض مواقف تاريخ: ${targetDate}` : 'كل الطلبات (بدون تاريخ)';
+  if (label) label.innerText = targetDate ? `يعرض مواقف تاريخ: ${targetDate}` : 'عرض كل التواريخ';
 
   renderMawaqefKpis(mawaqefAllData);
   mawaqefCurrentPage = 1;
@@ -4625,17 +4645,82 @@ function showAllMawaqefDates() {
   renderMawaqefPage();
 }
 
+// شكل/لون/أيقونة كل حالة موقف - عشان الكروت تبقى واضحة ومفهومة بنظرة واحدة
+const MAWAQEF_STATUS_META = {
+  'تم الرفع': { icon: '✅', color: '#34d399' },
+  'جاري التعديل': { icon: '🛠️', color: '#60a5fa' },
+  'محجوز': { icon: '🔒', color: '#a78bfa' },
+  'خطأ جهة ولاية': { icon: '⚠️', color: '#fbbf24' },
+  'مشكلة في بيانات الطلب': { icon: '❗', color: '#fb923c' },
+  'غير موجود': { icon: '❌', color: '#f87171' },
+  'بدون موقف': { icon: '➖', color: '#94a3b8' }
+};
+
+// دوسة على أي كارت حالة بتفلتر الجدول تحت بيها فورًا وتنزلك عليه
+function filterMawaqefByStatus(status) {
+  const select = document.getElementById('mawaqef-status-filter');
+  if (select) select.value = status;
+  renderMawaqefPage();
+  const table = document.querySelector('#tab-mawaqef .admin-container');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearMawaqefStatusFilter() {
+  const select = document.getElementById('mawaqef-status-filter');
+  if (select) select.value = 'ALL';
+  renderMawaqefPage();
+}
+
 function renderMawaqefKpis(rows) {
   const counts = {};
   MAWAQEF_STATUSES.forEach(s => counts[s] = 0);
-  rows.forEach(o => { counts[o.status] = (counts[o.status] || 0) + 1; });
+  let unknownCount = 0;
+  rows.forEach(o => {
+    if (counts[o.status] !== undefined) counts[o.status]++;
+    else unknownCount++;
+  });
+
   const container = document.getElementById('mawaqef-kpi-container');
   if (!container) return;
-  container.innerHTML = `
-    <div class="kpi-card"><div class="kpi-title">إجمالي المواقف (للتاريخ المحدد)</div><div class="kpi-value">${rows.length}</div></div>
-  ` + MAWAQEF_STATUSES.map(s => `
-    <div class="kpi-card"><div class="kpi-title">${s}</div><div class="kpi-value" style="font-size: 22px;">${counts[s] || 0}</div></div>
-  `).join('');
+
+  const total = rows.length;
+  const activeStatus = (document.getElementById('mawaqef-status-filter') || {}).value || 'ALL';
+
+  let html = `
+    <div class="stat-card" style="cursor:pointer; border-right: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(99,102,241,0.12), var(--bg-dark)); ${activeStatus === 'ALL' ? 'outline: 2px solid var(--accent-purple);' : ''}" onclick="clearMawaqefStatusFilter()">
+      <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">🅿️ إجمالي المواقف</div>
+      <div style="font-size:32px; font-weight:800;">${total.toLocaleString('ar-EG')}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">كل الحالات مع بعض &middot; اضغط لإلغاء الفلترة</div>
+    </div>
+  `;
+
+  MAWAQEF_STATUSES.forEach(status => {
+    const meta = MAWAQEF_STATUS_META[status] || { icon: '📍', color: '#94a3b8' };
+    const count = counts[status] || 0;
+    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const isActive = activeStatus === status;
+    html += `
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterMawaqefByStatus('${status}')">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${status}</div>
+        <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
+        <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+      </div>
+    `;
+  });
+
+  if (unknownCount > 0) {
+    html += `
+      <div class="stat-card" style="border-right: 4px solid #64748b;">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">❔ حالة غير معروفة</div>
+        <div style="font-size:28px; font-weight:800;">${unknownCount.toLocaleString('ar-EG')}</div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
 }
 
 function getFilteredMawaqefRows() {
@@ -4654,6 +4739,7 @@ function getFilteredMawaqefRows() {
 }
 
 function renderMawaqefPage() {
+  renderMawaqefKpis(mawaqefAllData || []);
   const rows = getFilteredMawaqefRows();
   const tbody = document.getElementById('mawaqef-tbody');
   if (!tbody) return;

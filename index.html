@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
-     
+   
   <!-- منع المتصفح من تخزين نسخة قديمة من الصفحة نفسها (HTML)، عشان أي تحديث جديد يوصل فورًا من غير Hard Refresh -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -96,13 +96,18 @@
 
     <div class="tabs-bar">
       <button class="tab-btn active" id="dashboard-tab-btn" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
-      <button class="tab-btn" id="admin-tab-btn" style="display: none;" onclick="switchTab('admin')">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
-      <button class="tab-btn" id="certificates-tab-btn" style="display: none;" onclick="switchTab('certificates')">🖨️ طباعة الشهادات</button>
-      <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none;" onclick="switchTab('certificates-renovation')">📠 طباعة شهادات التعمير</button>
       <button class="tab-btn" id="rejections-tab-btn" onclick="switchTab('rejections')">🚫 مرفوضات</button>
-      <button class="tab-btn" id="print-distribute-tab-btn" style="display: none;" onclick="switchTab('print-distribute')">📦 توزيع طلبات الطباعة</button>
-      <button class="tab-btn" id="mawaqef-tab-btn" style="display: none;" onclick="switchTab('mawaqef')">🅿️ المواقف</button>
-      <button class="tab-btn" id="gehat-wlaya-tab-btn" style="display: none;" onclick="switchTab('gehat-wlaya')">🏛️ جهة الولاية</button>
+      <div style="position: relative;">
+        <button class="tab-btn" id="admin-menu-toggle-btn" style="display: none;" onclick="toggleAdminTabsMenu()">⚙️ لوحة الأدمن ⌄</button>
+        <div id="admin-tabs-dropdown" style="display: none; position: absolute; top: 110%; right: 0; z-index: 60; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; min-width: 260px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); padding: 8px; flex-direction: column; gap: 4px;">
+          <button class="tab-btn" id="admin-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('admin'); closeAdminTabsMenu();">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
+          <button class="tab-btn" id="certificates-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('certificates'); closeAdminTabsMenu();">🖨️ طباعة الشهادات</button>
+          <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('certificates-renovation'); closeAdminTabsMenu();">📠 طباعة شهادات التعمير</button>
+          <button class="tab-btn" id="print-distribute-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('print-distribute'); closeAdminTabsMenu();">📦 توزيع طلبات الطباعة</button>
+          <button class="tab-btn" id="mawaqef-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('mawaqef'); closeAdminTabsMenu();">🅿️ المواقف</button>
+          <button class="tab-btn" id="gehat-wlaya-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('gehat-wlaya'); closeAdminTabsMenu();">🏛️ جهة الولاية</button>
+        </div>
+      </div>
     </div>
 
     <!-- TAB 1: Dashboard View -->
@@ -741,7 +746,7 @@
         <h3 style="font-size: 16px;">🅿️ قائمة المواقف</h3>
       </div>
 
-      <div id="mawaqef-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;"></div>
+      <div id="mawaqef-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px;"></div>
 
       <div class="admin-container">
         <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;">

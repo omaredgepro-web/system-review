@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
-     
+   
   <!-- منع المتصفح من تخزين نسخة قديمة من الصفحة نفسها (HTML)، عشان أي تحديث جديد يوصل فورًا من غير Hard Refresh -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
@@ -101,6 +101,8 @@
       <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none;" onclick="switchTab('certificates-renovation')">📠 طباعة شهادات التعمير</button>
       <button class="tab-btn" id="rejections-tab-btn" onclick="switchTab('rejections')">🚫 مرفوضات</button>
       <button class="tab-btn" id="print-distribute-tab-btn" style="display: none;" onclick="switchTab('print-distribute')">📦 توزيع طلبات الطباعة</button>
+      <button class="tab-btn" id="mawaqef-tab-btn" style="display: none;" onclick="switchTab('mawaqef')">🅿️ المواقف</button>
+      <button class="tab-btn" id="gehat-wlaya-tab-btn" style="display: none;" onclick="switchTab('gehat-wlaya')">🏛️ جهة الولاية</button>
     </div>
 
     <!-- TAB 1: Dashboard View -->
@@ -674,6 +676,7 @@
             <textarea id="quick-print-textarea" class="form-control" rows="4" placeholder="ألصق أو اكتب أرقام الطلبات هنا..." style="margin-bottom: 12px;"></textarea>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-primary" style="width: auto; padding: 8px 20px;" onclick="submitQuickPrintOrders()">➕ إضافة للمعاينة</button>
+              <button class="btn btn-secondary" style="width: auto; padding: 8px 20px;" onclick="submitQuickPrintOrders('تعمير')">📠 إضافة وإرسال مباشرة للتعمير</button>
               <button class="btn btn-secondary" onclick="document.getElementById('quick-print-textarea').value=''">مسح النص</button>
             </div>
           </div>
@@ -722,6 +725,156 @@
           </div>
           <button class="btn btn-primary" id="btn-upload-print" onclick="uploadPrintOrdersToSupabase()" style="width: auto;">تأكيد ورفع الطلبات لجدول الطباعة</button>
         </div>
+      </div>
+    </div>
+
+    <!-- TAB: 🅿️ المواقف -->
+    <div id="tab-mawaqef" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="refresh-mawaqef-btn" onclick="refreshMawaqefData()">🔄 تحديث يدوي</button>
+          <span id="mawaqef-live-status-indicator" style="font-size: 11px; color: var(--text-muted);">⚪ جاري الاتصال...</span>
+          <span id="mawaqef-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
+          <button class="btn btn-secondary" onclick="showAllMawaqefDates()">عرض كل التواريخ (بدون تاريخ)</button>
+          <button class="btn btn-secondary" onclick="exportMawaqefExcel()">📥 تصدير Excel (النتائج الحالية)</button>
+        </div>
+        <h3 style="font-size: 16px;">🅿️ قائمة المواقف</h3>
+      </div>
+
+      <div id="mawaqef-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;"></div>
+
+      <div class="admin-container">
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;">
+          <input type="text" id="mawaqef-search-input" class="filter-select" placeholder="ابحث برقم الطلب أو رقم التقنين..." style="flex: 1; min-width: 220px;" oninput="renderMawaqefPage()">
+          <label style="font-size: 13px; color: var(--text-muted);">الحالة:</label>
+          <select id="mawaqef-status-filter" class="filter-select" onchange="renderMawaqefPage()">
+            <option value="ALL">كل الحالات</option>
+          </select>
+          <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
+          <input type="date" id="mawaqef-date-filter" class="date-input" onchange="applyMawaqefDateFiltering()">
+        </div>
+
+        <div class="admin-bulk-actions" style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+          <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="mawaqef-selected-count">0</span> طلب</span>
+          <button class="btn btn-secondary" onclick="clearMawaqefSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
+          <select id="mawaqef-bulk-status-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
+            <option value="">تغيير الحالة إلى...</option>
+          </select>
+          <button class="btn btn-secondary" onclick="executeMawaqefBulkStatusUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق الحالة</button>
+          <button class="btn btn-danger" onclick="executeMawaqefBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th><input type="checkbox" onchange="toggleSelectAllMawaqefOnPage(this.checked)"></th>
+                <th>رقم الطلب</th>
+                <th>رقم طلب التقنين</th>
+                <th>الحالة</th>
+                <th>ملاحظات</th>
+                <th>التاريخ</th>
+                <th>إجراء</th>
+              </tr>
+            </thead>
+            <tbody id="mawaqef-tbody">
+              <tr><td colspan="7" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+          <button class="btn btn-secondary" onclick="changeMawaqefPage(-1)">◀ السابق</button>
+          <span id="mawaqef-pagination-info" style="font-size: 13px; color: var(--text-muted);"></span>
+          <button class="btn btn-secondary" onclick="changeMawaqefPage(1)">التالي ▶</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: 🏛️ جهة الولاية -->
+    <div id="tab-gehat-wlaya" style="display: none;">
+      <div class="admin-container">
+        <h2 style="font-size: 20px; margin-bottom: 10px;">🏛️ جهة الولاية: رفع ملف وتصدير للمواقف</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+          ارفع ملف إكسيل فيه عمود رقم الطلب (requestnumber) وعمود جهة الولاية (gehat_wlaya)، اختياريًا اسم المحافظة (gov_name_ar) والمدينة (name_city). بعد الرفع تقدر تفلتر بأي "جهة ولاية" عايز تصدرها، وتبعتها مباشرة لجدول المواقف.
+        </p>
+
+        <div class="upload-box" id="gehat-upload-box" ondragover="handleGehatWlayaDragOver(event)" ondragleave="handleGehatWlayaDragLeave(event)" ondrop="handleGehatWlayaFileDrop(event)">
+          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف (CSV أو Excel) هنا أو اضغط للاختيار</p>
+          <input type="file" id="gehat-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleGehatWlayaFileSelect(event)">
+          <button class="btn btn-secondary" onclick="document.getElementById('gehat-file-input').click()">اختيار ملف (CSV أو Excel)</button>
+          <button class="btn btn-danger" onclick="resetGehatWlayaData()" style="margin-right: 8px;">🗑️ مسح والبدء من جديد</button>
+          <p id="gehat-file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
+        </div>
+
+        <div id="gehat-preview-area" style="display: none; margin-top: 20px;">
+          <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px;">
+            <h3 style="font-size: 14px; margin-bottom: 10px;">فلتر حسب جهة الولاية (بيحدد إيه اللي هيتصدر)</h3>
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="selectAllGehatTypes(true)">تحديد الكل</button>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="selectAllGehatTypes(false)">إلغاء تحديد الكل</button>
+            </div>
+            <div id="gehat-type-filter-list" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 160px; overflow-y: auto;"></div>
+          </div>
+
+          <h3 style="margin-bottom: 10px; font-size: 16px;">معاينة (<span id="gehat-filtered-count">0</span> طلب مطابق للفلتر الحالي)</h3>
+          <div style="max-height: 300px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--card-border); border-radius: 8px;">
+            <table>
+              <thead><tr><th>رقم الطلب</th><th>جهة الولاية</th><th>المحافظة</th><th>المدينة</th></tr></thead>
+              <tbody id="gehat-preview-tbody"></tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" id="gehat-export-btn" onclick="exportGehatWlayaToMawaqef()" style="width: auto;">📤 تصدير المحدد إلى المواقف</button>
+
+          <div class="admin-container" style="padding: 16px 18px; margin-top: 20px; background: rgba(99, 102, 241, 0.08); border-color: var(--accent-purple);">
+            <h3 style="font-size: 14px; margin-bottom: 8px;">📨 تصدير باقي الطلبات (غير المحدد فوق) إلى الطباعة</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              أي "جهة ولاية" مش متحددة (✗) في الفلتر اللي فوق، طلباتها هتتحط هنا. ده مفيد لو مثلاً استبعدت أنواع معينة عشان تروح للمواقف، وعايز الباقي يروح لجدول الطباعة على طول.
+            </p>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+              <span style="font-size: 12px; color: var(--text-muted);">عدد الطلبات "الباقية" حاليًا: <b id="gehat-remainder-count">0</b></span>
+              <label style="font-size: 12px; color: var(--text-muted);">نوع الشهادة المستهدف:</label>
+              <select id="gehat-remainder-cert-type" class="filter-select" style="width: 200px;">
+                <option value="عادي">🖨️ عادي</option>
+                <option value="تعمير">📠 تعمير</option>
+              </select>
+            </div>
+            <button class="btn btn-secondary" id="gehat-remainder-export-btn" onclick="exportGehatWlayaRemainderToPrint()" style="width: auto;">📨 تصدير الباقي إلى الطباعة</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal تعديل موقف واحد -->
+  <div class="modal-overlay" id="mawaqef-edit-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>تحديث الموقف</h3>
+        <button class="close-btn" onclick="closeMawaqefModal()">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>رقم الطلب</label>
+        <input type="text" id="mawaqef-modal-order-no" class="form-control" disabled>
+      </div>
+      <div class="form-group">
+        <label>رقم طلب التقنين</label>
+        <input type="text" id="mawaqef-modal-tanzeen" class="form-control">
+      </div>
+      <div class="form-group">
+        <label>الحالة</label>
+        <select id="mawaqef-modal-status" class="filter-select form-control"></select>
+      </div>
+      <div class="form-group">
+        <label>ملاحظات</label>
+        <textarea id="mawaqef-modal-notes" class="form-control" placeholder="اكتب ملاحظاتك هنا..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>التاريخ</label>
+        <input type="date" id="mawaqef-modal-date" class="form-control">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeMawaqefModal()">إلغاء</button>
+        <button class="btn btn-primary" onclick="saveMawaqefUpdate()" style="width: auto;">حفظ</button>
       </div>
     </div>
   </div>

@@ -1609,6 +1609,8 @@ function resetCsvUploadData() {
   if (parsedCsvData.length > 0 && !confirm('هل تريد مسح كل الملفات/البيانات المرفوعة حاليًا والبدء من جديد؟')) return;
   parsedCsvData = [];
   csvDistUserSelection = null; // يرجع الاختيار الافتراضي (الكل متحدد) في المرة الجاية
+  window.lastAutoRemovedDuplicates = [];
+  renderAutoRemovedDuplicatesPanel();
   document.getElementById('file-name-display').innerText = '';
   document.getElementById('csv-preview-area').style.display = 'none';
   document.getElementById('csv-total-banner').style.display = 'none';
@@ -1733,11 +1735,27 @@ function removeWithinBatchDuplicates(rows) {
 //   بنفس الطلب يبقى موجود مرتين وهو أصلاً لسه مقرّرش فيه حاجة.
 function applyDuplicateRuleToRows(rows) {
   const targetDate = getCsvUploadTargetDateIso();
-  const log = { accepted: 0, rejectedNotFlagged: 0, stillPending: 0, allowedReReview: 0 };
+  const log = {
+    accepted: 0, acceptedAnyDate: 0, rejectedNotFlagged: 0, stillPending: 0, allowedReReview: 0,
+    // بنسجل رقم الطلب + سبب الاستبعاد لكل طلب اتشال، عشان نقدر نصدّرهم في شيت إكسيل بعد كده (مش بس نعرض عدد في alert بيختفي)
+    removed: []
+  };
 
   const kept = rows.filter(row => {
     const num = getCsvRowOrderNumber(row);
     if (!num) return true;
+
+    // أولاً: لو الطلب ده سبق واتقبل ("مقبول") في أي تاريخ سابق - أيًا كان - يتشال فورًا ومايتوزّعش تاني،
+    // مهما كان تاريخ الدفعة الحالية، عشان منسمحش بمراجعة/توزيع طلب اتقفل عليه القرار خالص.
+    const anyDateMaster = getMasterOrderByNumber(num);
+    if (anyDateMaster) {
+      const anyDateStatus = anyDateMaster.review_status || anyDateMaster['حالة المراجعة'];
+      if (anyDateStatus === 'مقبول') {
+        log.acceptedAnyDate++;
+        log.removed.push({ order_number: num, reason: 'مقبول من قبل (تاريخ سابق)' });
+        return false;
+      }
+    }
 
     const master = getMasterOrderByNumberAndDate(num, targetDate);
     if (!master) return true; // مش موجود بنفس اليوم ده، مش تكرار أصلاً
@@ -1746,6 +1764,7 @@ function applyDuplicateRuleToRows(rows) {
 
     if (existingStatus === 'مقبول') {
       log.accepted++;
+      log.removed.push({ order_number: num, reason: 'مقبول من قبل (نفس تاريخ الدفعة)' });
       return false;
     }
 
@@ -1758,18 +1777,21 @@ function applyDuplicateRuleToRows(rows) {
         return true;
       }
       log.rejectedNotFlagged++;
+      log.removed.push({ order_number: num, reason: 'مرفوض من قبل (بدون علامة إعادة مراجعة)' });
       return false;
     }
 
     log.stillPending++;
+    log.removed.push({ order_number: num, reason: 'موجود بالفعل ولسه معلّق/تحت المراجعة' });
     return false;
   });
 
   return { kept, log, targetDate };
 }
 
-// بيشغّل قاعدة منع التكرار كاملة (تكرار داخل الدفعة + تكرار مع قاعدة البيانات بنفس اليوم) على parsedCsvData
-// الحالية، ويرجّع تقرير بكل حاجة اتشالت وليه، عشان يتعرض للمستخدم.
+// بيشغّل قاعدة منع التكرار كاملة (تكرار داخل الدفعة + تكرار مع قاعدة البيانات) على parsedCsvData
+// الحالية، ويرجّع تقرير بكل حاجة اتشالت وليه، وكمان بيخزن لستة كل الأرقام المُستبعدة (window.lastAutoRemovedDuplicates)
+// عشان تقدر تنزلها شيت إكسيل بعد كده من اللوحة (مش بس تشوف العدد في رسالة بتختفي).
 function autoCleanCsvDuplicates() {
   const beforeCount = parsedCsvData.length;
 
@@ -1779,6 +1801,9 @@ function autoCleanCsvDuplicates() {
   const dupResult = applyDuplicateRuleToRows(parsedCsvData);
   parsedCsvData = dupResult.kept;
 
+  window.lastAutoRemovedDuplicates = dupResult.log.removed;
+  renderAutoRemovedDuplicatesPanel();
+
   return {
     totalRemoved: beforeCount - parsedCsvData.length,
     withinBatchRemoved: batchResult.removedCount,
@@ -1787,16 +1812,68 @@ function autoCleanCsvDuplicates() {
   };
 }
 
+// لوحة ثابتة (مش alert بيختفي) بتعرض كل الطلبات اللي اتشالت تلقائيًا آخر مرة (غالبًا لأنها كانت "مقبول" قبل كده)،
+// مع زرار تحميل شيت إكسيل بيهم (رقم الطلب، سبب الاستبعاد، حالة المراجعة، المراجع، والتاريخ من قاعدة البيانات).
+function renderAutoRemovedDuplicatesPanel() {
+  const area = document.getElementById('auto-removed-duplicates-area');
+  const container = document.getElementById('auto-removed-duplicates-panel');
+  if (!area || !container) return;
+
+  const removed = window.lastAutoRemovedDuplicates || [];
+  if (removed.length === 0) {
+    area.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  area.style.display = 'block';
+  let html = `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚫 ${removed.length} رقم طلب اتشال تلقائيًا من الملف (مقبول قبل كده أو تكرار غير مسموح):</p>`;
+  html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px; margin-bottom:10px;" onclick="downloadAutoRemovedDuplicatesExcel()">⬇️ تحميل شيت إكسيل بالمستبعدين (${removed.length})</button>`;
+  html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px;">`;
+  html += removed.map(r => `${r.order_number} <span style="color: var(--badge-reject-text);">(${r.reason})</span>`).join('، ');
+  html += `</div>`;
+
+  container.innerHTML = html;
+}
+
+function downloadAutoRemovedDuplicatesExcel() {
+  const removed = window.lastAutoRemovedDuplicates || [];
+  if (removed.length === 0) { alert('لا توجد طلبات مستبعدة لتحميلها.'); return; }
+
+  const exportRows = removed.map(r => {
+    const master = getMasterOrderByNumber(r.order_number);
+    return {
+      'رقم الطلب': r.order_number,
+      'سبب الاستبعاد': r.reason,
+      'اسم الشركة': master ? (master.company || master['الشركة'] || '-') : '-',
+      'المراجع': master ? (getDisplayName(master.reviewer || master['المراجع']) || '-') : '-',
+      'حالة المراجعة': master ? (master.review_status || master['حالة المراجعة'] || '-') : '-',
+      'التاريخ': master ? (extractDateString(master) || '-') : '-'
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 28 }, { wch: 32 }, { wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 14 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'مستبعدة تلقائيًا');
+
+  const dateLabel = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(workbook, `طلبات_مستبعدة_تلقائيًا_${dateLabel}.xlsx`);
+}
+
 function buildDuplicateCleanupReport(result) {
   if (result.totalRemoved === 0) return null;
   const log = result.log;
-  let msg = `🚫 تم منع تكرار الطلب في نفس اليوم (${result.targetDate}) تلقائيًا:\n\n`;
+  let msg = `🚫 تم منع تكرار الطلب تلقائيًا:\n\n`;
   if (result.withinBatchRemoved > 0) msg += `• ${result.withinBatchRemoved} نسخة مكررة داخل الملف/الملفات نفسها.\n`;
-  if (log.accepted > 0) msg += `• ${log.accepted} طلب كان "مقبول" من قبل بنفس اليوم — اتشال، والمقبول القديم فاضل زي ما هو.\n`;
+  if (log.acceptedAnyDate > 0) msg += `• ${log.acceptedAnyDate} طلب كان "مقبول" من قبل (بأي تاريخ سابق) — اتشال نهائيًا ومايتوزّعش تاني.\n`;
+  if (log.accepted > 0) msg += `• ${log.accepted} طلب كان "مقبول" من قبل بنفس اليوم (${result.targetDate}) — اتشال، والمقبول القديم فاضل زي ما هو.\n`;
   if (log.rejectedNotFlagged > 0) msg += `• ${log.rejectedNotFlagged} طلب كان "مرفوض" من قبل بنفس اليوم، بدون علامة "تم إعادة المراجعة" — اتشال كتكرار غير مبرر.\n`;
   if (log.stillPending > 0) msg += `• ${log.stillPending} طلب موجود بالفعل بنفس اليوم ولسه معلّق/تحت المراجعة — اتشال.\n`;
   if (log.allowedReReview > 0) msg += `\n✅ اتسمح بمرور ${log.allowedReReview} طلب "إعادة مراجعة" فعلي (كان مرفوض ومعلّم بإعادة المراجعة)، وهياخد نفس المراجع اللي راجعه قبل كده.\n`;
   msg += `\nالإجمالي بعد التنظيف: ${parsedCsvData.length} طلب.`;
+  msg += `\n\n📋 هتلاقي أرقام كل الطلبات اللي اتشالت دي (وسبب كل واحد) في لوحة "🚫 طلبات اتشالت تلقائيًا" تحت، وتقدر تنزلهم شيت إكسيل من هناك.`;
   return msg;
 }
 
@@ -2416,7 +2493,7 @@ function renderCsvDuplicatesPanel(data) {
 
   if (dupExisting.length > 0) {
     html += `<p style="color: var(--badge-hold-text); font-weight:700; margin-bottom:6px;">ℹ️ ${dupExisting.length} رقم طلب سبق وجوده في قاعدة البيانات (بأي تاريخ، مش بالضرورة نفس تاريخ الدفعة دي):</p>`;
-    html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">ملحوظة: التكرار في نفس تاريخ الدفعة الحالية بيتم التعامل معاه تلقائيًا أول ما ترفع الملف (يتشال، إلا لو "مرفوض" ومعلّم "تم إعادة المراجعة"). اللستة دي بتوريك أي رقم اتشاف قبل كده في تاريخ تاني برضو، للمراجعة فقط.</p>`;
+    html += `<p style="font-size:11px; color: var(--text-muted); margin-bottom:6px;">ملحوظة: أي طلب من دول كان "مقبول" قبل كده (بأي تاريخ) بيتشال تلقائيًا أول ما ترفع الملف ومايتوزّعش تاني. والتكرار بنفس تاريخ الدفعة الحالية بيتم التعامل معاه تلقائيًا برضو (يتشال، إلا لو "مرفوض" ومعلّم "تم إعادة المراجعة"). اللستة دي بتوريك كل رقم اتشاف قبل كده بأي تاريخ، للمراجعة والتحميل فقط.</p>`;
     html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
     html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="downloadDuplicateOrdersExcel()">⬇️ تحميل شيت إكسيل بالمكررة</button>`;
     html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="resolveExistingDuplicatesBySmartRule()">🤖 إعادة تطبيق قاعدة منع التكرار الآن</button>`;
@@ -2492,12 +2569,13 @@ function downloadDuplicateOrdersExcel() {
       'رقم الطلب': num,
       'اسم الشركة': master ? (master.company || master['الشركة'] || '-') : '-',
       'المراجع': master ? (getDisplayName(master.reviewer || master['المراجع']) || '-') : '-',
-      'حالة المراجعة': master ? (master.review_status || master['حالة المراجعة'] || '-') : '-'
+      'حالة المراجعة': master ? (master.review_status || master['حالة المراجعة'] || '-') : '-',
+      'التاريخ': master ? (extractDateString(master) || '-') : '-'
     };
   });
 
   const worksheet = XLSX.utils.json_to_sheet(exportRows);
-  worksheet['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 20 }, { wch: 16 }];
+  worksheet['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 14 }];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'الطلبات المكررة');
@@ -2513,14 +2591,15 @@ function resolveExistingDuplicatesBySmartRule() {
   const preview = applyDuplicateRuleToRows(parsedCsvData);
 
   if (preview.kept.length === parsedCsvData.length) {
-    alert(`لا توجد طلبات مكررة بنفس تاريخ الدفعة (${targetDate}) لمعالجتها.`);
+    alert(`لا توجد طلبات مكررة (لا بأي تاريخ سابق "مقبول"، ولا بنفس تاريخ الدفعة ${targetDate}) لمعالجتها.`);
     return;
   }
 
   const log = preview.log;
   const confirmProcess = confirm(
-    `هيتم فحص الطلبات اللي موجودة بالفعل بنفس تاريخ الدفعة (${targetDate}):\n` +
-    `- اللي حالته "مقبول" هيتشال من الملف تمامًا (${log.accepted} طلب).\n` +
+    `هيتم فحص الطلبات المكررة:\n` +
+    `- اللي سبق واتقبل ("مقبول") في أي تاريخ سابق هيتشال نهائيًا (${log.acceptedAnyDate} طلب).\n` +
+    `- اللي حالته "مقبول" بنفس تاريخ الدفعة (${targetDate}) هيتشال من الملف تمامًا (${log.accepted} طلب).\n` +
     `- اللي حالته "مرفوض" ومعلّم "تم إعادة المراجعة" هيفضل، وهيتحط عليه نفس المراجع السابق (${log.allowedReReview} طلب).\n` +
     `- اللي حالته "مرفوض" من غير علامة إعادة مراجعة هيتشال (${log.rejectedNotFlagged} طلب).\n` +
     `- اللي لسه معلّق/تحت المراجعة هيتشال برضو (${log.stillPending} طلب).\n\nتأكيد؟`
@@ -3122,18 +3201,129 @@ async function saveOrderUpdate() {
   finally { saveBtn.innerText = 'حفظ القرار'; saveBtn.disabled = false; }
 }
 
-function updateKPIs(data) {
-  document.getElementById('stat-total').innerText = data.length.toLocaleString('ar-EG');
-  const accepted = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مقبول').length;
-  const rejected = data.filter(o => (o.review_status || o['حالة المراجعة']) === 'مرفوض').length;
-  // "لم يتم المراجعة" = كل حاجة مش مقبول ومش مرفوض (يشمل "معلق" والفاضي)، عشان الإجمالي يفضل دايمًا
-  // بيساوي بالظبط "تم المراجعة" + "لم يتم المراجعة" من غير ما تضيع أي طلبات في المنتصف.
-  const pending = data.length - accepted - rejected;
+// شكل/لون/أيقونة كل حالة مراجعة - عشان الكروت تبقى واضحة ومفهومة بنظرة واحدة (بنفس فكرة كروت تاب المواقف)
+const REVIEW_STATUS_META = {
+  'لم يتم المراجعة': { icon: '⏳', color: '#eab308' },
+  'مقبول': { icon: '✅', color: '#34d399' },
+  'مرفوض': { icon: '❌', color: '#f87171' },
+  'معلق': { icon: '⏸️', color: '#fbbf24' },
+  'Qc': { icon: '🔍', color: '#c084fc' }
+};
+const REVIEW_STATUSES_ORDER = ['لم يتم المراجعة', 'مقبول', 'مرفوض', 'معلق', 'Qc'];
+const REVIEW_FALLBACK_COLORS = ['#38bdf8', '#f472b6', '#facc15', '#4ade80', '#818cf8', '#fb7185', '#22d3ee'];
 
-  document.getElementById('stat-accepted').innerText = accepted.toLocaleString('ar-EG');
-  document.getElementById('stat-rejected').innerText = rejected.toLocaleString('ar-EG');
-  document.getElementById('stat-reviewed').innerText = (accepted + rejected).toLocaleString('ar-EG');
-  document.getElementById('stat-pending').innerText = pending.toLocaleString('ar-EG');
+// كروت الحالات في لوحة المراجعة - بنفس تصميم/سلوك كروت تاب المواقف بالظبط:
+// كل كارت بيعرض عدد ونسبة الحالة دي، ودوسة عليه بتفلتر الجدول تحته بيها فورًا.
+function updateKPIs(data) {
+  data = data || [];
+  const counts = {};
+  data.forEach(o => {
+    const status = ((o.review_status || o['حالة المراجعة'] || '').toString().trim()) || 'لم يتم المراجعة';
+    counts[status] = (counts[status] || 0) + 1;
+  });
+
+  const extraStatuses = Object.keys(counts)
+    .filter(s => !REVIEW_STATUSES_ORDER.includes(s))
+    .sort((a, b) => counts[b] - counts[a]);
+  const orderedStatuses = [...REVIEW_STATUSES_ORDER, ...extraStatuses];
+
+  const container = document.getElementById('dashboard-kpi-container');
+  if (!container) return;
+
+  const total = data.length;
+  const statusSelect = document.getElementById('status-filter');
+  const activeStatus = statusSelect ? statusSelect.value : 'ALL';
+
+  let html = `
+    <div class="stat-card" style="cursor:pointer; border-right: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(99,102,241,0.12), var(--bg-dark)); ${activeStatus === 'ALL' ? 'outline: 2px solid var(--accent-purple);' : ''}" onclick="clearDashboardStatusFilter()">
+      <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">📋 إجمالي الطلبات (للتاريخ المحدد)</div>
+      <div style="font-size:32px; font-weight:800;">${total.toLocaleString('ar-EG')}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">كل الحالات مع بعض &middot; اضغط لإلغاء الفلترة</div>
+    </div>
+  `;
+
+  orderedStatuses.forEach((status, idx) => {
+    const meta = REVIEW_STATUS_META[status] || { icon: '📍', color: REVIEW_FALLBACK_COLORS[idx % REVIEW_FALLBACK_COLORS.length] };
+    const count = counts[status] || 0;
+    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const isActive = activeStatus === status;
+    html += `
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterDashboardByStatus('${status.replace(/'/g, "\\'")}')">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${status}</div>
+        <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
+        <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+
+  const reviewedEl = document.getElementById('dashboard-reviewed-note');
+  if (reviewedEl) {
+    const reviewed = (counts['مقبول'] || 0) + (counts['مرفوض'] || 0);
+    reviewedEl.innerText = `✔️ تم المراجعة: ${reviewed.toLocaleString('ar-EG')} من ${total.toLocaleString('ar-EG')}`;
+  }
+}
+
+// دوسة على أي كارت حالة في لوحة المراجعة بتفلتر جدول الطلبات تحته بيها فورًا وتنزلك عليه
+// (بنفس فكرة "filterMawaqefByStatus" في تاب المواقف بالظبط)
+function filterDashboardByStatus(status) {
+  const select = document.getElementById('status-filter');
+  if (select) select.value = status;
+  currentPage = 1;
+  renderCurrentPage();
+  updateKPIs(window.visibleData || []);
+  const table = document.querySelector('#tab-dashboard .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearDashboardStatusFilter() {
+  const select = document.getElementById('status-filter');
+  if (select) select.value = 'ALL';
+  currentPage = 1;
+  renderCurrentPage();
+  updateKPIs(window.visibleData || []);
+}
+
+// بيحمّل شيت إكسيل بالنتائج المعروضة حاليًا بس (حسب فلتر الحالة/المراجع/الشركة/البحث المطبّق فوق) —
+// مش كل بيانات اليوم، بس اللي فاضل بعد الفلترة بالظبط.
+function exportCurrentFilteredToExcel() {
+  const rows = window.currentFilteredData || [];
+  if (rows.length === 0) { alert('لا توجد نتائج ضمن الفلتر الحالي لتحميلها.'); return; }
+
+  const statusValue = (document.getElementById('status-filter') || {}).value;
+  const statusSuffix = (statusValue && statusValue !== 'ALL') ? `_${statusValue}` : '';
+  const dateLabel = (document.getElementById('date-filter') || {}).value || 'غير محدد';
+
+  const exportRows = rows.map(order => {
+    const orderNum = order.order_number || order.order_no || order['رقم الطلب'] || '-';
+    const company = order.company || order['الشركة'] || '-';
+    const reviewer = getDisplayName(order.reviewer || order['المراجع'] || '-');
+    const progressStatus = order.status || order['الحالة'] || '-';
+    const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
+    const date = order.date || extractDateString(order) || '-';
+    const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
+
+    return {
+      'رقم الطلب': orderNum,
+      'الشركة': company,
+      'المراجع': reviewer,
+      'حالة المراجعة': progressStatus,
+      'المراجعة': reviewStatus,
+      'التاريخ': date,
+      'سبب الرفض': rejectionReason
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 30 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'النتائج الحالية');
+  XLSX.writeFile(workbook, `نتائج_مفلترة${statusSuffix}_${dateLabel}.xlsx`);
 }
 
 function renderReviewersStats(data) {
@@ -4450,7 +4640,7 @@ document.getElementById('cert-status-filter').addEventListener('change', () => {
 document.getElementById('cert-layout-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 
 document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderCurrentPage(); });
-document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
+document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); updateKPIs(window.visibleData || []); });
 document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('company-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 

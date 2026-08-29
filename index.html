@@ -112,28 +112,8 @@
 
     <!-- TAB 1: Dashboard View -->
     <div id="tab-dashboard">
-      <div class="kpi-grid" style="grid-template-columns: repeat(5, 1fr);">
-        <div class="kpi-card">
-          <div class="kpi-title">إجمالي الطلبات (للتاريخ المحدد)</div>
-          <div class="kpi-value" id="stat-total">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">تم المراجعة</div>
-          <div class="kpi-value" id="stat-reviewed">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">لم يتم المراجعة</div>
-          <div class="kpi-value" style="color: #eab308" id="stat-pending">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">مقبول</div>
-          <div class="kpi-value" style="color: var(--badge-accept-text)" id="stat-accepted">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">مرفوض</div>
-          <div class="kpi-value" style="color: var(--badge-reject-text)" id="stat-rejected">0</div>
-        </div>
-      </div>
+      <div id="dashboard-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 10px;"></div>
+      <div id="dashboard-reviewed-note" style="font-size: 12px; color: var(--text-muted); margin-bottom: 15px;"></div>
 
       <div class="dashboard-layout">
 
@@ -146,6 +126,7 @@
               <span id="live-status-indicator" style="font-size: 11px; color: var(--text-muted);" title="جاري الاتصال بالتحديث اللحظي...">⚪ جاري الاتصال...</span>
               <span id="active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
               <button class="btn btn-secondary" onclick="exportMyOrdersToExcel()">📥 تحميل طلباتي (Excel)</button>
+              <button class="btn btn-secondary" onclick="exportCurrentFilteredToExcel()">⬇️ تحميل النتائج الحالية (حسب الفلتر المحدد)</button>
               <div id="admin-export-actions" style="display: none; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <button class="btn btn-secondary" onclick="exportTodayOrdersToExcel()">📥 تصدير طلبات اليوم (Excel)</button>
                 <button class="btn btn-secondary" onclick="exportReviewerStatsToExcel()">📈 تصدير إحصائيات المراجعين (Excel)</button>
@@ -336,6 +317,13 @@
           <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
             <h3 style="font-size: 15px; margin-bottom: 6px;">🔁 فحص أرقام الطلبات المكررة</h3>
             <div id="csv-duplicates-panel" style="font-size: 13px;"></div>
+          </div>
+
+          <!-- لوحة ثابتة (مش رسالة بتختفي) بتفضل معروضة بعد كل رفع ملف، بتوريك أرقام أي طلبات اتشالت تلقائيًا
+               (غالبًا لأنها كانت "مقبول" قبل كده)، مع إمكانية تحميلهم شيت إكسيل في أي وقت -->
+          <div id="auto-removed-duplicates-area" class="admin-container" style="display:none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark); border-color: var(--badge-reject-text);">
+            <h3 style="font-size: 15px; margin-bottom: 6px;">🚫 طلبات اتشالت تلقائيًا (مقبولة قبل كده أو تكرار غير مسموح)</h3>
+            <div id="auto-removed-duplicates-panel" style="font-size: 13px;"></div>
           </div>
 
           <!-- لوحة التوزيع المخصص: تحديد يدوي لكل مراجع (مجموعة شركات + عدد) مع تقسيم نسبي تلقائي بينهم -->

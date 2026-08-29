@@ -1,7 +1,7 @@
 const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RZz9pDGfJXNtZYc7wADlHg_uMffms_6';
 const TABLE_NAME = 'system_review1';
-  
+
 // ⚠️ عدّل اسم الجدول ده لو مختلف عندك في Supabase (استنتجته من اسم ملف الـ CSV اللي بعتهولي)
 const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
@@ -1701,12 +1701,37 @@ function getCsvUploadTargetDateIso() {
   return (dateInput && dateInput.value) ? dateInput.value : new Date().toISOString().split('T')[0];
 }
 
+// Index (Map: رقم الطلب -> [صفوف]) لبيانات قاعدة البيانات الأساسية (window.masterData)، بيتبني مرة واحدة بس
+// وبيتعاد بناؤه تلقائيًا لو window.masterData اتغيّر (رجّعنا مصفوفة جديدة) - عشان فحص التكرار وقت رفع ملف
+// (اللي بيدور على كل رقم طلب في الملف) يبقى سريع (O(1) لكل بحث) بدل ما يعمل .find() على آلاف الصفوف
+// في كل مرة، وده كان بيسبب بطء/تجمد فعلي في المتصفح مع الملفات الكبيرة وقاعدة البيانات الكبيرة.
+let _masterDataIndexCache = null;
+let _masterDataIndexSource = null;
+function getMasterDataIndex() {
+  const source = window.masterData;
+  if (_masterDataIndexCache && _masterDataIndexSource === source) return _masterDataIndexCache;
+
+  const idx = new Map();
+  (source || []).forEach(o => {
+    const num = String(o.order_number || o.order_no || o['رقم الطلب'] || '').trim();
+    if (!num) return;
+    if (!idx.has(num)) idx.set(num, []);
+    idx.get(num).push(o);
+  });
+
+  _masterDataIndexCache = idx;
+  _masterDataIndexSource = source;
+  return idx;
+}
+
 // بيرجّع الطلب المسجل بالفعل في قاعدة البيانات بنفس رقم الطلب ونفس التاريخ بالظبط (مش أي تاريخ تاني)
+// مبني على index (Map) بدل ما يعمل .find() على كل الداتا في كل مرة - عشان فحص التكرار (اللي بيتكرر
+// لكل صف في الملف المرفوع) يفضل سريع حتى مع آلاف الصفوف في قاعدة البيانات وآلاف الصفوف في الملف.
 function getMasterOrderByNumberAndDate(orderNum, dateIso) {
-  return (window.masterData || []).find(o =>
-    String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum) &&
-    extractDateString(o) === dateIso
-  );
+  const idx = getMasterDataIndex();
+  const candidates = idx.get(String(orderNum));
+  if (!candidates) return undefined;
+  return candidates.find(o => extractDateString(o) === dateIso);
 }
 
 // بيشيل أي رقم طلب اتكرر أكتر من مرة داخل نفس الدفعة اللي بتترفع دلوقتي (نفس الملف أو أكتر من ملف مع بعض)،
@@ -2438,10 +2463,12 @@ function getCsvRowOrderNumber(row) {
   return String(row.order_number || row['رقم الطلب'] || '').trim();
 }
 
-// بيرجّع بيانات الطلب (الشركة + المراجع + حالة المراجعة) من قاعدة البيانات لأي رقم طلب،
-// عشان نقدر نصدّرهم في شيت الإكسيل بتاع الأرقام المكررة.
+// بيرجّع بيانات الطلب (الشركة + المراجع + حالة المراجعة) من قاعدة البيانات لأي رقم طلب (أول ظهور له، أي تاريخ)،
+// عشان نقدر نصدّرهم في شيت الإكسيل بتاع الأرقام المكررة. مبني على index زي getMasterOrderByNumberAndDate.
 function getMasterOrderByNumber(orderNum) {
-  return (window.masterData || []).find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
+  const idx = getMasterDataIndex();
+  const candidates = idx.get(String(orderNum));
+  return candidates && candidates.length > 0 ? candidates[0] : undefined;
 }
 
 function renderCsvDuplicatesPanel(data) {

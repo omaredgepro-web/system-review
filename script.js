@@ -1213,84 +1213,6 @@ function updateSelectedCount() {
 
 // تحديد N طلب "غير موزّع" (لسه معندوش مراجع) تلقائيًا بنفس نسبة كل شركة الموجودة فعليًا
 // في الطلبات غير الموزّعة حاليًا ضمن الفلتر — النسب بتتحسب أوتوماتيك من البيانات نفسها في كل مرة
-function selectNextOrderBatch() {
-  const input = document.getElementById('bulk-count-input');
-  const count = parseInt(input.value, 10);
-
-  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
-  if (!window.currentFilteredData || window.currentFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
-
-  const getOrderNum = o => o.order_number || o.order_no || o['رقم الطلب'];
-  const getCompany = o => o.company || o['الشركة'] || 'غير محدد';
-
-  // تجميع الطلبات غير الموزّعة/غير المحددة حسب الشركة، مع الحفاظ على ترتيبها الأصلي
-  const pools = {};
-  const poolOrder = [];
-  window.currentFilteredData.forEach(o => {
-    const reviewer = o.reviewer || o['المراجع'] || '';
-    if (reviewer || selectedOrderNumbers.has(getOrderNum(o))) return;
-    const company = getCompany(o);
-    if (!pools[company]) { pools[company] = []; poolOrder.push(company); }
-    pools[company].push(o);
-  });
-
-  const totalAvailable = poolOrder.reduce((sum, c) => sum + pools[c].length, 0);
-  if (totalAvailable === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد ضمن الفلتر الحالي'); return; }
-
-  const targetTotal = Math.min(count, totalAvailable);
-
-  // حساب نصيب كل شركة بنفس نسبتها الحالية في المخزون المتاح (Largest Remainder Method لدقة أعلى)
-  let targets = poolOrder.map(company => {
-    const raw = targetTotal * (pools[company].length / totalAvailable);
-    return { company, count: Math.floor(raw), remainder: raw - Math.floor(raw) };
-  });
-
-  let allocated = targets.reduce((s, t) => s + t.count, 0);
-  let remainderNeeded = targetTotal - allocated;
-
-  targets.sort((a, b) => b.remainder - a.remainder);
-  for (let i = 0; i < targets.length && remainderNeeded > 0; i++) {
-    const t = targets[i];
-    if (t.count < pools[t.company].length) { t.count++; remainderNeeded--; }
-  }
-
-  // سحب الطلبات الفعلية من كل شركة حسب نصيبها
-  const selectedNow = [];
-  const breakdown = {};
-  targets.forEach(t => {
-    const takeCount = Math.min(t.count, pools[t.company].length);
-    if (takeCount > 0) {
-      const taken = pools[t.company].splice(0, takeCount);
-      taken.forEach(o => selectedNow.push(o));
-      breakdown[t.company] = takeCount;
-    }
-  });
-
-  // أي عجز بسيط بسبب التقريب بيتكمل من أي شركة لسه فيها طلبات متاحة
-  let totalSelected = selectedNow.length;
-  if (totalSelected < targetTotal) {
-    for (const c of poolOrder) {
-      if (totalSelected >= targetTotal) break;
-      while (pools[c].length > 0 && totalSelected < targetTotal) {
-        const o = pools[c].shift();
-        selectedNow.push(o);
-        breakdown[c] = (breakdown[c] || 0) + 1;
-        totalSelected++;
-      }
-    }
-  }
-
-  selectedNow.forEach(o => selectedOrderNumbers.add(getOrderNum(o)));
-  updateSelectedCount();
-  renderCurrentPage();
-  input.value = '';
-
-  const summaryLines = Object.entries(breakdown).map(([c, n]) => `• ${c}: ${n}`).join('\n');
-  let msg = `تم تحديد ${totalSelected} طلب تلقائيًا بنفس نسب الشركات الحالية في البيانات غير الموزّعة:\n${summaryLines}`;
-  if (totalSelected < count) msg += `\n\n(العدد المطلوب كان ${count}، لكن الطلبات المتاحة غير الموزّعة أقل من كده ضمن الفلتر الحالي)`;
-  alert(msg);
-}
-
 function clearOrderSelection() {
   selectedOrderNumbers.clear();
   updateSelectedCount();
@@ -3171,6 +3093,32 @@ function openEditModal(orderNum) {
 }
 
 function closeModal() { document.getElementById('edit-modal').style.display = 'none'; selectedOrder = null; }
+
+// نسخ رقم الطلب من أي input (زي حقل رقم الطلب المعطّل في مودال المراجعة) بضغطة واحدة،
+// مع تغيير مؤقت في نص الزرار نفسه يفيد إن النسخ نجح.
+function copyOrderNumberFromInput(inputId, btnEl) {
+  const input = document.getElementById(inputId);
+  if (!input || !input.value) return;
+
+  const finish = (ok) => {
+    if (!btnEl) return;
+    const original = btnEl.innerHTML;
+    btnEl.innerHTML = ok ? '✅ اتنسخ' : '⚠️ فشل النسخ';
+    setTimeout(() => { btnEl.innerHTML = original; }, 1200);
+  };
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).then(() => finish(true)).catch(() => finish(false));
+  } else {
+    try {
+      input.select();
+      document.execCommand('copy');
+      finish(true);
+    } catch (e) {
+      finish(false);
+    }
+  }
+}
 function toggleRejectionField() {
   const status = document.getElementById('modal-review-status').value;
   const needsReason = (status === 'مرفوض' || status === 'معلق');
@@ -3901,6 +3849,8 @@ function getRejectedCertRows() {
   return rejected.filter(o => currentUser && o.reviewer === currentUser.username);
 }
 
+// بيفلتر تاب المرفوضات حسب التاريخ المختار (لو موجود)، ولو مفيش تاريخ محدد بيعرض كل الطلبات
+// المرفوضة لكل مراجع بكل التواريخ مع بعض (مش بس أحدث يوم)، عشان محدش يضيع منه طلب قديم منسي.
 function applyRejectionsDateFiltering() {
   const rejected = getRejectedCertRows();
 
@@ -3911,28 +3861,41 @@ function applyRejectionsDateFiltering() {
     return;
   }
 
-  const dateInput = document.getElementById('rejections-date-filter').value;
-  let targetDate = dateInput;
+  const targetDate = document.getElementById('rejections-date-filter').value;
 
   if (!targetDate) {
-    const dates = rejected.map(extractDateString).filter(Boolean).sort().reverse();
-    targetDate = dates[0] || '';
-    if (targetDate) document.getElementById('rejections-date-filter').value = targetDate;
+    // من غير تاريخ محدد = يعرض كل الطلبات المرفوضة لكل مراجع بكل التواريخ مع بعض (السلوك الافتراضي)
+    rejectionsAllData = rejected;
+    document.getElementById('rejections-active-date-label').innerText = `يعرض كل الطلبات المرفوضة (كل التواريخ) - ${rejected.length} طلب`;
+    renderRejectionsTab();
+    return;
   }
 
   rejectionsAllData = rejected.filter(item => {
     const d = extractDateString(item);
     return d === targetDate || !d;
   });
-  document.getElementById('rejections-active-date-label').innerText = targetDate
-    ? `يعرض مرفوضات تاريخ: ${targetDate} (+ الطلبات بدون تاريخ)`
-    : 'يعرض كل الطلبات المرفوضة (بدون تاريخ)';
+  document.getElementById('rejections-active-date-label').innerText = `يعرض مرفوضات تاريخ: ${targetDate} (+ الطلبات بدون تاريخ)`;
 
   renderRejectionsTab();
 }
 
 function onRejectionsDateFilterChange() { applyRejectionsDateFiltering(); }
-function resetRejectionsDateToLatest() { document.getElementById('rejections-date-filter').value = ''; applyRejectionsDateFiltering(); }
+
+// بيرجّع الفلتر لعرض كل التواريخ مع بعض (السلوك الافتراضي)
+function showAllRejectionsDates() {
+  document.getElementById('rejections-date-filter').value = '';
+  applyRejectionsDateFiltering();
+}
+
+// لو عايز يضيّق العرض على أحدث يوم فيه رفض بس (اختياري، مش الافتراضي)
+function resetRejectionsDateToLatest() {
+  const rejected = getRejectedCertRows();
+  const dates = rejected.map(extractDateString).filter(Boolean).sort().reverse();
+  const latest = dates[0] || '';
+  document.getElementById('rejections-date-filter').value = latest;
+  applyRejectionsDateFiltering();
+}
 
 function getFilteredRejectionsRows() {
   const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
@@ -5565,4 +5528,118 @@ function resetGehatWlayaData() {
   parsedGehatWlayaRows = [];
   document.getElementById('gehat-file-name-display').innerText = '';
   document.getElementById('gehat-preview-area').style.display = 'none';
+}
+
+// ============ ⚡ إضافة سريعة بدون ملف (جهة الولاية) ============
+// بديل سريع لرفع ملف كامل: بتاخد أرقام طلبات مكتوبة يدوي وتبعتها لواحدة من 3 وجهات:
+// المواقف (mawaqef) / الطباعة (layout) / تحديث حالة المراجعة مباشرة (system_review1).
+function onGehatQuickTargetChange() {
+  const target = document.getElementById('gehat-quick-target').value;
+  document.getElementById('gehat-quick-mawaqef-field').style.display = target === 'mawaqef' ? 'block' : 'none';
+  document.getElementById('gehat-quick-print-field').style.display = target === 'print' ? 'block' : 'none';
+  document.getElementById('gehat-quick-review-field').style.display = target === 'review' ? 'block' : 'none';
+}
+
+function parseGehatQuickOrderNumbers() {
+  const raw = document.getElementById('gehat-quick-order-numbers').value || '';
+  return [...new Set(raw.split(/[\n,،]+/).map(s => s.trim()).filter(Boolean))];
+}
+
+async function submitGehatQuickAdd() {
+  const orderNumbers = parseGehatQuickOrderNumbers();
+  if (orderNumbers.length === 0) { alert('اكتب رقم طلب واحد على الأقل'); return; }
+
+  const target = document.getElementById('gehat-quick-target').value;
+  const resultsEl = document.getElementById('gehat-quick-results');
+  const btn = document.querySelector('button[onclick="submitGehatQuickAdd()"]');
+
+  if (target === 'mawaqef') {
+    const statusValue = document.getElementById('gehat-quick-mawaqef-status').value.trim();
+    if (!statusValue) { alert('اكتب الموقف/الحالة الأول'); return; }
+
+    if (!mawaqefDataLoaded) await loadMawaqefData();
+    const existingNumbers = new Set((mawaqefMasterData || []).map(o => String(o.order_number)));
+    const newRows = orderNumbers
+      .filter(n => !existingNumbers.has(String(n)))
+      .map(n => ({ order_number: n, status: statusValue, date: new Date().toISOString().split('T')[0] }));
+    const skipped = orderNumbers.length - newRows.length;
+
+    if (newRows.length === 0) { alert('كل الأرقام دي موجودة بالفعل في جدول المواقف.'); return; }
+    if (!confirm(`هيتم إضافة ${newRows.length} طلب لجدول المواقف بحالة "${statusValue}"${skipped > 0 ? ` (${skipped} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`)) return;
+
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التنفيذ...'; }
+    try {
+      const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).insert(newRows);
+      if (error) { alert('خطأ: ' + error.message); return; }
+      resultsEl.innerHTML = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم إضافة ${newRows.length} طلب لجدول المواقف بحالة "${statusValue}" بنجاح.</p>`;
+      document.getElementById('gehat-quick-order-numbers').value = '';
+      mawaqefDataLoaded = false;
+      await loadMawaqefData();
+    } catch (err) {
+      alert('خطأ: ' + err.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerText = '🚀 تنفيذ'; }
+    }
+
+  } else if (target === 'print') {
+    const certType = document.getElementById('gehat-quick-print-type').value;
+
+    if (!certDataLoaded) await loadCertificatesData();
+    const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
+    const newRows = orderNumbers
+      .filter(n => !existingNumbers.has(String(n)))
+      .map(n => ({ order_number: n, cert_type: certType }));
+    const skipped = orderNumbers.length - newRows.length;
+
+    if (newRows.length === 0) { alert('كل الأرقام دي موجودة بالفعل في جدول الطباعة.'); return; }
+    if (!confirm(`هيتم إضافة ${newRows.length} طلب لجدول الطباعة (${certType})${skipped > 0 ? ` (${skipped} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`)) return;
+
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التنفيذ...'; }
+    try {
+      const { error } = await supabaseClient.from(CERT_TABLE_NAME).insert(newRows);
+      if (error) { alert('خطأ: ' + error.message); return; }
+      resultsEl.innerHTML = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم إضافة ${newRows.length} طلب لجدول الطباعة (${certType}) بنجاح.</p>`;
+      document.getElementById('gehat-quick-order-numbers').value = '';
+      certDataLoaded = false;
+      await loadCertificatesData();
+    } catch (err) {
+      alert('خطأ: ' + err.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerText = '🚀 تنفيذ'; }
+    }
+
+  } else if (target === 'review') {
+    const reviewStatus = document.getElementById('gehat-quick-review-status').value;
+
+    const idx = getMasterDataIndex();
+    const matched = [];
+    const notFound = [];
+    orderNumbers.forEach(n => {
+      const rows = idx.get(String(n));
+      if (rows && rows.length > 0) matched.push(rows[0]); else notFound.push(n);
+    });
+
+    if (matched.length === 0) { alert('محدش من الأرقام دي موجود في قاعدة بيانات المراجعة أصلاً.'); return; }
+    if (!confirm(`هيتم تحديث حالة المراجعة لـ ${matched.length} طلب إلى "${reviewStatus}"${notFound.length > 0 ? ` (${notFound.length} رقم مش موجود هيتجاهل)` : ''}. تأكيد؟`)) return;
+
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التنفيذ...'; }
+    try {
+      const ids = matched.map(o => o.id);
+      const { error } = await supabaseClient.from(TABLE_NAME).update({ review_status: reviewStatus }).in('id', ids);
+      if (error) { alert('خطأ: ' + error.message); return; }
+      matched.forEach(o => { o.review_status = reviewStatus; });
+
+      let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديث حالة المراجعة لـ ${matched.length} طلب إلى "${reviewStatus}".</p>`;
+      if (notFound.length > 0) {
+        html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود في قاعدة بيانات المراجعة:</p>`;
+        html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
+      }
+      resultsEl.innerHTML = html;
+      document.getElementById('gehat-quick-order-numbers').value = '';
+    } catch (err) {
+      alert('خطأ: ' + err.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerText = '🚀 تنفيذ'; }
+    }
+  }
 }

@@ -4233,16 +4233,80 @@ function verifyAndSelectCertOrders() {
 function onCertDateFilterChange() { certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 
-function renderCertKpis(data) {
-  const total = data.length;
-  const printed = data.filter(o => (o.status || '') === 'تم الطباعة').length;
-  const rejected = data.filter(o => (o.status || '') === 'مرفوض').length;
-  const pending = data.filter(o => (o.status || '') === 'معلق').length;
+// حالات الشهادات المعروفة مسبقًا لكارت الـ KPI (بترتيبها المعتاد، شاملة "لم يتم الطباعة")
+// أي حالة تانية موجودة فعليًا في الداتا هتتضاف تلقائيًا بعدهم زي ما بيحصل في تاب المواقف بالظبط
+const CERT_KPI_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'معلق', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'لم يتم الطباعة'];
+const CERT_STATUS_META = {
+  'تم الطباعة': { icon: '✅', color: '#34d399' },
+  'تم إعادة الطباعة': { icon: '🔁', color: '#38bdf8' },
+  'مرفوض': { icon: '❌', color: '#f87171' },
+  'معلق': { icon: '⏸️', color: '#fbbf24' },
+  'محجوز': { icon: '🔒', color: '#a78bfa' },
+  'خطأ جهة ولاية': { icon: '⚠️', color: '#fb923c' },
+  'خطأ عنوان': { icon: '📍', color: '#fb923c' },
+  'لم يتم الطباعة': { icon: '⛔', color: '#60a5fa' }
+};
 
-  document.getElementById('cert-stat-total').innerText = total;
-  document.getElementById('cert-stat-printed').innerText = printed;
-  document.getElementById('cert-stat-rejected').innerText = rejected;
-  document.getElementById('cert-stat-pending').innerText = pending;
+// دوسة على أي كارت حالة بتفلتر جدول الشهادات تحت بيها فورًا وتنزلك عليه
+function filterCertByStatus(status) {
+  const select = document.getElementById('cert-status-filter');
+  if (select) select.value = (status === 'لم يتم الطباعة') ? 'UNPRINTED' : status;
+  renderCertPage();
+  const table = document.querySelector('#tab-certificates .admin-container, #tab-certificates .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearCertStatusFilter() {
+  const select = document.getElementById('cert-status-filter');
+  if (select) select.value = 'ALL';
+  renderCertPage();
+}
+
+function renderCertKpis(data) {
+  const counts = {};
+  data.forEach(o => {
+    const status = (o.status && String(o.status).trim()) || 'لم يتم الطباعة';
+    counts[status] = (counts[status] || 0) + 1;
+  });
+
+  const extraStatuses = Object.keys(counts)
+    .filter(s => !CERT_KPI_STATUSES.includes(s))
+    .sort((a, b) => counts[b] - counts[a]);
+  const orderedStatuses = [...CERT_KPI_STATUSES, ...extraStatuses];
+
+  const container = document.getElementById('cert-kpi-container');
+  if (!container) return;
+
+  const total = data.length;
+  const rawFilterValue = (document.getElementById('cert-status-filter') || {}).value || 'ALL';
+  const activeStatus = rawFilterValue === 'UNPRINTED' ? 'لم يتم الطباعة' : rawFilterValue;
+
+  let html = `
+    <div class="stat-card" style="cursor:pointer; border-right: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(99,102,241,0.12), var(--bg-dark)); ${activeStatus === 'ALL' ? 'outline: 2px solid var(--accent-purple);' : ''}" onclick="clearCertStatusFilter()">
+      <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">🖨️ إجمالي الحالات</div>
+      <div style="font-size:32px; font-weight:800;">${total.toLocaleString('ar-EG')}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">كل الحالات مع بعض &middot; اضغط لإلغاء الفلترة</div>
+    </div>
+  `;
+
+  orderedStatuses.forEach((status, idx) => {
+    const meta = CERT_STATUS_META[status] || { icon: '📍', color: MAWAQEF_FALLBACK_COLORS[idx % MAWAQEF_FALLBACK_COLORS.length] };
+    const count = counts[status] || 0;
+    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const isActive = activeStatus === status;
+    html += `
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterCertByStatus('${status.replace(/'/g, "\'")}')">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${status}</div>
+        <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
+        <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
 }
 
 function renderCertPage() {

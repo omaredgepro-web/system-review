@@ -172,8 +172,6 @@
           <div id="admin-bulk-bar" class="admin-bulk-actions" style="flex-wrap: wrap; gap: 12px;">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="selected-count">0</span> طلب</span>
-              <input type="number" id="bulk-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
-              <button class="btn btn-secondary" onclick="selectNextOrderBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (تلقائي حسب نسب الشركات)</button>
               <input type="number" id="order-select-first-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
               <button class="btn btn-secondary" onclick="selectNextOrderFromFiltered()" style="padding: 4px 10px; font-size: 12px;">تحديد الأول من النتائج الحالية</button>
               <button class="btn btn-secondary" onclick="clearOrderSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
@@ -580,7 +578,8 @@
 
             <label style="font-size: 13px; color: var(--text-muted);">تاريخ الرفض:</label>
             <input type="date" id="rejections-date-filter" class="date-input" onchange="onRejectionsDateFilterChange()">
-            <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+            <button class="btn btn-secondary" onclick="showAllRejectionsDates()" style="padding: 6px 12px; font-size: 12px;">عرض كل التواريخ</button>
+            <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
 
           <div class="table-container">
@@ -788,6 +787,55 @@
           <p id="gehat-file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
         </div>
 
+        <!-- ⚡ إضافة سريعة بدون ملف: بتاخد أرقام طلبات مكتوبة يدوي وتبعتها للمواقف أو للطباعة أو تحدّث حالة مراجعتها مباشرة -->
+        <div class="admin-container" style="padding: 18px; margin-top: 20px; background: var(--bg-dark);">
+          <h3 style="font-size: 15px; margin-bottom: 6px;">⚡ إضافة سريعة (بدون ملف)</h3>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">اكتب رقم طلب واحد أو أكتر (رقم في كل سطر أو مفصولين بفاصلة)، اختار الوجهة، وحدد القيمة المطلوبة، وابعتهم على طول من غير ما تحتاج ترفع ملف.</p>
+
+          <div class="form-group">
+            <label>أرقام الطلبات</label>
+            <textarea id="gehat-quick-order-numbers" class="form-control" style="min-height: 90px;" placeholder="رقم طلب في كل سطر..."></textarea>
+          </div>
+
+          <div style="display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px;">
+            <div class="form-group" style="margin-bottom: 0; min-width: 220px;">
+              <label>الوجهة</label>
+              <select id="gehat-quick-target" class="filter-select form-control" onchange="onGehatQuickTargetChange()">
+                <option value="mawaqef">📤 إرسال إلى المواقف</option>
+                <option value="print">📨 إرسال إلى الطباعة</option>
+                <option value="review">✅ تحديث حالة المراجعة</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="gehat-quick-mawaqef-field" style="margin-bottom: 0; min-width: 220px;">
+              <label>الموقف / الحالة</label>
+              <input type="text" id="gehat-quick-mawaqef-status" class="form-control" placeholder="مثال: تم الرفع / جاري التعديل / محجوز...">
+            </div>
+
+            <div class="form-group" id="gehat-quick-print-field" style="margin-bottom: 0; min-width: 220px; display: none;">
+              <label>نوع الشهادة</label>
+              <select id="gehat-quick-print-type" class="filter-select form-control">
+                <option value="عادي">🖨️ عادي</option>
+                <option value="تعمير">📠 تعمير</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="gehat-quick-review-field" style="margin-bottom: 0; min-width: 220px; display: none;">
+              <label>حالة المراجعة</label>
+              <select id="gehat-quick-review-status" class="filter-select form-control">
+                <option value="مقبول">✅ مقبول</option>
+                <option value="مرفوض">❌ مرفوض</option>
+                <option value="معلق">⏸️ معلق</option>
+                <option value="لم يتم المراجعة">⏳ لم يتم المراجعة</option>
+              </select>
+            </div>
+
+            <button class="btn btn-primary" style="width: auto; padding: 10px 22px;" onclick="submitGehatQuickAdd()">🚀 تنفيذ</button>
+          </div>
+
+          <div id="gehat-quick-results" style="font-size: 13px;"></div>
+        </div>
+
         <div id="gehat-preview-area" style="display: none; margin-top: 20px;">
           <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px;">
             <h3 style="font-size: 14px; margin-bottom: 10px;">فلتر حسب جهة الولاية (بيحدد إيه اللي هيتصدر)</h3>
@@ -870,7 +918,10 @@
       </div>
       <div class="form-group">
         <label>رقم الطلب</label>
-        <input type="text" id="modal-order-no" class="form-control" disabled>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="modal-order-no" class="form-control" disabled style="flex:1;">
+          <button type="button" class="btn btn-secondary" style="padding: 10px 12px; white-space:nowrap;" onclick="copyOrderNumberFromInput('modal-order-no', this)" title="نسخ رقم الطلب">📋 نسخ</button>
+        </div>
       </div>
       <div class="form-group">
         <label>قرار المراجعة</label>

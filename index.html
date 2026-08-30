@@ -395,24 +395,7 @@
 
     <!-- TAB 3: طباعة الشهادات (أدمن فقط) -->
     <div id="tab-certificates" style="display: none;">
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-title">إجمالي الحالات (للتاريخ المحدد)</div>
-          <div class="kpi-value" id="cert-stat-total">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">تم الطباعة</div>
-          <div class="kpi-value" style="color: var(--badge-accept-text)" id="cert-stat-printed">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">مرفوض</div>
-          <div class="kpi-value" style="color: var(--badge-reject-text)" id="cert-stat-rejected">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">معلق</div>
-          <div class="kpi-value" style="color: var(--badge-pending-text)" id="cert-stat-pending">0</div>
-        </div>
-      </div>
+      <div id="cert-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px;"></div>
 
       <div class="main-content">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">

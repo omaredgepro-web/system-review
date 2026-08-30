@@ -396,6 +396,25 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// قائمة الإعدادات (وضع فاتح/داكن، تغيير كلمة المرور، تسجيل خروج) في زرار واحد بدل تلاتة متفرقين
+function toggleSettingsMenu() {
+  const dropdown = document.getElementById('settings-dropdown');
+  dropdown.style.display = dropdown.style.display === 'none' ? 'flex' : 'none';
+}
+
+function closeSettingsMenu() {
+  document.getElementById('settings-dropdown').style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('settings-dropdown');
+  const btn = document.getElementById('settings-menu-toggle-btn');
+  if (!dropdown || dropdown.style.display === 'none') return;
+  if (!dropdown.contains(e.target) && e.target !== btn) {
+    dropdown.style.display = 'none';
+  }
+});
+
 document.addEventListener('click', (e) => {
   const panel = document.getElementById('stats-multiselect-panel');
   const btn = document.getElementById('stats-multiselect-btn');
@@ -3456,20 +3475,42 @@ const CHART_COLORS = {
   'مرفوض': '#f87171',
   'معلق': '#fbbf24',
   'Qc': '#c084fc',
-  'لم يتم المراجعة': '#60a5fa'
+  'لم يتم المراجعة': '#60a5fa',
+  // حالات تاب الشهادات (عادي وتعمير)
+  'تم الطباعة': '#34d399',
+  'تم إعادة الطباعة': '#38bdf8',
+  'محجوز': '#a78bfa',
+  'خطأ جهة ولاية': '#fb923c',
+  'خطأ عنوان': '#fb923c',
+  'لم يتم الطباعة': '#60a5fa'
+};
+
+// الحالات المعروضة في رسم "نظرة عامة" لكل سياق (تاب) على حدة
+const CONTEXT_STATUS_LABELS = {
+  main: ['مقبول', 'مرفوض', 'معلق', 'Qc', 'لم يتم المراجعة'],
+  cert: ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'معلق', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'لم يتم الطباعة']
 };
 
 function getCssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-// بيانات الرسوم البيانية: للأدمن كل بيانات التاريخ المحدد، للمراجع العادي بياناته هو بس (نفس منطق الـ KPIs)
+// بيانات الرسوم البيانية: بتختلف حسب السياق (لوحة المراجعة العادية، أو تاب الشهادات بنوعيه)
+let currentChartsContext = 'main';
+
 function getChartsDataScope() {
+  if (currentChartsContext === 'cert') return certAllData || [];
   if (currentUser && currentUser.role === 'admin') return window.allData || [];
   return window.visibleData || [];
 }
 
-async function openChartsModal() {
+async function openChartsModal(context) {
+  currentChartsContext = context || 'main';
+
+  const isCert = currentChartsContext === 'cert';
+  document.getElementById('chart-view-btn-companies').style.display = isCert ? 'none' : 'inline-flex';
+  document.getElementById('chart-view-btn-reviewers').innerText = isCert ? '👤 المسؤولين' : '👤 المراجعين';
+
   document.getElementById('charts-modal').style.display = 'flex';
   document.getElementById('charts-title').innerText = 'الرسوم البيانية';
   document.getElementById('charts-subtitle').innerText = '';
@@ -3483,13 +3524,13 @@ async function openChartsModal() {
     wrap.innerHTML = `
       <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:12px; color:var(--text-muted); font-size:13px; text-align:center; padding: 0 20px;">
         <span>تعذر تحميل مكتبة الرسوم البيانية. تأكد من اتصال الإنترنت، أو جرّب توقف أي إضافة حظر إعلانات (Ad-blocker) لهذا الموقع، وحاول تاني.</span>
-        <button class="btn btn-secondary" style="width:auto; padding:6px 16px;" onclick="openChartsModal()">🔄 إعادة المحاولة</button>
+        <button class="btn btn-secondary" style="width:auto; padding:6px 16px;" onclick="openChartsModal('${currentChartsContext}')">🔄 إعادة المحاولة</button>
       </div>`;
     return;
   }
 
   wrap.innerHTML = '<canvas id="charts-canvas"></canvas>';
-  showChartView('overview');
+  showChartView(isCert ? 'reviewers' : 'overview');
 }
 
 function closeChartsModal() {
@@ -3515,18 +3556,34 @@ function showChartView(view) {
   const canvas = document.getElementById('charts-canvas');
   const ctx = canvas.getContext('2d');
   const data = getChartsDataScope();
+  const isCert = currentChartsContext === 'cert';
 
   if (view === 'overview') renderOverviewChart(ctx, data);
   else if (view === 'companies') renderGroupedChart(ctx, data, o => (o.company || o['الشركة'] || '').toString().trim(), 'توزيع الطلبات حسب الشركات');
-  else if (view === 'reviewers') renderGroupedChart(ctx, data, o => getDisplayName(o.reviewer || o['المراجع'] || ''), 'توزيع الطلبات حسب المراجعين');
+  else if (view === 'reviewers') {
+    if (isCert) {
+      renderGroupedChart(ctx, data, o => getDisplayName(o.Layout || o.layout || 'غير موزّع'), 'توزيع الطلبات حسب المسؤولين');
+    } else {
+      renderGroupedChart(ctx, data, o => getDisplayName(o.reviewer || o['المراجع'] || ''), 'توزيع الطلبات حسب المراجعين');
+    }
+  }
+}
+
+// حالة كل صف بتختلف تسميتها حسب السياق: review_status في لوحة المراجعة، status في تاب الشهادات
+function getRowStatus(o) {
+  if (currentChartsContext === 'cert') return o.status || 'لم يتم الطباعة';
+  return o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة';
 }
 
 function getStatusCounts(data) {
-  const counts = { 'مقبول': 0, 'مرفوض': 0, 'معلق': 0, 'Qc': 0, 'لم يتم المراجعة': 0 };
+  const labels = CONTEXT_STATUS_LABELS[currentChartsContext] || CONTEXT_STATUS_LABELS.main;
+  const fallback = labels[labels.length - 1];
+  const counts = {};
+  labels.forEach(l => { counts[l] = 0; });
   data.forEach(o => {
-    const s = o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة';
+    const s = getRowStatus(o);
     if (counts[s] !== undefined) counts[s]++;
-    else counts['لم يتم المراجعة']++;
+    else counts[fallback]++;
   });
   return counts;
 }
@@ -3562,15 +3619,20 @@ function renderOverviewChart(ctx, data) {
 }
 
 function buildGroupStats(data, keyFn) {
+  const labels = CONTEXT_STATUS_LABELS[currentChartsContext] || CONTEXT_STATUS_LABELS.main;
+  const fallback = labels[labels.length - 1];
   const stats = {};
   data.forEach(o => {
     const key = keyFn(o);
     if (!key) return;
-    const revStatus = o.review_status || o['حالة المراجعة'] || 'لم يتم المراجعة';
-    if (!stats[key]) stats[key] = { 'مقبول': 0, 'مرفوض': 0, 'معلق': 0, 'Qc': 0, 'لم يتم المراجعة': 0, total: 0 };
+    const rowStatus = getRowStatus(o);
+    if (!stats[key]) {
+      stats[key] = { total: 0 };
+      labels.forEach(l => { stats[key][l] = 0; });
+    }
     stats[key].total++;
-    if (stats[key][revStatus] !== undefined) stats[key][revStatus]++;
-    else stats[key]['لم يتم المراجعة']++;
+    if (stats[key][rowStatus] !== undefined) stats[key][rowStatus]++;
+    else stats[key][fallback]++;
   });
   return stats;
 }
@@ -3585,7 +3647,7 @@ function renderGroupedChart(ctx, data, keyFn, titleText) {
   document.getElementById('charts-title').innerText = titleText.includes('الشركات') ? '🏢 ' + titleText : '👤 ' + titleText;
   document.getElementById('charts-subtitle').innerText = keys.length ? `أعلى ${keys.length} عنصر حسب عدد الطلبات` : 'لا توجد بيانات كافية لعرضها';
 
-  const statusLabels = ['مقبول', 'مرفوض', 'معلق', 'Qc', 'لم يتم المراجعة'];
+  const statusLabels = CONTEXT_STATUS_LABELS[currentChartsContext] || CONTEXT_STATUS_LABELS.main;
 
   chartsInstance = new Chart(ctx, {
     type: 'bar',

@@ -269,21 +269,53 @@ function selectQuickAddOrders() {
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل في الخانة أولاً'); return; }
 
   const numsSet = new Set(orderNumbers);
-  let foundCount = 0;
+  const matchedOrders = [];
   (window.masterData || []).forEach(o => {
     const num = o.order_number || o.order_no || o['رقم الطلب'];
     if (numsSet.has(String(num))) {
       selectedOrderNumbers.add(num);
-      foundCount++;
+      matchedOrders.push(o);
     }
   });
+  const foundCount = matchedOrders.length;
+
+  switchTab('dashboard');
+
+  if (foundCount > 0) {
+    // الأرقام اللي اتحددت ممكن تكون منتشرة على تواريخ مختلفة، فبنشيل فلتر التاريخ وأي فلتر تاني
+    // ممكن يخفيهم (بحث/حالة/مراجع/شركة)، عشان نضمن ظهورهم كلهم، وننقل تلقائيًا لأول صفحة فيها
+    // أول رقم اتحدد - عشان تشوفه فورًا من غير ما تدور عليه بنفسك.
+    document.getElementById('date-filter').value = '';
+    document.getElementById('search-input').value = '';
+    document.getElementById('status-filter').value = 'ALL';
+    document.getElementById('reviewer-filter').value = 'ALL';
+    document.getElementById('company-filter').value = 'ALL';
+
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    window.allData = isAdmin
+      ? (window.masterData || [])
+      : (window.masterData || []).filter(item => {
+          const reviewerName = item.reviewer || item['المراجع'] || '';
+          return reviewerName === currentUser.username || reviewerName === currentUser.name;
+        });
+    window.visibleData = window.allData;
+    document.getElementById('active-date-label').innerText = `يعرض كل التواريخ (بحث عن ${foundCount} رقم محدد)`;
+
+    const getNum = o => o.order_number || o.order_no || o['رقم الطلب'];
+    const firstFoundIndex = window.visibleData.findIndex(o => numsSet.has(String(getNum(o))));
+    currentPage = firstFoundIndex >= 0 ? Math.floor(firstFoundIndex / pageSize) + 1 : 1;
+
+    updateKPIs(window.visibleData);
+  }
 
   updateSelectedCount();
-  switchTab('dashboard');
   renderCurrentPage();
 
+  const table = document.querySelector('#tab-dashboard .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
   const notFoundCount = orderNumbers.length - foundCount;
-  let msg = `تم تحديد ${foundCount} طلب من أصل ${orderNumbers.length} في الجدول.`;
+  let msg = `تم تحديد ${foundCount} طلب من أصل ${orderNumbers.length} (بحثنا في كل التواريخ) - ونقلناك على طول لأول صفحة فيها أول رقم متحدد.`;
   if (notFoundCount > 0) msg += `\n(${notFoundCount} رقم مش موجود أصلاً في قاعدة البيانات)`;
   alert(msg);
 }
@@ -1352,7 +1384,7 @@ async function executeBulkDateUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedOrderNumbers.size}) طلب إلى "${newDate}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
   if (targetOrders.length === 0) return;
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -1380,7 +1412,7 @@ async function executeBulkStatusUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تغيير حالة المراجعة لـ (${selectedOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
   if (targetOrders.length === 0) return;
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -1419,7 +1451,7 @@ async function executeBulkReviewDecisionUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تغيير القرار لـ (${selectedOrderNumbers.size}) طلب إلى "${newDecision}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
   if (targetOrders.length === 0) return;
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -1459,7 +1491,7 @@ async function executeBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
@@ -1484,7 +1516,7 @@ async function executeBulkReassign() {
   const confirmChange = confirm(`هل أنت تأكد من نقل (${selectedOrderNumbers.size}) طلب إلى المراجع "${newReviewer}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
@@ -4286,12 +4318,15 @@ function verifyAndSelectCertOrders() {
     return;
   }
 
-  if (!certAllData || certAllData.length === 0) {
-    alert('لا يوجد بيانات محمّلة حاليًا للتاريخ المحدد.');
+  if (!certMasterData || certMasterData.length === 0) {
+    alert('لا يوجد بيانات محمّلة حاليًا.');
     return;
   }
 
-  const availableNumbers = new Set(certAllData.map(o => String(o.order_number)));
+  // بندور في كل التواريخ (مش بس التاريخ المعروض حاليًا)، بس بنفس نوع الشهادة الحالي (عادي/تعمير)
+  // عشان الرقم يتحدد حتى لو مسجل في يوم تاني غير اليوم المعروض فوق.
+  const scopedData = certMasterData.filter(o => (o.cert_type || 'عادي') === activeCertType);
+  const availableNumbers = new Set(scopedData.map(o => String(o.order_number)));
   const found = [];
   const notFound = [];
 
@@ -4305,12 +4340,36 @@ function verifyAndSelectCertOrders() {
   });
 
   updateCertSelectedCount();
-  renderCertPage(); // بيعيد رسم نفس البيانات بنفس الترتيب، بس الـ checkboxes بتتظبط تلقائيًا حسب التحديد
+
+  if (found.length > 0) {
+    // الأرقام المتحددة ممكن تكون منتشرة على تواريخ مختلفة، فبنشيل فلتر التاريخ وأي فلتر تاني
+    // ممكن يخفيهم (بحث/حالة/مسؤول)، عشان نضمن ظهورهم كلهم، وننقل تلقائيًا لأول صفحة فيها
+    // أول رقم اتحدد - عشان تشوفه فورًا من غير ما تدور عليه بنفسك.
+    document.getElementById('cert-date-filter').value = '';
+    document.getElementById('cert-search-input').value = '';
+    document.getElementById('cert-status-filter').value = 'ALL';
+    document.getElementById('cert-layout-filter').value = 'ALL';
+
+    certAllData = scopedData; // كل التواريخ لنفس نوع الشهادة الحالي
+    certTotalRecordsCount = certAllData.length;
+    document.getElementById('cert-active-date-label').innerText = `يعرض كل التواريخ (بحث عن ${found.length} رقم محدد)`;
+
+    const foundSet = new Set(found);
+    const firstFoundIndex = certAllData.findIndex(o => foundSet.has(String(o.order_number)));
+    certCurrentPage = firstFoundIndex >= 0 ? Math.floor(firstFoundIndex / certPageSize) + 1 : 1;
+
+    renderCertKpis(certAllData);
+  }
+
+  renderCertPage(); // بيعيد رسم البيانات بترتيبها، والـ checkboxes بتتظبط تلقائيًا حسب التحديد
+
+  const table = document.querySelector('#tab-certificates .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   const resultsEl = document.getElementById('cert-multiselect-results');
-  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل).</p>`;
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل) - بحثنا في كل التواريخ ونقلناك على طول لأول صفحة فيها أول رقم متحدد.</p>`;
   if (notFound.length > 0) {
-    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود في التاريخ المعروض حاليًا:</p>`;
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود أصلاً (بأي تاريخ) في نوع "${activeCertType}":</p>`;
     html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
   }
   resultsEl.innerHTML = html;
@@ -4623,7 +4682,7 @@ async function executeCertBulkReassign() {
   const confirmChange = confirm(`هل أنت تأكد من توزيع (${selectedCertOrderNumbers.size}) طلب على المسؤول "${newLayout}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -4648,7 +4707,7 @@ async function executeCertBulkDateUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedCertOrderNumbers.size}) طلب إلى "${newDate}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -4674,7 +4733,7 @@ async function executeCertBulkTypeUpdate() {
   const confirmChange = confirm(`هل أنت متأكد من نقل (${selectedCertOrderNumbers.size}) طلب إلى "${targetLabel}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -4707,7 +4766,7 @@ async function executeCertBulkStatusUpdate() {
   const confirmChange = confirm(`هل أنت متأكد من تغيير حالة (${selectedCertOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -4732,7 +4791,7 @@ async function executeCertBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedCertOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -5285,7 +5344,7 @@ async function executeMawaqefBulkStatusUpdate() {
   const confirmChange = confirm(`هل أنت متأكد من تغيير حالة (${selectedMawaqefOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -5307,7 +5366,7 @@ async function executeMawaqefBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedMawaqefOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 

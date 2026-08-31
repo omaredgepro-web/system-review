@@ -3326,6 +3326,20 @@ function updateKPIs(data) {
     </div>
   `;
 
+  // كارت "تم المراجعة" (مقبول + مرفوض مع بعض) - بارز جنب باقي الكروت بدل ما يكون سطر صغير تحت
+  const reviewed = (counts['مقبول'] || 0) + (counts['مرفوض'] || 0);
+  const reviewedPct = total > 0 ? Math.round((reviewed / total) * 100) : 0;
+  html += `
+    <div class="stat-card" style="border-right: 4px solid #a78bfa; background: linear-gradient(135deg, rgba(167,139,250,0.12), var(--bg-dark));">
+      <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">✔️ تم المراجعة (مقبول + مرفوض)</div>
+      <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${reviewed.toLocaleString('ar-EG')}</div>
+      <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+        <div style="height:100%; width:${reviewedPct}%; background:#a78bfa;"></div>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted);">${reviewedPct}% من الإجمالي</div>
+    </div>
+  `;
+
   orderedStatuses.forEach((status, idx) => {
     const meta = REVIEW_STATUS_META[status] || { icon: '📍', color: REVIEW_FALLBACK_COLORS[idx % REVIEW_FALLBACK_COLORS.length] };
     const count = counts[status] || 0;
@@ -3344,12 +3358,6 @@ function updateKPIs(data) {
   });
 
   container.innerHTML = html;
-
-  const reviewedEl = document.getElementById('dashboard-reviewed-note');
-  if (reviewedEl) {
-    const reviewed = (counts['مقبول'] || 0) + (counts['مرفوض'] || 0);
-    reviewedEl.innerText = `✔️ تم المراجعة: ${reviewed.toLocaleString('ar-EG')} من ${total.toLocaleString('ar-EG')}`;
-  }
 }
 
 // دوسة على أي كارت حالة في لوحة المراجعة بتفلتر جدول الطلبات تحته بيها فورًا وتنزلك عليه

@@ -217,6 +217,14 @@ async function submitQuickAddOrders() {
   const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
 
+  // فحص التكرار هنا لازم يشمل كل التواريخ (الطلب ممكن يكون مسجل بتاريخ مختلف عن التاريخ المختار هنا)
+  try {
+    await ensureFullMasterData();
+  } catch (err) {
+    alert('تعذّر تحميل بيانات قاعدة البيانات للتأكد من عدم التكرار: ' + err.message);
+    return;
+  }
+
   const toInsert = [];
   const toUpdateIds = [];
   let skippedSameReviewer = 0;
@@ -263,10 +271,18 @@ async function submitQuickAddOrders() {
 // بيحدد (يعلّم checkbox) الطلبات اللي أرقامها مكتوبة في نفس خانة "الإضافة السريعة"، من غير
 // ما يضيف أو يعدل أي حاجة - عشان تقدر تطبّق عليهم أي إجراء تاني موجود فوق (حذف/تغيير مراجع/تاريخ)
 // يدويًا بنفسك، زي "تحديد" عادي بس بالأرقام اللي انت كاتبها بدل التحديد التلقائي.
-function selectQuickAddOrders() {
+async function selectQuickAddOrders() {
   const raw = document.getElementById('quick-add-textarea').value;
   const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل في الخانة أولاً'); return; }
+
+  // البحث هنا بيدور عبر كل التواريخ، فمحتاج كل الجدول متحمّل الأول
+  try {
+    await ensureFullMasterData();
+  } catch (err) {
+    alert('تعذّر تحميل باقي التواريخ: ' + err.message);
+    return;
+  }
 
   const numsSet = new Set(orderNumbers);
   const matchedOrders = [];
@@ -1059,31 +1075,99 @@ function extractDateString(item) {
   return parseToIsoDate(item.date || item.created_at || item['التاريخ'] || item['تاريخ الطلب'] || '');
 }
 
+// ============ تحميل البيانات بذكاء: تاريخ واحد بسرعة، وباقي الجدول بس لما يتحتاج فعلاً ============
+// السبب: كان loadData() بيجيب الجدول كله (system_review1) بالكامل، كل مرة تتفتح/تتحدّث فيها
+// لوحة المراجعة، حتى لو المطلوب فعليًا هو بس طلبات تاريخ واحد. ده كان بيسبب بطء واضح مع نمو
+// الجدول، وبيستهلك حصة الـ Egress بتاعة Supabase من غير داعي.
+//
+// دلوقتي: window.masterData بيبدأ بس بصفوف التاريخ المعروض (استعلام .eq('date', ...) صغير
+// وسريع)، مش الجدول كله. أي ميزة محتاجة تشوف كل التواريخ مع بعض (بحث برقم طلب، فحص التكرار وقت
+// رفع ملف، تصفح تاريخ تاني، "عرض المحدد فقط" لو فيه طلبات محددة من تواريخ مختلفة...) بتنادي
+// ensureFullMasterData() الأول، اللي بتجيب باقي الجدول (بنفس أسلوب الدفعات القديم) مرة واحدة بس
+// وتخزّنه، وبعدين بيفضل محفوظ (من غير إعادة جلب) لحد ما تعمل تحديث/ريفرش تاني للوحة.
+//
+// ملاحظة: الفلترة السريعة دي بتفترض إن عمود "date" مخزّن بصيغة ISO (YYYY-MM-DD) زي ما بيحطها
+// حقل اختيار التاريخ (type="date") في كل مكان بيتسجل بيه تاريخ في الكود ده. لو فيه صفوف قديمة جدًا
+// بصيغة تانية (زي "3/5/2026")، مش هتظهر في التحميل السريع الأول، لكن هتظهر عادي أول ما أي ميزة
+// تنادي ensureFullMasterData() (زي البحث برقم الطلب).
+window.__masterDataScope = 'none'; // 'none' (لسه معملش تحميل) | 'date' (تاريخ واحد بس) | 'full' (الجدول كله)
+let _fullMasterDataPromise = null;
+
+async function fetchAllRowsFromTable(tableName, extraFilter) {
+  let allFetched = [];
+  let from = 0, step = 1000, hasMore = true;
+
+  while (hasMore) {
+    let query = supabaseClient.from(tableName).select('*').order('id', { ascending: true }).range(from, from + step - 1);
+    if (extraFilter) query = extraFilter(query);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      allFetched = allFetched.concat(data);
+      from += step;
+      if (data.length < step) hasMore = false;
+    } else { hasMore = false; }
+  }
+
+  return allFetched;
+}
+
+// بيجيب باقي الجدول كله (كل التواريخ) مرة واحدة بس، ويخزنه في window.masterData. لو النداء اتكرر
+// وهو لسه شغال، بينضم لنفس الطلب الجاري بدل ما يبعت طلب تاني منفصل لـ Supabase.
+async function ensureFullMasterData() {
+  if (window.__masterDataScope === 'full') return window.masterData;
+  if (_fullMasterDataPromise) return _fullMasterDataPromise;
+
+  _fullMasterDataPromise = (async () => {
+    const allFetched = await fetchAllRowsFromTable(TABLE_NAME);
+    window.masterData = allFetched;
+    window.__masterDataScope = 'full';
+    return window.masterData;
+  })();
+
+  try {
+    return await _fullMasterDataPromise;
+  } finally {
+    _fullMasterDataPromise = null;
+  }
+}
+
 async function loadData() {
   const tbody = document.getElementById('orders-tbody');
   tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري جلب البيانات من Supabase...</td></tr>`;
 
   try {
-    let allFetched = [];
-    let from = 0, step = 1000, hasMore = true;
+    // الخطوة 1: تحديد التاريخ المستهدف (المحدد يدويًا فوق، أو أحدث تاريخ موجود فعليًا في الجدول)
+    // - استعلام صغير جدًا (عمود واحد، صف واحد) بدل ما نجيب الجدول كله عشان نعرف أحدث تاريخ.
+    let targetDate = document.getElementById('date-filter').value;
 
-    while (hasMore) {
-      const { data, error } = await supabaseClient.from(TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        allFetched = allFetched.concat(data);
-        from += step;
-        if (data.length < step) hasMore = false;
-      } else { hasMore = false; }
+    if (!targetDate) {
+      const { data: latestRow, error: latestErr } = await supabaseClient
+        .from(TABLE_NAME)
+        .select('date')
+        .not('date', 'is', null)
+        .neq('date', '')
+        .order('date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestErr) throw latestErr;
+      targetDate = (latestRow && latestRow.date) || '';
     }
 
-    if (allFetched.length === 0) {
+    // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله
+    const dateRows = targetDate
+      ? await fetchAllRowsFromTable(TABLE_NAME, q => q.eq('date', targetDate))
+      : [];
+
+    if (dateRows.length === 0 && !targetDate) {
       tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد بيانات متاحة</td></tr>`;
       return;
     }
 
-    window.masterData = allFetched;
+    window.masterData = dateRows;
+    window.__masterDataScope = 'date';
+    if (targetDate) document.getElementById('date-filter').value = targetDate;
     applyDateFiltering();
 
   } catch (err) {
@@ -1126,7 +1210,26 @@ function applyDateFiltering() {
   renderCurrentPage();
 }
 
-function onDateFilterChange() { currentPage = 1; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
+// تغيير التاريخ المعروض لتاريخ تاني (تصفح تاريخ سابق) لازم كل بيانات الجدول تكون متحملة (مش بس
+// تاريخ واحد)، فبنتأكد من تحميل الباقي الأول (مرة واحدة بس، بعد كده بيفضل محفوظ).
+async function onDateFilterChange() {
+  currentPage = 1;
+  selectedOrderNumbers.clear();
+  updateSelectedCount();
+
+  if (window.__masterDataScope !== 'full') {
+    const tbody = document.getElementById('orders-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل باقي التواريخ...</td></tr>`;
+    try {
+      await ensureFullMasterData();
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      return;
+    }
+  }
+
+  applyDateFiltering();
+}
 function resetDateToLatest() { document.getElementById('date-filter').value = ''; selectedOrderNumbers.clear(); updateSelectedCount(); applyDateFiltering(); }
 
 // تحديث بيانات لوحة المراجعة والإحصائيات من Supabase من غير عمل ريفرش لكل الصفحة
@@ -1147,12 +1250,25 @@ async function refreshDashboardData() {
 let showOnlySelectedDashboard = false;
 
 // بيبدّل بين عرض كل البيانات المفلترة عادي، وعرض المحدد بس (كل الطلبات اللي عليها ✔️ حاليًا)
-// مجمّعين مع بعض بغض النظر عن تاريخهم أو أي فلتر تاني شغال فوق.
-function toggleShowOnlySelectedDashboard() {
+// مجمّعين مع بعض بغض النظر عن تاريخهم أو أي فلتر تاني شغال فوق. بما إن المحدد ممكن يكون منتشر
+// على تواريخ مختلفة، بنتأكد إن كل الجدول متحمّل قبل ما نفعّل الوضع ده.
+async function toggleShowOnlySelectedDashboard() {
   showOnlySelectedDashboard = !showOnlySelectedDashboard;
   currentPage = 1;
   const btn = document.getElementById('show-selected-only-btn');
-  if (btn) btn.innerText = showOnlySelectedDashboard ? '↩️ عرض الكل' : '📌 عرض المحدد فقط';
+
+  if (showOnlySelectedDashboard && window.__masterDataScope !== 'full') {
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحميل...'; }
+    try {
+      await ensureFullMasterData();
+    } catch (err) {
+      alert('حصل خطأ أثناء تحميل باقي التواريخ: ' + err.message);
+      showOnlySelectedDashboard = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.innerText = showOnlySelectedDashboard ? '↩️ عرض الكل' : '📌 عرض المحدد فقط'; }
   renderCurrentPage();
 }
 
@@ -1324,7 +1440,7 @@ function useCsvUploadTodayDate() {
 
 // بيطبّق التاريخ المختار على كل الصفوف المرفوعة حاليًا (يستبدل أي تاريخ كان موجود بالملف الأصلي)،
 // ويحدّث حالة الخانة عشان يبقى واضح إن التاريخ اتأكد فعليًا.
-function applyCsvUploadDateToAllRows() {
+async function applyCsvUploadDateToAllRows() {
   const dateInput = document.getElementById('csv-upload-date-input');
   const statusEl = document.getElementById('csv-upload-date-status');
 
@@ -1337,7 +1453,10 @@ function applyCsvUploadDateToAllRows() {
   if (parsedCsvData && parsedCsvData.length > 0) {
     parsedCsvData.forEach(row => { row.date = dateInput.value; });
 
-    const cleanupResult = autoCleanCsvDuplicates();
+    statusEl.innerText = '⏳ جاري فحص التكرار...';
+    statusEl.style.color = 'var(--text-muted)';
+
+    const cleanupResult = await autoCleanCsvDuplicates();
     renderCsvPreview(parsedCsvData);
 
     const report = buildDuplicateCleanupReport(cleanupResult);
@@ -1650,8 +1769,10 @@ async function handleMultipleFiles(fileList) {
 
     parsedCsvData = parsedCsvData.concat(allNewRows); // إضافة على اللي موجود بالفعل، مش استبدال
 
+    document.getElementById('file-name-display').innerText = `جاري فحص التكرار مع باقي التواريخ...`;
+
     // ============ منع تكرار الطلب في نفس اليوم تلقائيًا (بدون الحاجة لأي زرار يدوي) ============
-    const cleanupResult = autoCleanCsvDuplicates();
+    const cleanupResult = await autoCleanCsvDuplicates();
 
     document.getElementById('file-name-display').innerText = `تم إضافة: ${namesLabel} (الإجمالي الآن ${parsedCsvData.length} طلب)`;
     renderCsvPreview(parsedCsvData);
@@ -1913,7 +2034,11 @@ function applyDuplicateRuleToRows(rows) {
 // بيشغّل قاعدة منع التكرار كاملة (تكرار داخل الدفعة + تكرار مع قاعدة البيانات) على parsedCsvData
 // الحالية، ويرجّع تقرير بكل حاجة اتشالت وليه، وكمان بيخزن لستة كل الأرقام المُستبعدة (window.lastAutoRemovedDuplicates)
 // عشان تقدر تنزلها شيت إكسيل بعد كده من اللوحة (مش بس تشوف العدد في رسالة بتختفي).
-function autoCleanCsvDuplicates() {
+async function autoCleanCsvDuplicates() {
+  // فحص التكرار (وخصوصًا "اتقبل قبل كده بأي تاريخ") لازم يشوف الجدول كله، مش بس تاريخ واحد،
+  // وإلا ممكن يسمح بتوزيع طلب اتقفل عليه القرار فعلاً من قبل لمجرد إن بياناته مش محمّلة دلوقتي.
+  await ensureFullMasterData();
+
   const beforeCount = parsedCsvData.length;
 
   const batchResult = removeWithinBatchDuplicates(parsedCsvData);
@@ -2720,7 +2845,9 @@ function downloadDuplicateOrdersExcel() {
 
 // زرار يدوي (للمراجعة/الطمأنينة بعد أي تعديل يدوي على الصفوف) — بيطبّق بالظبط نفس القاعدة اللي
 // بتتشغل تلقائيًا أول ما ترفع ملف أو تغيّر تاريخ الدفعة (applyDuplicateRuleToRows فوق).
-function resolveExistingDuplicatesBySmartRule() {
+async function resolveExistingDuplicatesBySmartRule() {
+  await ensureFullMasterData();
+
   const targetDate = getCsvUploadTargetDateIso();
   const preview = applyDuplicateRuleToRows(parsedCsvData);
 
@@ -5018,7 +5145,25 @@ document.getElementById('cert-search-input').addEventListener('input', () => { c
 document.getElementById('cert-status-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 document.getElementById('cert-layout-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 
-document.getElementById('search-input').addEventListener('input', () => { currentPage = 1; renderCurrentPage(); });
+// البحث برقم الطلب بيدور عبر كل التواريخ (مش بس التاريخ المعروض)، فمحتاج كل الجدول متحمّل. أول
+// مرة يتكتب فيها حرف في البحث، بنجيب باقي التواريخ الأول (مرة واحدة، بعد كده بيفضل محفوظ).
+document.getElementById('search-input').addEventListener('input', async () => {
+  currentPage = 1;
+  const hasSearchValue = document.getElementById('search-input').value.trim().length > 0;
+
+  if (hasSearchValue && window.__masterDataScope !== 'full') {
+    const tbody = document.getElementById('orders-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل باقي التواريخ للبحث الشامل...</td></tr>`;
+    try {
+      await ensureFullMasterData();
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      return;
+    }
+  }
+
+  renderCurrentPage();
+});
 document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); updateKPIs(window.visibleData || []); });
 document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('company-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });

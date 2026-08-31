@@ -982,6 +982,18 @@ function switchTab(tabName) {
     document.getElementById('admin-menu-toggle-btn').classList.add('active');
   }
 
+  // بنرجّع وضع "عرض المحدد فقط" (لو كان شغال) للوضع الطبيعي تلقائيًا عند تغيير التاب، عشان محدش
+  // يلاقي نفسه فاتح تاب جديد وهو لسه في وضع فلترة قديم من غير ما ينتبه.
+  showOnlySelectedDashboard = false;
+  showOnlySelectedCert = false;
+  showOnlySelectedMawaqef = false;
+  const dashBtn = document.getElementById('show-selected-only-btn');
+  if (dashBtn) dashBtn.innerText = '📌 عرض المحدد فقط';
+  const certBtn = document.getElementById('show-selected-only-cert-btn');
+  if (certBtn) certBtn.innerText = '📌 عرض المحدد فقط';
+  const mawaqefBtn = document.getElementById('show-selected-only-mawaqef-btn');
+  if (mawaqefBtn) mawaqefBtn.innerText = '📌 عرض المحدد فقط';
+
   if (tabName === 'dashboard') {
     document.getElementById('dashboard-tab-btn').classList.add('active');
     document.getElementById('tab-dashboard').style.display = 'block';
@@ -1132,8 +1144,41 @@ async function refreshDashboardData() {
   }
 }
 
+let showOnlySelectedDashboard = false;
+
+// بيبدّل بين عرض كل البيانات المفلترة عادي، وعرض المحدد بس (كل الطلبات اللي عليها ✔️ حاليًا)
+// مجمّعين مع بعض بغض النظر عن تاريخهم أو أي فلتر تاني شغال فوق.
+function toggleShowOnlySelectedDashboard() {
+  showOnlySelectedDashboard = !showOnlySelectedDashboard;
+  currentPage = 1;
+  const btn = document.getElementById('show-selected-only-btn');
+  if (btn) btn.innerText = showOnlySelectedDashboard ? '↩️ عرض الكل' : '📌 عرض المحدد فقط';
+  renderCurrentPage();
+}
+
 function renderCurrentPage() {
   if (!window.visibleData) return;
+
+  // وضع "عرض المحدد فقط": بيتجاهل كل فلاتر البحث/الحالة/المراجع/الشركة/التاريخ، وبيعرض بس
+  // الطلبات اللي متحددة حاليًا (✔️) من كل التواريخ مع بعض.
+  if (showOnlySelectedDashboard) {
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    const scoped = isAdmin ? (window.masterData || []) : (window.masterData || []).filter(item => {
+      const reviewerName = item.reviewer || item['المراجع'] || '';
+      return reviewerName === currentUser.username || reviewerName === currentUser.name;
+    });
+    const getNum = o => o.order_number || o.order_no || o['رقم الطلب'];
+    const filtered = scoped.filter(item => selectedOrderNumbers.has(getNum(item)));
+
+    totalRecordsCount = filtered.length;
+    const from = (currentPage - 1) * pageSize;
+    const to = from + pageSize;
+
+    window.currentFilteredData = filtered;
+    renderTable(filtered.slice(from, to));
+    updatePaginationControls(from + 1, Math.min(to, totalRecordsCount));
+    return;
+  }
 
   const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
   const statusValue = document.getElementById('status-filter').value;
@@ -1267,7 +1312,7 @@ function updateSelectedCount() {
 function clearOrderSelection() {
   selectedOrderNumbers.clear();
   updateSelectedCount();
-  renderCurrentPage();
+  if (showOnlySelectedDashboard) toggleShowOnlySelectedDashboard(); else renderCurrentPage();
 }
 
 // ============ التاريخ الإجباري لدفعة الرفع (لوحة الأدمن CSV) ============
@@ -1396,6 +1441,7 @@ async function executeBulkDateUpdate() {
       alert(`تم تحديث تاريخ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newDate}"!`);
       targetOrders.forEach(o => { o.date = newDate; });
       selectedOrderNumbers.clear();
+      if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateSelectedCount();
       await loadData();
     }
@@ -1424,6 +1470,7 @@ async function executeBulkStatusUpdate() {
       alert(`تم تغيير حالة المراجعة لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
       targetOrders.forEach(o => { o.status = newStatus; });
       selectedOrderNumbers.clear();
+      if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateSelectedCount();
       document.getElementById('bulk-status-select').value = '';
       await loadData();
@@ -1478,6 +1525,7 @@ async function executeBulkReviewDecisionUpdate() {
         if ('سبب الرفض' in o) o['سبب الرفض'] = reason;
       });
       selectedOrderNumbers.clear();
+      if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateSelectedCount();
       document.getElementById('bulk-review-decision-select').value = '';
       await loadData();
@@ -1502,6 +1550,7 @@ async function executeBulkDelete() {
       alert(`تم حذف ${selectedOrderNumbers.size} طلب بنجاح!`);
       window.masterData = window.masterData.filter(o => !selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
       selectedOrderNumbers.clear();
+      if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateSelectedCount();
       applyDateFiltering();
     }
@@ -1531,6 +1580,7 @@ async function executeBulkReassign() {
       alert(`تم تغيير المراجع لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newReviewer}"!`);
       targetOrders.forEach(o => o[reviewerColKey] = newReviewer);
       selectedOrderNumbers.clear();
+      if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateSelectedCount();
       renderReviewersStats(window.allData);
       renderCurrentPage();
@@ -4454,8 +4504,34 @@ function renderCertKpis(data) {
   container.innerHTML = html;
 }
 
+let showOnlySelectedCert = false;
+
+function toggleShowOnlySelectedCert() {
+  showOnlySelectedCert = !showOnlySelectedCert;
+  certCurrentPage = 1;
+  const btn = document.getElementById('show-selected-only-cert-btn');
+  if (btn) btn.innerText = showOnlySelectedCert ? '↩️ عرض الكل' : '📌 عرض المحدد فقط';
+  renderCertPage();
+}
+
 function renderCertPage() {
   if (!certAllData) return;
+
+  // وضع "عرض المحدد فقط": بيعرض بس الطلبات المتحددة حاليًا (✔️) من كل التواريخ لنفس نوع الشهادة،
+  // بغض النظر عن فلاتر البحث/الحالة/المسؤول/التاريخ الشغالة فوق.
+  if (showOnlySelectedCert) {
+    const scoped = getCertMasterDataForActiveType();
+    const filtered = scoped.filter(item => selectedCertOrderNumbers.has(String(item.order_number)));
+
+    certTotalRecordsCount = filtered.length;
+    const from = (certCurrentPage - 1) * certPageSize;
+    const to = from + certPageSize;
+
+    window.certFilteredData = filtered;
+    renderCertTable(filtered.slice(from, to));
+    updateCertPaginationControls(from + 1, Math.min(to, certTotalRecordsCount));
+    return;
+  }
 
   const searchValue = document.getElementById('cert-search-input').value.trim().toLowerCase();
   const statusValue = document.getElementById('cert-status-filter').value;
@@ -4601,7 +4677,7 @@ function selectNextCertBatch() {
 function clearCertSelection() {
   selectedCertOrderNumbers.clear();
   updateCertSelectedCount();
-  renderCertPage();
+  if (showOnlySelectedCert) toggleShowOnlySelectedCert(); else renderCertPage();
 }
 
 // تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع أو لا) — مفيد لو أنت
@@ -4693,6 +4769,7 @@ async function executeCertBulkReassign() {
       alert(`تم توزيع ${selectedCertOrderNumbers.size} طلب بنجاح على "${newLayout}"!`);
       targetOrders.forEach(o => { o.Layout = newLayout; o.layout = newLayout; });
       selectedCertOrderNumbers.clear();
+      if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
       applyCertDateFiltering();
     }
@@ -4718,6 +4795,7 @@ async function executeCertBulkDateUpdate() {
       alert(`تم تحديث تاريخ ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newDate}"!`);
       targetOrders.forEach(o => { o.date = newDate; });
       selectedCertOrderNumbers.clear();
+      if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
       applyCertDateFiltering();
     }
@@ -4744,6 +4822,7 @@ async function executeCertBulkTypeUpdate() {
       alert(`تم نقل ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${targetLabel}"!`);
       targetOrders.forEach(o => { o.cert_type = newType; });
       selectedCertOrderNumbers.clear();
+      if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
       applyCertDateFiltering(); // الطلبات اللي اتغير نوعها هتختفي من القايمة الحالية فورًا لأنها بقت من النوع التاني
     }
@@ -4779,6 +4858,7 @@ async function executeCertBulkStatusUpdate() {
       alert(`تم تغيير حالة ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
       targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; });
       selectedCertOrderNumbers.clear();
+      if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
       applyCertDateFiltering();
     }
@@ -4802,6 +4882,7 @@ async function executeCertBulkDelete() {
       alert(`تم حذف ${selectedCertOrderNumbers.size} طلب بنجاح!`);
       certMasterData = certMasterData.filter(o => !selectedCertOrderNumbers.has(o.order_number));
       selectedCertOrderNumbers.clear();
+      if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
       applyCertDateFiltering();
     }
@@ -5229,7 +5310,23 @@ function renderMawaqefKpis(rows) {
   container.innerHTML = html;
 }
 
+let showOnlySelectedMawaqef = false;
+
+function toggleShowOnlySelectedMawaqef() {
+  showOnlySelectedMawaqef = !showOnlySelectedMawaqef;
+  mawaqefCurrentPage = 1;
+  const btn = document.getElementById('show-selected-only-mawaqef-btn');
+  if (btn) btn.innerText = showOnlySelectedMawaqef ? '↩️ عرض الكل' : '📌 عرض المحدد فقط';
+  renderMawaqefPage();
+}
+
 function getFilteredMawaqefRows() {
+  // وضع "عرض المحدد فقط": بيعرض بس المواقف المتحددة حاليًا (✔️) من كل التواريخ مع بعض،
+  // بغض النظر عن فلاتر البحث/الحالة/التاريخ الشغالة فوق.
+  if (showOnlySelectedMawaqef) {
+    return (mawaqefMasterData || []).filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  }
+
   const searchValue = (document.getElementById('mawaqef-search-input').value || '').trim().toLowerCase();
   const statusValue = document.getElementById('mawaqef-status-filter').value;
 
@@ -5328,6 +5425,7 @@ function clearMawaqefSelection() {
   selectedMawaqefOrderNumbers.clear();
   document.querySelectorAll('.mawaqef-row-checkbox').forEach(cb => cb.checked = false);
   updateMawaqefSelectedCount();
+  if (showOnlySelectedMawaqef) toggleShowOnlySelectedMawaqef(); else renderMawaqefPage();
 }
 
 function updateMawaqefSelectedCount() {
@@ -5355,6 +5453,7 @@ async function executeMawaqefBulkStatusUpdate() {
       alert(`تم تغيير حالة ${selectedMawaqefOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
       targetOrders.forEach(o => { o.status = newStatus; });
       selectedMawaqefOrderNumbers.clear();
+      if (showOnlySelectedMawaqef) { showOnlySelectedMawaqef = false; const __b = document.getElementById('show-selected-only-mawaqef-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       applyMawaqefDateFiltering();
     }
   } catch (err) { alert('خطأ: ' + err.message); }
@@ -5378,6 +5477,7 @@ async function executeMawaqefBulkDelete() {
       const idsToRemove = new Set(matchValues);
       mawaqefMasterData = mawaqefMasterData.filter(o => !idsToRemove.has(o.id));
       selectedMawaqefOrderNumbers.clear();
+      if (showOnlySelectedMawaqef) { showOnlySelectedMawaqef = false; const __b = document.getElementById('show-selected-only-mawaqef-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       applyMawaqefDateFiltering();
     }
   } catch (err) { alert('خطأ: ' + err.message); }

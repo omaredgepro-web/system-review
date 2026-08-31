@@ -174,6 +174,7 @@
               <input type="number" id="order-select-first-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
               <button class="btn btn-secondary" onclick="selectNextOrderFromFiltered()" style="padding: 4px 10px; font-size: 12px;">تحديد الأول من النتائج الحالية</button>
               <button class="btn btn-secondary" onclick="clearOrderSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
+              <button id="show-selected-only-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedDashboard()" style="padding: 4px 10px; font-size: 12px;">📌 عرض المحدد فقط</button>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
               <select id="bulk-reassign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
@@ -469,6 +470,7 @@
             <input type="number" id="cert-bulk-count-input" class="filter-select" min="1" placeholder="عدد الطلبات" style="width: 110px; padding: 4px 8px; font-size: 12px;">
             <button class="btn btn-secondary" onclick="selectNextCertBatch()" style="padding: 4px 10px; font-size: 12px;">تحديد التالي (غير موزّع)</button>
             <button class="btn btn-secondary" onclick="clearCertSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
+            <button id="show-selected-only-cert-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedCert()" style="padding: 4px 10px; font-size: 12px;">📌 عرض المحدد فقط</button>
           </div>
           <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
             <span id="cert-reassign-controls" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -745,6 +747,7 @@
         <div class="admin-bulk-actions" style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
           <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="mawaqef-selected-count">0</span> طلب</span>
           <button class="btn btn-secondary" onclick="clearMawaqefSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
+          <button id="show-selected-only-mawaqef-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedMawaqef()" style="padding: 4px 10px; font-size: 12px;">📌 عرض المحدد فقط</button>
           <select id="mawaqef-bulk-status-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
             <option value="">تغيير الحالة إلى...</option>
           </select>

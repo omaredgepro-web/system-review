@@ -189,6 +189,14 @@
                 <option value="تم اعادة المراجعة">تم اعادة المراجعة</option>
               </select>
               <button class="btn btn-secondary" onclick="executeBulkStatusUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق الحالة</button>
+              <select id="bulk-review-decision-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
+                <option value="">تغيير القرار (المراجعة) إلى...</option>
+                <option value="مقبول">✅ مقبول</option>
+                <option value="مرفوض">❌ مرفوض</option>
+                <option value="معلق">⏸️ معلق</option>
+                <option value="لم يتم المراجعة">⏳ لم يتم المراجعة</option>
+              </select>
+              <button class="btn btn-secondary" onclick="executeBulkReviewDecisionUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق القرار</button>
               <button id="bulk-delete-btn" class="btn btn-danger" onclick="executeBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
             </div>
           </div>

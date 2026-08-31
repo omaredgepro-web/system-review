@@ -476,7 +476,7 @@ function buildStatsCardsHtml(stats, filterQuery) {
   if (filterQuery) {
     keys = keys.filter(name => name.toLowerCase().includes(filterQuery));
   }
-  keys = keys.sort((a, b) => stats[b].total - stats[a].total);
+  keys = keys.sort((a, b) => (stats[b].accepted + stats[b].rejected) - (stats[a].accepted + stats[a].rejected));
 
   if (keys.length === 0) {
     return `<div class="stat-empty-msg">لا يوجد نتائج${filterQuery ? ' تطابق البحث' : ''}</div>`;
@@ -528,11 +528,25 @@ function buildTeamsCardsHtml(filterQuery) {
     return `<div class="stat-empty-msg">لا يوجد نتائج${filterQuery ? ' تطابق البحث' : ''}</div>`;
   }
 
+  // بنحسب "تم المراجعة" (مقبول + مرفوض) لكل تيم مقدمًا، عشان نرتب التيمات بيها (الأكتر مراجعة الأول)
+  const getTeamReviewed = key => TEAMS_CONFIG[key].members.reduce((sum, memberName) => {
+    const s = lastReviewerStats[memberName] || { accepted: 0, rejected: 0 };
+    return sum + s.accepted + s.rejected;
+  }, 0);
+  teamKeys = teamKeys.sort((a, b) => getTeamReviewed(b) - getTeamReviewed(a));
+
   return teamKeys.map(key => {
     const team = TEAMS_CONFIG[key];
     let total = 0, accepted = 0, rejected = 0;
 
-    const memberRows = team.members.map(memberName => {
+    // نفس الترتيب جوه كل تيم كمان: الأعضاء اللي راجعوا أكتر يظهروا الأول
+    const sortedMembers = [...team.members].sort((a, b) => {
+      const sa = lastReviewerStats[a] || { accepted: 0, rejected: 0 };
+      const sb = lastReviewerStats[b] || { accepted: 0, rejected: 0 };
+      return (sb.accepted + sb.rejected) - (sa.accepted + sa.rejected);
+    });
+
+    const memberRows = sortedMembers.map(memberName => {
       const s = lastReviewerStats[memberName] || { total: 0, accepted: 0, rejected: 0 };
       total += s.total; accepted += s.accepted; rejected += s.rejected;
       const memberReviewed = s.accepted + s.rejected;

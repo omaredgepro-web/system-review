@@ -1171,7 +1171,12 @@ function renderTable(orders) {
         ${checkboxHtml}
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
         ${adminCellHtml}
-        <td class="order-no-cell">${orderNum}</td>
+        <td class="order-no-cell">
+          <span style="display:inline-flex; align-items:center; gap:6px;">
+            <span>${orderNum}</span>
+            <button type="button" onclick="copyOrderNumberCell(this)" data-ordernum="${orderNum}" title="نسخ رقم الطلب" style="background:none; border:none; cursor:pointer; font-size:12px; padding:2px 4px; opacity:0.7; line-height:1;">📋</button>
+          </span>
+        </td>
         <td>${company}</td>
         <td>${reviewer}</td>
         <td><span class="badge badge-pending">${progressStatus}</span></td>
@@ -3147,6 +3152,37 @@ function openEditModal(orderNum) {
 }
 
 function closeModal() { document.getElementById('edit-modal').style.display = 'none'; selectedOrder = null; }
+
+// نسخ رقم الطلب من زرار 📋 صغير جنب رقم الطلب في أي صف جدول (مش بس في مودال المراجعة) —
+// بياخد القيمة من data-ordernum على الزرار نفسه، عشان يشتغل حتى لو رقم الطلب فيه رموز خاصة.
+function copyOrderNumberCell(btnEl) {
+  const value = btnEl.getAttribute('data-ordernum');
+  if (!value) return;
+
+  const original = btnEl.innerText;
+  const finish = (ok) => {
+    btnEl.innerText = ok ? '✅' : '⚠️';
+    setTimeout(() => { btnEl.innerText = original; }, 1000);
+  };
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(value).then(() => finish(true)).catch(() => finish(false));
+  } else {
+    try {
+      const temp = document.createElement('textarea');
+      temp.value = value;
+      temp.style.position = 'fixed';
+      temp.style.opacity = '0';
+      document.body.appendChild(temp);
+      temp.select();
+      document.execCommand('copy');
+      document.body.removeChild(temp);
+      finish(true);
+    } catch (e) {
+      finish(false);
+    }
+  }
+}
 
 // نسخ رقم الطلب من أي input (زي حقل رقم الطلب المعطّل في مودال المراجعة) بضغطة واحدة،
 // مع تغيير مؤقت في نص الزرار نفسه يفيد إن النسخ نجح.

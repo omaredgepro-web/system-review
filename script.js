@@ -1380,6 +1380,60 @@ async function executeBulkStatusUpdate() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
+// تغيير "القرار" (حالة المراجعة الفعلية: مقبول/مرفوض/معلق/لم يتم المراجعة) لكل الطلبات المحددة دفعة واحدة —
+// ده مختلف عن executeBulkStatusUpdate اللي بيغيّر عمود "الحالة" (جاري مراجعة/تم اعادة المراجعة) بس.
+// لو القرار "مرفوض" أو "معلق" بيطلب سبب واحد يتطبق على كل الطلبات المحددة (زي فحص مودال المراجعة الفردي بالظبط).
+async function executeBulkReviewDecisionUpdate() {
+  const newDecision = document.getElementById('bulk-review-decision-select').value;
+  if (!newDecision) { alert('برجاء اختيار القرار الجديد أولاً'); return; }
+  if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  let reason = '-';
+  if (newDecision === 'مرفوض' || newDecision === 'معلق') {
+    const promptLabel = newDecision === 'معلق' ? 'اكتب سبب التعليق (هيتطبق على كل الطلبات المحددة):' : 'اكتب سبب الرفض (هيتطبق على كل الطلبات المحددة):';
+    const enteredReason = prompt(promptLabel, '');
+    if (enteredReason === null) return; // إلغاء
+    if (!enteredReason.trim()) { alert(newDecision === 'معلق' ? 'يرجى كتابة سبب التعليق' : 'يرجى كتابة سبب الرفض'); return; }
+    reason = enteredReason.trim();
+  }
+
+  const confirmChange = confirm(`هل أنت تأكد من تغيير القرار لـ (${selectedOrderNumbers.size}) طلب إلى "${newDecision}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  if (targetOrders.length === 0) return;
+  const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+  const matchValues = targetOrders.map(o => o[matchColumn]);
+
+  // "لم يتم المراجعة" مش قيمة متخزنة فعليًا - هي غياب القرار، فبنرجّع العمود null عشان نصفّره
+  const decisionValue = newDecision === 'لم يتم المراجعة' ? null : newDecision;
+
+  const updateData = {};
+  const sample = targetOrders[0];
+  if ('review_status' in sample) updateData.review_status = decisionValue;
+  if ('حالة المراجعة' in sample) updateData['حالة المراجعة'] = decisionValue;
+  if ('rejection_reason' in sample) updateData.rejection_reason = reason;
+  if ('سبب الرفض' in sample) updateData['سبب الرفض'] = reason;
+
+  try {
+    const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'update', updateData);
+    if (error) { alert('حدث خطأ أثناء تغيير القرار: ' + error.message); }
+    else {
+      alert(`تم تغيير القرار لـ ${selectedOrderNumbers.size} طلب بنجاح إلى "${newDecision}"!`);
+      targetOrders.forEach(o => {
+        if ('review_status' in o) o.review_status = decisionValue;
+        if ('حالة المراجعة' in o) o['حالة المراجعة'] = decisionValue;
+        if ('rejection_reason' in o) o.rejection_reason = reason;
+        if ('سبب الرفض' in o) o['سبب الرفض'] = reason;
+      });
+      selectedOrderNumbers.clear();
+      updateSelectedCount();
+      document.getElementById('bulk-review-decision-select').value = '';
+      await loadData();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 async function executeBulkDelete() {
   if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }

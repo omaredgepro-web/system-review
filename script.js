@@ -214,7 +214,7 @@ async function submitQuickAddOrders() {
   if (!reviewer) { alert('برجاء اختيار المراجع'); return; }
   if (!date) { alert('برجاء تحديد التاريخ'); return; }
 
-  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
 
   const toInsert = [];
@@ -265,7 +265,7 @@ async function submitQuickAddOrders() {
 // يدويًا بنفسك، زي "تحديد" عادي بس بالأرقام اللي انت كاتبها بدل التحديد التلقائي.
 function selectQuickAddOrders() {
   const raw = document.getElementById('quick-add-textarea').value;
-  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل في الخانة أولاً'); return; }
 
   const numsSet = new Set(orderNumbers);
@@ -1927,6 +1927,17 @@ const ORDER_NUMBER_ALIASES = [
   'requestnumber', 'request_number', 'request number', 'requestno', 'request no'
 ].map(normalizeHeaderKey);
 
+// بتاخد أي سطر/توكن ممكن يكون رقم طلب نضيف أو ممكن يكون فيه كلام زيادة معاه (زي اسم/شركة/حالة
+// من نسخ عمود كامل من إكسيل)، وترجّع رقم الطلب بس وتتجاهل باقي الكلام. رقم الطلب بيتكون من حروف
+// لاتينية/أرقام/شرطات بس، فأي نص عربي أو تابات/مسافات بعده بيتقطع عنده تلقائيًا.
+function extractOrderNumberToken(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^[A-Za-z0-9-]+$/.test(s)) return s; // السطر رقم طلب نضيف من غير أي إضافات - رجّعه زي ما هو
+  const match = s.match(/[A-Za-z0-9][A-Za-z0-9-]{6,}/);
+  return match ? match[0].replace(/-+$/, '') : s;
+}
+
 function extractOrderNumbersFromRows(rows) {
   if (!rows || rows.length === 0) return [];
 
@@ -1973,7 +1984,7 @@ function submitQuickPrintOrders(forceCertType) {
   const raw = document.getElementById('quick-print-textarea').value;
   const layoutValue = document.getElementById('quick-print-layout').value;
 
-  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean))];
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
 
   // لو الزرار المستخدم هو "إرسال مباشرة للتعمير"، نغيّر نوع الشهادة بتاع الدفعة كلها لـ "تعمير" تلقائيًا
@@ -4267,7 +4278,7 @@ async function processCertMultiSelectFile(file) {
 // من غير ما يعمل أي Sort أو تغيير في ترتيب الجدول نفسه.
 function verifyAndSelectCertOrders() {
   const textValue = document.getElementById('cert-multiselect-textarea').value;
-  const fromText = textValue.split(/[\n,،]+/).map(s => s.trim()).filter(Boolean);
+  const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
   const combined = [...new Set([...fromText, ...certMultiSelectFileRows])];
 
   if (combined.length === 0) {
@@ -5654,7 +5665,7 @@ function onGehatQuickTargetChange() {
 
 function parseGehatQuickOrderNumbers() {
   const raw = document.getElementById('gehat-quick-order-numbers').value || '';
-  return [...new Set(raw.split(/[\n,،]+/).map(s => s.trim()).filter(Boolean))];
+  return [...new Set(raw.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
 }
 
 async function submitGehatQuickAdd() {

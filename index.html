@@ -154,7 +154,7 @@
             </select>
 
             <label id="date-filter-label" style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
-            <input type="date" id="date-filter" class="date-input" onchange="onDateFilterChange()">
+            <input type="date" id="date-filter" class="date-input" autocomplete="off" onchange="onDateFilterChange()">
             <button id="reset-date-btn" class="btn btn-secondary" onclick="resetDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
 
             <select id="status-filter" class="filter-select">
@@ -425,7 +425,7 @@
           </select>
 
           <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
-          <input type="date" id="cert-date-filter" class="date-input" onchange="onCertDateFilterChange()">
+          <input type="date" id="cert-date-filter" class="date-input" autocomplete="off" onchange="onCertDateFilterChange()">
           <button class="btn btn-secondary" onclick="resetCertDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
 
           <select id="cert-status-filter" class="filter-select">
@@ -586,7 +586,7 @@
             </select>
 
             <label style="font-size: 13px; color: var(--text-muted);">تاريخ الرفض:</label>
-            <input type="date" id="rejections-date-filter" class="date-input" onchange="onRejectionsDateFilterChange()">
+            <input type="date" id="rejections-date-filter" class="date-input" autocomplete="off" onchange="onRejectionsDateFilterChange()">
             <button class="btn btn-secondary" onclick="showAllRejectionsDates()" style="padding: 6px 12px; font-size: 12px;">عرض كل التواريخ</button>
             <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
@@ -741,7 +741,7 @@
             <option value="ALL">كل الحالات</option>
           </select>
           <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
-          <input type="date" id="mawaqef-date-filter" class="date-input" onchange="applyMawaqefDateFiltering()">
+          <input type="date" id="mawaqef-date-filter" class="date-input" autocomplete="off" onchange="applyMawaqefDateFiltering()">
         </div>
 
         <div class="admin-bulk-actions" style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">

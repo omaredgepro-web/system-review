@@ -1154,14 +1154,28 @@ async function loadData() {
       // بعد ما نمرّره على parseToIsoDate - عشان لو فيه صفوف قديمة بصيغة تاريخ مختلفة
       // (زي "3/5/2026" بدل "2026-05-03")، الترتيب النصي في قاعدة البيانات ميغلطش
       // ويختار تاريخ غلط على إنه "الأحدث".
-      const { data: dateRows, error: latestErr } = await supabaseClient
-        .from(TABLE_NAME)
-        .select('date')
-        .not('date', 'is', null)
-        .neq('date', '');
-      if (latestErr) throw latestErr;
+      // مهم: لازم نجيب كل الصفوف بالتصفح (pagination) مش استعلام واحد بس - لأن Supabase
+      // بيرجّع أول 1000 صف بس تلقائيًا لأي استعلام من غير .range(). لو الجدول أكبر من كده،
+      // الطلبات الأحدث (اللي id بتاعها أكبر) ممكن تكون خارج الـ 1000 صف دول، فحساب "الأحدث"
+      // كان بيطلع غلط ويرجع تاريخ قديم.
+      let dateRows = [];
+      let from = 0, step = 1000, hasMoreDates = true;
+      while (hasMoreDates) {
+        const { data, error } = await supabaseClient
+          .from(TABLE_NAME)
+          .select('date')
+          .not('date', 'is', null)
+          .neq('date', '')
+          .range(from, from + step - 1);
+        if (error) throw error;
+        if (data && data.length > 0) {
+          dateRows = dateRows.concat(data);
+          from += step;
+          if (data.length < step) hasMoreDates = false;
+        } else { hasMoreDates = false; }
+      }
 
-      const isoDates = (dateRows || [])
+      const isoDates = dateRows
         .map(r => parseToIsoDate(r.date))
         .filter(Boolean)
         .sort()

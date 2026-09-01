@@ -1143,16 +1143,23 @@ async function loadData() {
     let targetDate = document.getElementById('date-filter').value;
 
     if (!targetDate) {
-      const { data: latestRow, error: latestErr } = await supabaseClient
+      // بنجيب عمود "date" بس (مش الجدول كله) لكل الصفوف، وبنحسب أحدث تاريخ في المتصفح
+      // بعد ما نمرّره على parseToIsoDate - عشان لو فيه صفوف قديمة بصيغة تاريخ مختلفة
+      // (زي "3/5/2026" بدل "2026-05-03")، الترتيب النصي في قاعدة البيانات ميغلطش
+      // ويختار تاريخ غلط على إنه "الأحدث".
+      const { data: dateRows, error: latestErr } = await supabaseClient
         .from(TABLE_NAME)
         .select('date')
         .not('date', 'is', null)
-        .neq('date', '')
-        .order('date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .neq('date', '');
       if (latestErr) throw latestErr;
-      targetDate = (latestRow && latestRow.date) || '';
+
+      const isoDates = (dateRows || [])
+        .map(r => parseToIsoDate(r.date))
+        .filter(Boolean)
+        .sort()
+        .reverse();
+      targetDate = isoDates[0] || '';
     }
 
     // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله

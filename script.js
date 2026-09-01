@@ -4349,7 +4349,10 @@ function renderRejectionsTab() {
       const date = o.date || extractDateString(o) || '-';
 
       let substatusBadge = `<span class="badge badge-hold">بانتظار المراجع</span>`;
-      if (o.reviewer_action === 'تم التعديل') substatusBadge = `<span class="badge badge-accepted">تم التعديل</span>`;
+      // لو الأدمن خلاص راجع الطلب وحوّل حالته لـ"تم الطباعة"، نوريها هي بدل ما نرجّع نعرض
+      // "بانتظار المراجع" (اللي بتحصل عشان setRejectionPrinted بيصفّر reviewer_action).
+      if (o.status === 'تم الطباعة') substatusBadge = `<span class="badge badge-accepted">🖨️ تم الطباعة</span>`;
+      else if (o.reviewer_action === 'تم التعديل') substatusBadge = `<span class="badge badge-accepted">تم التعديل</span>`;
       else if (o.reviewer_action === 'تم الرفض للشركة') substatusBadge = `<span class="badge badge-rejected">تم الرفض للشركة</span>`;
 
       const isOwnReviewer = currentUser && (o.reviewer === currentUser.username);

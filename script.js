@@ -4388,8 +4388,21 @@ async function setRejectionReviewerAction(orderNum, action) {
   const row = (certMasterData || []).find(o => String(o.order_number) === String(orderNum));
   if (!row) return;
   try {
-    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ reviewer_action: action }).eq('id', row.id);
+    // .select() ضروري هنا عشان نتأكد إن الصف اتحدث فعليًا في الداتابيز.
+    // من غيرها، لو الـ RLS رفضت التحديث (مثلاً صلاحيات المراجع مش سامحة)، Supabase
+    // بيرجع بدون أي error رغم إن 0 صف اتحدث فعليًا - وكان الكود بيفترض النجاح غلط
+    // ويحدّث الشاشة محليًا بس، من غير ما يتسجل حاجة في الداتابيز فعلاً.
+    const { data, error } = await supabaseClient
+      .from(CERT_TABLE_NAME)
+      .update({ reviewer_action: action })
+      .eq('id', row.id)
+      .select();
+
     if (error) { alert('فشل التحديث: ' + error.message); return; }
+    if (!data || data.length === 0) {
+      alert('التحديث لم يُنفَّذ فعليًا. على الأغلب صلاحياتك على هذا الطلب غير كافية (RLS) - راجع الأدمن.');
+      return;
+    }
     row.reviewer_action = action;
     renderRejectionsTab();
   } catch (err) {
@@ -4403,8 +4416,17 @@ async function setRejectionPrinted(orderNum) {
   if (!confirm(`تأكيد تحويل حالة الطلب ${orderNum} إلى "تم الطباعة"؟`)) return;
   try {
     const updateData = { status: 'تم الطباعة', reason: '-', reviewer_action: null };
-    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).eq('id', row.id);
+    const { data, error } = await supabaseClient
+      .from(CERT_TABLE_NAME)
+      .update(updateData)
+      .eq('id', row.id)
+      .select();
+
     if (error) { alert('فشل التحديث: ' + error.message); return; }
+    if (!data || data.length === 0) {
+      alert('التحديث لم يُنفَّذ فعليًا. على الأغلب صلاحياتك (RLS) غير كافية - راجع الأدمن.');
+      return;
+    }
     Object.assign(row, updateData);
     applyCertDateFiltering();
     applyRejectionsDateFiltering();

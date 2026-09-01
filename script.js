@@ -806,7 +806,11 @@ function scheduleLiveReviewRender() {
 let liveCertRenderTimer = null;
 function scheduleLiveCertRender() {
   clearTimeout(liveCertRenderTimer);
-  liveCertRenderTimer = setTimeout(() => applyCertDateFiltering(), 250);
+  liveCertRenderTimer = setTimeout(() => {
+    applyCertDateFiltering();
+    // تاب المرفوضات بياخد بياناته من نفس جدول الشهادات، فأي تحديث لحظي عليه لازم يوصل هنا كمان
+    applyRejectionsDateFiltering();
+  }, 250);
 }
 
 let liveMawaqefRenderTimer = null;
@@ -823,13 +827,56 @@ function handleLiveChange(tableName, payload) {
     scheduleLiveReviewRender();
   } else if (tableName === CERT_TABLE_NAME) {
     certMasterData = patchMasterDataRow(certMasterData || [], eventType, newRow, oldRow);
-    if (typeof certDataLoaded !== 'undefined' && certDataLoaded) {
-      scheduleLiveCertRender();
-    }
+    // بنجدول إعادة الرسم دايمًا (مش بس لو certDataLoaded=true) - بالظبط زي تاب المراجعة،
+    // عشان لو الأدمن فاتح تاب الشهادات فعليًا، التحديث يوصله فورًا من غير أي تأخير أو شرط إضافي
+    scheduleLiveCertRender();
+    notifyReviewerIfNewlyRejected(eventType, newRow, oldRow);
   } else if (tableName === MAWAQEF_TABLE_NAME) {
     mawaqefMasterData = patchMasterDataRow(mawaqefMasterData || [], eventType, newRow, oldRow);
-    if (mawaqefDataLoaded) scheduleLiveMawaqefRender();
+    scheduleLiveMawaqefRender();
   }
+}
+
+// لو طلب جديد اتحدد له "مرفوض" وكان المراجع المسؤول عنه هو نفسه المسجل دخول دلوقتي،
+// نوريه تنبيه فوري - حتى لو مش فاتح تاب المرفوضات أصلاً وقتها
+function notifyReviewerIfNewlyRejected(eventType, newRow, oldRow) {
+  if (!newRow || newRow.status !== 'مرفوض') return;
+  if (eventType === 'UPDATE' && oldRow && oldRow.status === 'مرفوض') return; // كان مرفوض بالفعل، مش تغيير جديد
+
+  const isForMe = currentUser && (newRow.reviewer === currentUser.username || newRow.reviewer === currentUser.name);
+  if (!isForMe) return;
+
+  showRejectionToast(newRow);
+}
+
+function showRejectionToast(row) {
+  const container = document.getElementById('rejection-toast-container');
+  if (!container) return;
+
+  const toastId = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+  const orderNum = row.order_number || '-';
+  const reason = row.reason && row.reason !== '-' ? row.reason : 'بدون سبب مكتوب';
+
+  const toast = document.createElement('div');
+  toast.id = toastId;
+  toast.style.cssText = 'background: var(--card-bg); border: 1px solid var(--badge-reject-text); border-right: 4px solid var(--badge-reject-text); border-radius: 10px; padding: 14px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); animation: none;';
+  toast.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px;">
+      <div style="font-weight:800; font-size:14px; color: var(--badge-reject-text);">⚠️ طلب اترفض ومحتاج تعديل</div>
+      <button onclick="document.getElementById('${toastId}').remove()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px; line-height:1;">&times;</button>
+    </div>
+    <div style="font-size:13px; margin-bottom:4px;"><b>رقم الطلب:</b> ${orderNum}</div>
+    <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><b>السبب:</b> ${reason}</div>
+    <button class="btn btn-primary" style="width:100%; padding:6px; font-size:12px;" onclick="switchTab('rejections'); document.getElementById('${toastId}').remove();">📋 روح لمرفوضاتي</button>
+  `;
+
+  container.appendChild(toast);
+
+  // يختفي لوحده بعد دقيقة لو محدش قفله يدوي
+  setTimeout(() => {
+    const el = document.getElementById(toastId);
+    if (el) el.remove();
+  }, 60000);
 }
 
 let liveUpdatesChannel = null;
@@ -4200,7 +4247,9 @@ function toggleRejectionsStatsSidebar() {
 }
 
 function getRejectedCertRows() {
-  const rejected = (certMasterData || []).filter(o => o.status === 'مرفوض');
+  // بيشمل أي طلب حالته حاليًا "مرفوض"، أو اتعمله رفض قبل كده أي وقت (was_rejected) حتى لو
+  // اتغيرت حالته بعدين لـ"تم الطباعة" أو أي حالة تانية - عشان يفضل ظاهر في سجل المرفوضات
+  const rejected = (certMasterData || []).filter(o => o.status === 'مرفوض' || o.was_rejected === true);
   const isAdmin = currentUser && currentUser.role === 'admin';
   if (isAdmin) return rejected;
   return rejected.filter(o => currentUser && o.reviewer === currentUser.username);
@@ -5002,13 +5051,15 @@ async function executeCertBulkStatusUpdate() {
   const matchValues = targetOrders.map(o => o.id);
 
   const updateData = { status: newStatus, reason: reason };
+  // نفس العلامة الدائمة، بس هنا لتحديث جماعي لأكتر من طلب مرة واحدة
+  if (newStatus === 'مرفوض') updateData.was_rejected = true;
 
   try {
     const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'update', updateData);
     if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); }
     else {
       alert(`تم تغيير حالة ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
-      targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; });
+      targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; if (newStatus === 'مرفوض') o.was_rejected = true; });
       selectedCertOrderNumbers.clear();
       if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
@@ -5121,6 +5172,9 @@ async function saveCertUpdate() {
     reviewer_action: null,
     date: newDate || null
   };
+  // علامة دائمة: أول ما الطلب يترفض مرة، يفضل معلّم كده للأبد - حتى لو اتغيرت حالته بعدين
+  // (زي "تم الطباعة")، عشان يفضل ظاهر في تاب المرفوضات كسجل تاريخي
+  if (newStatus === 'مرفوض') updateData.was_rejected = true;
 
   try {
     const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).eq('id', selectedCertOrder.id);

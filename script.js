@@ -1154,33 +1154,20 @@ async function loadData() {
       // بعد ما نمرّره على parseToIsoDate - عشان لو فيه صفوف قديمة بصيغة تاريخ مختلفة
       // (زي "3/5/2026" بدل "2026-05-03")، الترتيب النصي في قاعدة البيانات ميغلطش
       // ويختار تاريخ غلط على إنه "الأحدث".
-      // مهم: لازم نجيب كل الصفوف بالتصفح (pagination) مش استعلام واحد بس - لأن Supabase
-      // بيرجّع أول 1000 صف بس تلقائيًا لأي استعلام من غير .range(). لو الجدول أكبر من كده،
-      // الطلبات الأحدث (اللي id بتاعها أكبر) ممكن تكون خارج الـ 1000 صف دول، فحساب "الأحدث"
-      // كان بيطلع غلط ويرجع تاريخ قديم.
-      let dateRows = [];
-      let from = 0, step = 1000, hasMoreDates = true;
-      while (hasMoreDates) {
-        const { data, error } = await supabaseClient
-          .from(TABLE_NAME)
-          .select('date')
-          .not('date', 'is', null)
-          .neq('date', '')
-          .range(from, from + step - 1);
-        if (error) throw error;
-        if (data && data.length > 0) {
-          dateRows = dateRows.concat(data);
-          from += step;
-          if (data.length < step) hasMoreDates = false;
-        } else { hasMoreDates = false; }
-      }
+      // أسرع طريقة وأدق من غير ما نجيب الجدول كله ومن غير ما نعتمد على ترتيب نصي للتاريخ:
+      // بما إن أحدث الطلبات دايمًا بتتضاف بأعلى id (ترقيم تلقائي تصاعدي)، بنجيب بس آخر صف
+      // اتضاف فعليًا (استعلام لصف واحد، سريع جدًا) وناخد تاريخه كـ "أحدث تاريخ".
+      const { data: lastInsertedRow, error: latestErr } = await supabaseClient
+        .from(TABLE_NAME)
+        .select('date')
+        .not('date', 'is', null)
+        .neq('date', '')
+        .order('id', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestErr) throw latestErr;
 
-      const isoDates = dateRows
-        .map(r => parseToIsoDate(r.date))
-        .filter(Boolean)
-        .sort()
-        .reverse();
-      targetDate = isoDates[0] || '';
+      targetDate = (lastInsertedRow && parseToIsoDate(lastInsertedRow.date)) || '';
     }
 
     // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله

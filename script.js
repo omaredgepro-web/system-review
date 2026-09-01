@@ -750,6 +750,13 @@ async function setupUserSession(profile) {
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
   populateMawaqefStatusDropdowns();
+
+  // بعض المتصفحات (Chrome خصوصًا) بترجّع آخر تاريخ اتكتب في الحقل ده من جلسة سابقة حتى بعد
+  // Hard Refresh. بنصفّره هنا يدويًا عشان أول تحميل بعد الدخول يجيب "أحدث تاريخ" فعليًا دايمًا،
+  // مش تاريخ قديم متبقّي من غير قصد.
+  const dateFilterEl = document.getElementById('date-filter');
+  if (dateFilterEl) dateFilterEl.value = '';
+
   loadData();
   subscribeToLiveUpdates();
 }
@@ -1167,8 +1174,18 @@ async function loadData() {
       ? await fetchAllRowsFromTable(TABLE_NAME, q => q.eq('date', targetDate))
       : [];
 
-    if (dateRows.length === 0 && !targetDate) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد بيانات متاحة</td></tr>`;
+    // لو مفيش تاريخ خالص في الجدول، أو التاريخ المحدد (سواء يدوي أو متبقّي من المتصفح) مفيهوش
+    // أي طلبات - لازم نوقف "جاري التحميل" ونوضح للمستخدم مفيش بيانات، بدل ما الصفحة تفضل عالقة
+    // على رسالة التحميل للأبد من غير أي تفسير.
+    if (dateRows.length === 0) {
+      window.masterData = [];
+      window.allData = [];
+      window.visibleData = [];
+      window.__masterDataScope = 'date';
+      const message = targetDate ? `لا توجد بيانات لتاريخ ${targetDate}` : 'لا توجد بيانات متاحة';
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${message}</td></tr>`;
+      document.getElementById('active-date-label').innerText = targetDate ? `يعرض طلبات تاريخ: ${targetDate}` : '';
+      updateKPIs([]);
       return;
     }
 

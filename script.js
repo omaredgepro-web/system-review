@@ -1157,6 +1157,9 @@ function switchTab(tabName) {
   } else if (tabName === 'rejections') {
     document.getElementById('rejections-tab-btn').classList.add('active');
     document.getElementById('tab-rejections').style.display = 'block';
+    // كل مرة يفتح فيها التاب، يرجع افتراضيًا لأحدث تاريخ بس (زي باقي التابات)
+    rejectionsShowAllDates = false;
+    document.getElementById('rejections-date-filter').value = '';
     if (!certDataLoaded) { loadCertificatesData().then(applyRejectionsDateFiltering); }
     else { applyRejectionsDateFiltering(); }
   } else if (tabName === 'print-distribute') {
@@ -4329,8 +4332,10 @@ function getRejectedCertRows() {
   return rejected.filter(o => currentUser && o.reviewer === currentUser.username && o.status !== 'تم الطباعة');
 }
 
-// بيفلتر تاب المرفوضات حسب التاريخ المختار (لو موجود)، ولو مفيش تاريخ محدد بيعرض كل الطلبات
-// المرفوضة لكل مراجع بكل التواريخ مع بعض (مش بس أحدث يوم)، عشان محدش يضيع منه طلب قديم منسي.
+// بيفلتر تاب المرفوضات حسب التاريخ - الافتراضي دلوقتي "أحدث تاريخ فقط" (زي باقي التابات)،
+// وفيه زرار "عرض كل التواريخ" لو عايز يشوف كل الطلبات المرفوضة بكل التواريخ مع بعض وقت ما يحتاج.
+let rejectionsShowAllDates = false;
+
 function applyRejectionsDateFiltering() {
   const rejected = getRejectedCertRows();
 
@@ -4341,14 +4346,18 @@ function applyRejectionsDateFiltering() {
     return;
   }
 
-  const targetDate = document.getElementById('rejections-date-filter').value;
-
-  if (!targetDate) {
-    // من غير تاريخ محدد = يعرض كل الطلبات المرفوضة لكل مراجع بكل التواريخ مع بعض (السلوك الافتراضي)
+  if (rejectionsShowAllDates) {
     rejectionsAllData = rejected;
     document.getElementById('rejections-active-date-label').innerText = `يعرض كل الطلبات المرفوضة (كل التواريخ) - ${rejected.length} طلب`;
     renderRejectionsTab();
     return;
+  }
+
+  let targetDate = document.getElementById('rejections-date-filter').value;
+  if (!targetDate) {
+    const dates = rejected.map(extractDateString).filter(Boolean).sort().reverse();
+    targetDate = dates[0] || '';
+    if (targetDate) document.getElementById('rejections-date-filter').value = targetDate;
   }
 
   rejectionsAllData = rejected.filter(item => {
@@ -4360,27 +4369,56 @@ function applyRejectionsDateFiltering() {
   renderRejectionsTab();
 }
 
-function onRejectionsDateFilterChange() { applyRejectionsDateFiltering(); }
+function onRejectionsDateFilterChange() {
+  rejectionsShowAllDates = false; // اختيار تاريخ معين يدويًا يلغي وضع "كل التواريخ"
+  applyRejectionsDateFiltering();
+}
 
-// بيرجّع الفلتر لعرض كل التواريخ مع بعض (السلوك الافتراضي)
+// عرض كل التواريخ مع بعض - اختياري، بتفعّله بالزرار بس
 function showAllRejectionsDates() {
+  rejectionsShowAllDates = true;
   document.getElementById('rejections-date-filter').value = '';
   applyRejectionsDateFiltering();
 }
 
-// لو عايز يضيّق العرض على أحدث يوم فيه رفض بس (اختياري، مش الافتراضي)
+// يرجّع العرض لأحدث تاريخ بس (وضع الافتراضي)
 function resetRejectionsDateToLatest() {
-  const rejected = getRejectedCertRows();
-  const dates = rejected.map(extractDateString).filter(Boolean).sort().reverse();
-  const latest = dates[0] || '';
-  document.getElementById('rejections-date-filter').value = latest;
+  rejectionsShowAllDates = false;
+  document.getElementById('rejections-date-filter').value = '';
   applyRejectionsDateFiltering();
 }
 
-function getFilteredRejectionsRows() {
+// تحديث يدوي: بيعيد تحميل بيانات جدول الشهادات من الداتابيز من الصفر ويحدث تاب المرفوضات بيه
+async function refreshRejectionsData() {
+  const btn = document.getElementById('refresh-rejections-btn');
+  const originalText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحديث...'; }
+
+  try {
+    certDataLoaded = false;
+    await loadCertificatesData();
+    applyRejectionsDateFiltering();
+  } catch (err) {
+    alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
+
+// بيصنّف حالة المراجعة الحقيقية للصف - نفس المنطق المستخدم في الشارة (badge) بالجدول،
+// بنستخدمه هنا كمان في الفلترة والإحصائيات عشان يفضلوا متطابقين مع بعض دايمًا.
+function getRejectionSubstatus(o) {
+  if (o.status === 'تم الطباعة') return 'PRINTED';
+  if (o.reviewer_action === 'تم التعديل') return 'EDITED';
+  if (o.reviewer_action === 'تم الرفض للشركة') return 'FINAL_REJECTED';
+  return 'PENDING';
+}
+
+// كل الفلاتر ما عدا "حالة المراجعة" - بنستخدمها كأساس لعرض الجدول ولحساب توزيع الحالات
+// الأربعة في لوحة الإحصائيات (KPIs) مع بعض، بغض النظر عن أي حالة مراجعة مختارة حاليًا.
+function getRejectionsRowsBeforeSubstatus() {
   const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
   const reviewerValue = document.getElementById('rejections-reviewer-filter').value;
-  const substatusValue = document.getElementById('rejections-substatus-filter').value;
   const typeValue = document.getElementById('rejections-type-filter').value;
 
   let rows = rejectionsAllData || [];
@@ -4391,13 +4429,17 @@ function getFilteredRejectionsRows() {
   if (typeValue && typeValue !== 'ALL') {
     rows = rows.filter(o => (o.cert_type || 'عادي') === typeValue);
   }
-  if (substatusValue === 'PENDING') {
-    rows = rows.filter(o => !o.reviewer_action);
-  } else if (substatusValue && substatusValue !== 'ALL') {
-    rows = rows.filter(o => o.reviewer_action === substatusValue);
-  }
   if (searchValue) {
     rows = rows.filter(o => String(o.order_number || '').toLowerCase().includes(searchValue));
+  }
+  return rows;
+}
+
+function getFilteredRejectionsRows() {
+  const substatusValue = document.getElementById('rejections-substatus-filter').value;
+  let rows = getRejectionsRowsBeforeSubstatus();
+  if (substatusValue && substatusValue !== 'ALL') {
+    rows = rows.filter(o => getRejectionSubstatus(o) === substatusValue);
   }
   return rows;
 }
@@ -4411,6 +4453,16 @@ function renderRejectionsTab() {
 
   document.getElementById('rejections-stat-total').innerText = rows.length;
 
+  // لوحة توزيع الحالات الأربعة - بتحسب على كل الفلاتر ما عدا فلتر "حالة المراجعة" نفسه،
+  // عشان تفضل توريك التوزيع الحقيقي بغض النظر عن أي حالة مختارة في الفلتر دلوقتي.
+  const kpiBaseRows = getRejectionsRowsBeforeSubstatus();
+  const kpiCounts = { PENDING: 0, EDITED: 0, FINAL_REJECTED: 0, PRINTED: 0 };
+  kpiBaseRows.forEach(o => { kpiCounts[getRejectionSubstatus(o)]++; });
+  document.getElementById('rejections-stat-pending').innerText = kpiCounts.PENDING;
+  document.getElementById('rejections-stat-edited').innerText = kpiCounts.EDITED;
+  document.getElementById('rejections-stat-final-rejected').innerText = kpiCounts.FINAL_REJECTED;
+  document.getElementById('rejections-stat-printed').innerText = kpiCounts.PRINTED;
+
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
   } else {
@@ -4422,12 +4474,14 @@ function renderRejectionsTab() {
       const reason = o.reason && o.reason !== '-' ? o.reason : '-';
       const date = o.date || extractDateString(o) || '-';
 
-      let substatusBadge = `<span class="badge badge-hold">بانتظار المراجع</span>`;
-      // لو الأدمن خلاص راجع الطلب وحوّل حالته لـ"تم الطباعة"، نوريها هي بدل ما نرجّع نعرض
-      // "بانتظار المراجع" (اللي بتحصل عشان setRejectionPrinted بيصفّر reviewer_action).
-      if (o.status === 'تم الطباعة') substatusBadge = `<span class="badge badge-accepted">🖨️ تم الطباعة</span>`;
-      else if (o.reviewer_action === 'تم التعديل') substatusBadge = `<span class="badge badge-accepted">تم التعديل</span>`;
-      else if (o.reviewer_action === 'تم الرفض للشركة') substatusBadge = `<span class="badge badge-rejected">تم الرفض للشركة</span>`;
+      const substatus = getRejectionSubstatus(o);
+      const substatusBadgeMap = {
+        PENDING: `<span class="badge badge-hold">بانتظار المراجع</span>`,
+        EDITED: `<span class="badge badge-accepted">تم التعديل</span>`,
+        FINAL_REJECTED: `<span class="badge badge-rejected">تم الرفض للشركة</span>`,
+        PRINTED: `<span class="badge badge-accepted">🖨️ تم الطباعة</span>`,
+      };
+      const substatusBadge = substatusBadgeMap[substatus];
 
       const isOwnReviewer = currentUser && (o.reviewer === currentUser.username);
       let actionsHtml = '';
@@ -4524,7 +4578,8 @@ function exportRejectionsOrderNumbers() {
   XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام الطلبات المرفوضة');
 
   const substatusValue = document.getElementById('rejections-substatus-filter').value;
-  const substatusLabel = (substatusValue && substatusValue !== 'ALL') ? `_${substatusValue === 'PENDING' ? 'بانتظار_المراجع' : substatusValue}` : '';
+  const substatusLabels = { PENDING: 'بانتظار_المراجع', EDITED: 'تم_التعديل', FINAL_REJECTED: 'تم_الرفض_للشركة', PRINTED: 'تم_الطباعة' };
+  const substatusLabel = (substatusValue && substatusValue !== 'ALL') ? `_${substatusLabels[substatusValue] || substatusValue}` : '';
   const dateLabel = document.getElementById('rejections-date-filter').value || 'غير محدد';
 
   XLSX.writeFile(workbook, `مرفوضات${substatusLabel}_${dateLabel}.xlsx`);

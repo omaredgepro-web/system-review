@@ -4679,7 +4679,10 @@ async function setRejectionPrinted(orderNum) {
   if (!row) return;
   if (!confirm(`تأكيد تحويل حالة الطلب ${orderNum} إلى "تم الطباعة"؟`)) return;
   try {
-    const updateData = { status: 'تم الطباعة', reason: '-', reviewer_action: null };
+    // بنغيّر الحالة بس (status) ونسيب كل حاجة تانية زي ما هي - السبب الأصلي وحالة المراجعة
+    // (تم التعديل / رفض نهائي) لازم يفضلوا موجودين في الصف عشان الريبورت يفضل كامل ومفيدش
+    // من غير ما نعرف السبب الأصلي اللي كان وراء الرفض.
+    const updateData = { status: 'تم الطباعة' };
     const { data, error } = await supabaseClient
       .from(CERT_TABLE_NAME)
       .update(updateData)

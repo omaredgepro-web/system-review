@@ -225,12 +225,19 @@ async function submitQuickAddOrders() {
   const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
 
-  // فحص التكرار هنا لازم يشمل كل التواريخ (الطلب ممكن يكون مسجل بتاريخ مختلف عن التاريخ المختار هنا)
+  // فحص التكرار هنا لازم يشمل كل التواريخ (الطلب ممكن يكون مسجل بتاريخ مختلف عن التاريخ المختار هنا)،
+  // لكن مش محتاجين نحمّل الجدول كله عشان كده - بنجيب بس الصفوف اللي رقمها من ضمن الأرقام المكتوبة
+  // هنا (أسرع بكتير ومحصّنة ضد "statement timeout" مع الجداول الكبيرة).
+  const addBtn = document.querySelector('button[onclick="submitQuickAddOrders()"]');
+  if (addBtn) { addBtn.disabled = true; addBtn.innerText = '⏳ جاري الفحص...'; }
   try {
-    await ensureFullMasterData();
+    const matchedFromDb = await fetchMasterRowsByOrderNumbers(orderNumbers);
+    mergeRowsIntoMasterData(matchedFromDb);
   } catch (err) {
-    alert('تعذّر تحميل بيانات قاعدة البيانات للتأكد من عدم التكرار: ' + err.message);
+    alert('تعذّر التأكد من عدم التكرار: ' + err.message);
     return;
+  } finally {
+    if (addBtn) { addBtn.disabled = false; addBtn.innerText = '➕ إضافة الطلبات'; }
   }
 
   const toInsert = [];
@@ -284,11 +291,13 @@ async function selectQuickAddOrders() {
   const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
   if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل في الخانة أولاً'); return; }
 
-  // البحث هنا بيدور عبر كل التواريخ، فمحتاج كل الجدول متحمّل الأول
+  // البحث هنا بيدور عبر كل التواريخ - بنجيب بس الصفوف اللي رقمها من ضمن الأرقام المكتوبة (مش الجدول
+  // كله)، وبنضيفهم لبيانات window.masterData الحالية بدل تحميل كل شيء (أسرع ومحصّنة ضد التايم آوت)
   try {
-    await ensureFullMasterData();
+    const matchedFromDb = await fetchMasterRowsByOrderNumbers(orderNumbers);
+    mergeRowsIntoMasterData(matchedFromDb);
   } catch (err) {
-    alert('تعذّر تحميل باقي التواريخ: ' + err.message);
+    alert('تعذّر البحث عن الأرقام دي: ' + err.message);
     return;
   }
 
@@ -1231,6 +1240,35 @@ function extractDateString(item) {
 window.__masterDataScope = 'none'; // 'none' (لسه معملش تحميل) | 'date' (تاريخ واحد بس) | 'full' (الجدول كله)
 let _fullMasterDataPromise = null;
 
+// بيجيب من قاعدة البيانات بس الصفوف اللي رقم الطلب بتاعها موجود ضمن قائمة أرقام محددة (مش الجدول
+// كله) - مفيدة جدًا لأي عملية بتحتاج تتأكد من عدم تكرار عدد محدود من الأرقام (زي الإضافة السريعة،
+// أو ملف CSV مرفوع) من غير ما نحمّل آلاف الصفوف اللي مش محتاجينها أصلاً. ده أسرع بكتير من
+// ensureFullMasterData() ومحصّن ضد مشاكل "statement timeout" اللي بتحصل مع الجداول الكبيرة.
+async function fetchMasterRowsByOrderNumbers(orderNumbers) {
+  const uniqueNums = [...new Set((orderNumbers || []).filter(Boolean).map(String))];
+  if (uniqueNums.length === 0) return [];
+
+  const CHUNK = 200; // عشان مانتجاوزش حد طول الاستعلام لو الأرقام كتير أوي
+  let allFetched = [];
+  for (let i = 0; i < uniqueNums.length; i += CHUNK) {
+    const batch = uniqueNums.slice(i, i + CHUNK);
+    const { data, error } = await supabaseClient.from(TABLE_NAME).select('*').in('order_number', batch);
+    if (error) throw error;
+    if (data && data.length > 0) allFetched = allFetched.concat(data);
+  }
+  return allFetched;
+}
+
+// بيدمج صفوف جديدة (جايالة من فحص مستهدف بـ fetchMasterRowsByOrderNumbers) في window.masterData
+// الحالية من غير ما يكرر نفس الصف مرتين - عشان أي دالة تانية بتقرأ من window.masterData (زي فحص
+// التكرار أو جداول الإحصائيات) تلاقي البيانات دي متاحة من غير ما نحتاج نحمّل الجدول كله.
+function mergeRowsIntoMasterData(newRows) {
+  if (!newRows || newRows.length === 0) return;
+  const existingIds = new Set((window.masterData || []).map(o => o.id));
+  const toAdd = newRows.filter(o => !existingIds.has(o.id));
+  if (toAdd.length > 0) window.masterData = (window.masterData || []).concat(toAdd);
+}
+
 // جلب كل صفوف جدول معين على دفعات (Pagination)، مع تصغير حجم الدفعة تلقائيًا لو Supabase رجّع
 // خطأ "statement timeout" (بيحصل لو الجدول كبر أوي وحجم الدفعة الافتراضي بقى بياخد وقت أطول من
 // المسموح به في إعدادات قاعدة البيانات). بدل ما العملية كلها توقف بغلطة، بنعيد محاولة نفس الدفعة
@@ -1404,11 +1442,17 @@ async function onDateFilterChange() {
   selectedOrderNumbers.clear();
   updateSelectedCount();
 
-  if (window.__masterDataScope !== 'full') {
+  // تصفح تاريخ تاني مش محتاج الجدول كله - بنجيب بس صفوف التاريخ ده تحديدًا (استعلام مفلتر وسريع)،
+  // زي ما بيحصل بالظبط عند أول تحميل للصفحة، بدل ما نحمّل كل التواريخ عشان نعرض واحد بس منهم.
+  const targetDate = document.getElementById('date-filter').value;
+  const alreadyHaveThisDate = targetDate && (window.masterData || []).some(o => extractDateString(o) === targetDate);
+
+  if (targetDate && !alreadyHaveThisDate) {
     const tbody = document.getElementById('orders-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل باقي التواريخ...</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
-      await ensureFullMasterData();
+      const dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.eq('date', targetDate));
+      mergeRowsIntoMasterData(dateRows);
     } catch (err) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
       return;
@@ -1444,12 +1488,15 @@ async function toggleShowOnlySelectedDashboard() {
   currentPage = 1;
   const btn = document.getElementById('show-selected-only-btn');
 
-  if (showOnlySelectedDashboard && window.__masterDataScope !== 'full') {
+  // مش محتاجين الجدول كله عشان نعرض "المحدد فقط" - بنجيب بس الصفوف اللي رقمها من ضمن الأرقام
+  // المحددة فعليًا (selectedOrderNumbers)، أسرع بكتير ومحصّنة ضد التايم آوت.
+  if (showOnlySelectedDashboard && selectedOrderNumbers.size > 0) {
     if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحميل...'; }
     try {
-      await ensureFullMasterData();
+      const matchedFromDb = await fetchMasterRowsByOrderNumbers([...selectedOrderNumbers]);
+      mergeRowsIntoMasterData(matchedFromDb);
     } catch (err) {
-      alert('حصل خطأ أثناء تحميل باقي التواريخ: ' + err.message);
+      alert('حصل خطأ أثناء تحميل الطلبات المحددة: ' + err.message);
       showOnlySelectedDashboard = false;
       if (btn) btn.disabled = false;
     }
@@ -2222,9 +2269,13 @@ function applyDuplicateRuleToRows(rows) {
 // الحالية، ويرجّع تقرير بكل حاجة اتشالت وليه، وكمان بيخزن لستة كل الأرقام المُستبعدة (window.lastAutoRemovedDuplicates)
 // عشان تقدر تنزلها شيت إكسيل بعد كده من اللوحة (مش بس تشوف العدد في رسالة بتختفي).
 async function autoCleanCsvDuplicates() {
-  // فحص التكرار (وخصوصًا "اتقبل قبل كده بأي تاريخ") لازم يشوف الجدول كله، مش بس تاريخ واحد،
-  // وإلا ممكن يسمح بتوزيع طلب اتقفل عليه القرار فعلاً من قبل لمجرد إن بياناته مش محمّلة دلوقتي.
-  await ensureFullMasterData();
+  // فحص التكرار (وخصوصًا "اتقبل قبل كده بأي تاريخ") لازم يشوف كل تواريخ قاعدة البيانات، مش بس تاريخ
+  // واحد، وإلا ممكن يسمح بتوزيع طلب اتقفل عليه القرار فعلاً من قبل. بدل ما نحمّل الجدول كله (بطيء
+  // ومحتمل يعمل "statement timeout" مع الجداول الكبيرة)، بنجيب بس الصفوف اللي رقمها موجود فعليًا
+  // في الملف المرفوع، ونضيفهم لبيانات window.masterData الحالية.
+  const orderNumbersInFile = parsedCsvData.map(getCsvRowOrderNumber).filter(Boolean);
+  const matchedFromDb = await fetchMasterRowsByOrderNumbers(orderNumbersInFile);
+  mergeRowsIntoMasterData(matchedFromDb);
 
   const beforeCount = parsedCsvData.length;
 
@@ -3033,7 +3084,9 @@ function downloadDuplicateOrdersExcel() {
 // زرار يدوي (للمراجعة/الطمأنينة بعد أي تعديل يدوي على الصفوف) — بيطبّق بالظبط نفس القاعدة اللي
 // بتتشغل تلقائيًا أول ما ترفع ملف أو تغيّر تاريخ الدفعة (applyDuplicateRuleToRows فوق).
 async function resolveExistingDuplicatesBySmartRule() {
-  await ensureFullMasterData();
+  const orderNumbersInFile = parsedCsvData.map(getCsvRowOrderNumber).filter(Boolean);
+  const matchedFromDb = await fetchMasterRowsByOrderNumbers(orderNumbersInFile);
+  mergeRowsIntoMasterData(matchedFromDb);
 
   const targetDate = getCsvUploadTargetDateIso();
   const preview = applyDuplicateRuleToRows(parsedCsvData);

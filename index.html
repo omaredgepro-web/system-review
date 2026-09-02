@@ -410,6 +410,7 @@
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <button class="btn btn-secondary" id="refresh-cert-btn" onclick="refreshCertDashboardData()">🔄 تحديث يدوي</button>
             <button class="btn btn-secondary" onclick="openChartsModal('cert')">📈 الرسوم البيانية</button>
+            <button class="btn btn-secondary" onclick="openCertCustomExportModal()">📤 تصدير مخصص (حسب المسؤول)</button>
             <span id="cert-live-status-indicator" style="font-size: 11px; color: var(--text-muted);" title="جاري الاتصال بالتحديث اللحظي...">⚪ جاري الاتصال...</span>
             <span id="cert-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
             <button class="btn btn-secondary" onclick="exportUnassignedCertOrders()">📥 تنزيل الطلبات الغير موزعة (Excel)</button>
@@ -547,28 +548,7 @@
 
     <!-- TAB: مرفوضات (تظهر للكل - مراجع وأدمن) -->
     <div id="tab-rejections" style="display: none;">
-      <div class="kpi-grid" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));">
-        <div class="kpi-card">
-          <div class="kpi-title">إجمالي الطلبات المرفوضة</div>
-          <div class="kpi-value" style="color: var(--badge-reject-text)" id="rejections-stat-total">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">⏳ بانتظار المراجع</div>
-          <div class="kpi-value" style="color: var(--badge-pending-text)" id="rejections-stat-pending">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">✅ تم التعديل</div>
-          <div class="kpi-value" style="color: var(--badge-accept-text)" id="rejections-stat-edited">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">🚫 تم الرفض للشركة</div>
-          <div class="kpi-value" style="color: var(--badge-reject-text)" id="rejections-stat-final-rejected">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-title">🖨️ تم الطباعة</div>
-          <div class="kpi-value" style="color: var(--badge-accept-text)" id="rejections-stat-printed">0</div>
-        </div>
-      </div>
+      <div id="rejections-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px;"></div>
 
       <div class="dashboard-layout">
         <div class="main-content">
@@ -1093,6 +1073,39 @@
       <p id="charts-subtitle" style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;"></p>
       <div id="charts-canvas-wrap" style="position: relative; width: 100%; height: 420px;">
         <canvas id="charts-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal تصدير مخصص لتاب الشهادات - فلتر حالة + تحديد مسؤولين معينين بس -->
+  <div class="modal-overlay" id="cert-custom-export-modal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3>📤 تصدير مخصص (حسب الحالة والمسؤول)</h3>
+        <button class="close-btn" onclick="closeCertCustomExportModal()">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <label>الحالة</label>
+        <select id="cert-export-status-select" class="filter-select form-control">
+          <option value="ALL">كل الحالات</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>المسؤولين (حدد واحد أو أكتر - سيبها فاضية يعني الكل)</label>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <button class="btn btn-secondary" style="width: auto; padding: 4px 12px; font-size: 12px;" onclick="selectAllCertExportPersons(true)">تحديد الكل</button>
+          <button class="btn btn-secondary" style="width: auto; padding: 4px 12px; font-size: 12px;" onclick="selectAllCertExportPersons(false)">إلغاء التحديد</button>
+        </div>
+        <div id="cert-export-persons-list" style="display: flex; flex-wrap: wrap; gap: 10px; max-height: 220px; overflow-y: auto; background: var(--bg-dark); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;"></div>
+      </div>
+
+      <p id="cert-export-preview-count" style="font-size: 13px; color: var(--text-muted); margin-bottom: 10px;"></p>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCertCustomExportModal()">إلغاء</button>
+        <button class="btn btn-primary" style="width: auto;" onclick="runCertCustomExport()">📥 تصدير Excel</button>
       </div>
     </div>
   </div>

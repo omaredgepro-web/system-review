@@ -4444,6 +4444,61 @@ function getFilteredRejectionsRows() {
   return rows;
 }
 
+// وصف كل حالة مراجعة (أيقونة + لون) لكروت الإحصائيات الذكية - نفس أسلوب تابي المواقف والشهادات
+const REJECTIONS_SUBSTATUS_META = {
+  PENDING: { label: 'بانتظار المراجع', icon: '⏳', color: '#fbbf24' },
+  EDITED: { label: 'تم التعديل', icon: '✅', color: '#34d399' },
+  FINAL_REJECTED: { label: 'تم الرفض للشركة', icon: '🚫', color: '#f87171' },
+  PRINTED: { label: 'تم الطباعة', icon: '🖨️', color: '#38bdf8' }
+};
+
+// دوسة على أي كارت حالة بتفلتر جدول المرفوضات تحت بيها فورًا
+function filterRejectionsBySubstatus(substatus) {
+  const select = document.getElementById('rejections-substatus-filter');
+  if (select) select.value = substatus;
+  renderRejectionsTab();
+}
+
+function clearRejectionsSubstatusFilter() {
+  const select = document.getElementById('rejections-substatus-filter');
+  if (select) select.value = 'ALL';
+  renderRejectionsTab();
+}
+
+function renderRejectionsKpis(totalCount, kpiCounts) {
+  const container = document.getElementById('rejections-kpi-container');
+  if (!container) return;
+
+  const activeSubstatus = (document.getElementById('rejections-substatus-filter') || {}).value || 'ALL';
+
+  let html = `
+    <div class="stat-card" style="cursor:pointer; border-right: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(99,102,241,0.12), var(--bg-dark)); ${activeSubstatus === 'ALL' ? 'outline: 2px solid var(--accent-purple);' : ''}" onclick="clearRejectionsSubstatusFilter()">
+      <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">🚫 إجمالي الطلبات المرفوضة</div>
+      <div style="font-size:32px; font-weight:800;">${totalCount.toLocaleString('ar-EG')}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">كل حالات المراجعة مع بعض &middot; اضغط لإلغاء الفلترة</div>
+    </div>
+  `;
+
+  Object.keys(REJECTIONS_SUBSTATUS_META).forEach(key => {
+    const meta = REJECTIONS_SUBSTATUS_META[key];
+    const count = kpiCounts[key] || 0;
+    const pct = totalCount > 0 ? Math.round((count / totalCount) * 100) : 0;
+    const isActive = activeSubstatus === key;
+    html += `
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterRejectionsBySubstatus('${key}')">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${meta.label}</div>
+        <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
+        <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
 function renderRejectionsTab() {
   const tbody = document.getElementById('rejections-tbody');
   if (!tbody) return;
@@ -4451,17 +4506,12 @@ function renderRejectionsTab() {
   const rows = getFilteredRejectionsRows();
   const isAdmin = currentUser && currentUser.role === 'admin';
 
-  document.getElementById('rejections-stat-total').innerText = rows.length;
-
   // لوحة توزيع الحالات الأربعة - بتحسب على كل الفلاتر ما عدا فلتر "حالة المراجعة" نفسه،
   // عشان تفضل توريك التوزيع الحقيقي بغض النظر عن أي حالة مختارة في الفلتر دلوقتي.
   const kpiBaseRows = getRejectionsRowsBeforeSubstatus();
   const kpiCounts = { PENDING: 0, EDITED: 0, FINAL_REJECTED: 0, PRINTED: 0 };
   kpiBaseRows.forEach(o => { kpiCounts[getRejectionSubstatus(o)]++; });
-  document.getElementById('rejections-stat-pending').innerText = kpiCounts.PENDING;
-  document.getElementById('rejections-stat-edited').innerText = kpiCounts.EDITED;
-  document.getElementById('rejections-stat-final-rejected').innerText = kpiCounts.FINAL_REJECTED;
-  document.getElementById('rejections-stat-printed').innerText = kpiCounts.PRINTED;
+  renderRejectionsKpis(kpiBaseRows.length, kpiCounts);
 
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
@@ -6341,4 +6391,90 @@ async function submitGehatQuickAdd() {
       if (btn) { btn.disabled = false; btn.innerText = '🚀 تنفيذ'; }
     }
   }
+}
+
+// ============================================================
+// تصدير مخصص لتاب الشهادات: فلتر بحالة معينة + تحديد مسؤولين بعينهم بس (زي عمر ومؤمن وابو هيبة)
+// ============================================================
+function openCertCustomExportModal() {
+  // قايمة الحالات - نفس القايمة المعروفة لكارتات الـ KPI، وأي حالة إضافية موجودة فعليًا في البيانات
+  const statusSelect = document.getElementById('cert-export-status-select');
+  const countsInData = {};
+  (certAllData || []).forEach(o => {
+    const s = (o.status && String(o.status).trim()) || 'لم يتم الطباعة';
+    countsInData[s] = true;
+  });
+  const extra = Object.keys(countsInData).filter(s => !CERT_KPI_STATUSES.includes(s));
+  const allStatuses = [...CERT_KPI_STATUSES, ...extra];
+
+  statusSelect.innerHTML = '<option value="ALL">كل الحالات</option>' +
+    allStatuses.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  // قايمة المسؤولين (نفس مصدر فلتر "المسؤول" العادي في الجدول)
+  const listContainer = document.getElementById('cert-export-persons-list');
+  listContainer.innerHTML = ALL_PROFILES.filter(p => p.role === 'admin').map(p => `
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" class="cert-export-person-checkbox" value="${p.username}" onchange="updateCertExportPreviewCount()">
+      ${p.name}
+    </label>
+  `).join('');
+
+  statusSelect.onchange = updateCertExportPreviewCount;
+  updateCertExportPreviewCount();
+  document.getElementById('cert-custom-export-modal').style.display = 'flex';
+}
+
+function closeCertCustomExportModal() {
+  document.getElementById('cert-custom-export-modal').style.display = 'none';
+}
+
+function selectAllCertExportPersons(checked) {
+  document.querySelectorAll('.cert-export-person-checkbox').forEach(cb => { cb.checked = checked; });
+  updateCertExportPreviewCount();
+}
+
+// الفلترة الفعلية المشتركة بين المعاينة والتصدير - نفس المنطق في المكانين عشان الرقم المعروض
+// يطابق تمامًا اللي هيتصدّر فعليًا
+function getCertCustomExportRows() {
+  const statusValue = document.getElementById('cert-export-status-select').value;
+  const selectedPersons = Array.from(document.querySelectorAll('.cert-export-person-checkbox:checked')).map(cb => cb.value);
+
+  return (certAllData || []).filter(o => {
+    const rowStatus = (o.status && String(o.status).trim()) || 'لم يتم الطباعة';
+    const matchesStatus = (statusValue === 'ALL') || (rowStatus === statusValue);
+    // لو محدش متحدد من المسؤولين، معناها "الكل" - مفيش فلترة على المسؤول خالص
+    const matchesPerson = selectedPersons.length === 0 || selectedPersons.includes(o.Layout || o.layout);
+    return matchesStatus && matchesPerson;
+  });
+}
+
+function updateCertExportPreviewCount() {
+  const count = getCertCustomExportRows().length;
+  document.getElementById('cert-export-preview-count').innerText = `عدد الطلبات المطابقة حاليًا: ${count.toLocaleString('ar-EG')}`;
+}
+
+function runCertCustomExport() {
+  const rows = getCertCustomExportRows();
+  if (rows.length === 0) {
+    alert('لا يوجد طلبات مطابقة للفلتر المحدد.');
+    return;
+  }
+
+  const exportRows = rows.map(o => ({
+    'رقم الطلب': o.order_number || '-',
+    'المسؤول': getDisplayName(o.Layout || o.layout || '-'),
+    'الحالة': (o.status && String(o.status).trim()) || 'لم يتم الطباعة',
+    'النوع': o.cert_type || 'عادي',
+    'التاريخ': o.date || '-'
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 12 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'تصدير مخصص');
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  XLSX.writeFile(workbook, `تصدير_شهادات_مخصص_${stamp}.xlsx`);
 }

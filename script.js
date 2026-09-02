@@ -7,7 +7,7 @@ const CERT_TABLE_NAME = 'layout';
 const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
-  
+
 // ============ جدول المواقف (مقصور على 5 أدمن بالاسم، والحذف على umar/mondy بس) ============
 const MAWAQEF_TABLE_NAME = 'mawaqef';
 const MAWAQEF_ALLOWED_USERNAMES = ['umar', 'mondy', 'sara', 'momen', 'rawan'];
@@ -1231,24 +1231,55 @@ function extractDateString(item) {
 window.__masterDataScope = 'none'; // 'none' (لسه معملش تحميل) | 'date' (تاريخ واحد بس) | 'full' (الجدول كله)
 let _fullMasterDataPromise = null;
 
-async function fetchAllRowsFromTable(tableName, extraFilter) {
+// جلب كل صفوف جدول معين على دفعات (Pagination)، مع تصغير حجم الدفعة تلقائيًا لو Supabase رجّع
+// خطأ "statement timeout" (بيحصل لو الجدول كبر أوي وحجم الدفعة الافتراضي بقى بياخد وقت أطول من
+// المسموح به في إعدادات قاعدة البيانات). بدل ما العملية كلها توقف بغلطة، بنعيد محاولة نفس الدفعة
+// بنص الحجم وهكذا لحد ما تنجح، وبعدين نفتكر آخر حجم نجح ونكمل بيه باقي الدفعات.
+async function fetchAllRowsPaginated(runQuery, initialStep = 300) {
   let allFetched = [];
-  let from = 0, step = 1000, hasMore = true;
+  let from = 0;
+  let step = initialStep;
+  let hasMore = true;
 
   while (hasMore) {
-    let query = supabaseClient.from(tableName).select('*').order('id', { ascending: true }).range(from, from + step - 1);
-    if (extraFilter) query = extraFilter(query);
-    const { data, error } = await query;
-    if (error) throw error;
+    let attemptStep = step;
+    let lastError = null;
+    let succeeded = false;
 
-    if (data && data.length > 0) {
-      allFetched = allFetched.concat(data);
-      from += step;
-      if (data.length < step) hasMore = false;
-    } else { hasMore = false; }
+    while (attemptStep >= 25) {
+      const { data, error } = await runQuery(from, from + attemptStep - 1);
+
+      if (!error) {
+        if (data && data.length > 0) {
+          allFetched = allFetched.concat(data);
+          from += attemptStep;
+          if (data.length < attemptStep) hasMore = false;
+        } else {
+          hasMore = false;
+        }
+        step = attemptStep;
+        succeeded = true;
+        break;
+      }
+
+      lastError = error;
+      const isTimeout = /timeout/i.test(error.message || '') || error.code === '57014';
+      if (!isTimeout) break; // خطأ تاني غير التايم آوت (زي مشكلة صلاحيات) - مفيش داعي نصغّر ونعيد
+      attemptStep = Math.floor(attemptStep / 2);
+    }
+
+    if (!succeeded) throw lastError;
   }
 
   return allFetched;
+}
+
+async function fetchAllRowsFromTable(tableName, extraFilter) {
+  return fetchAllRowsPaginated((from, to) => {
+    let query = supabaseClient.from(tableName).select('*').order('id', { ascending: true }).range(from, to);
+    if (extraFilter) query = extraFilter(query);
+    return query;
+  });
 }
 
 // بيجيب باقي الجدول كله (كل التواريخ) مرة واحدة بس، ويخزنه في window.masterData. لو النداء اتكرر
@@ -4255,19 +4286,9 @@ function changePage(direction) { currentPage += direction; renderCurrentPage(); 
 async function loadCertificatesData() {
   document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
-    let allFetched = [];
-    let from = 0, step = 1000, hasMore = true;
-
-    while (hasMore) {
-      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        allFetched = allFetched.concat(data);
-        from += step;
-        if (data.length < step) hasMore = false;
-      } else { hasMore = false; }
-    }
+    const allFetched = await fetchAllRowsPaginated((from, to) =>
+      supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, to)
+    );
 
     certMasterData = allFetched;
     certDataLoaded = true;
@@ -5636,18 +5657,9 @@ async function loadMawaqefData() {
   if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
 
   try {
-    let allFetched = [];
-    let from = 0, step = 1000, hasMore = true;
-
-    while (hasMore) {
-      const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
-      if (error) throw error;
-      if (data && data.length > 0) {
-        allFetched = allFetched.concat(data);
-        from += step;
-        if (data.length < step) hasMore = false;
-      } else { hasMore = false; }
-    }
+    const allFetched = await fetchAllRowsPaginated((from, to) =>
+      supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, to)
+    );
 
     mawaqefMasterData = allFetched;
     mawaqefDataLoaded = true;

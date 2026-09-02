@@ -547,10 +547,26 @@
 
     <!-- TAB: مرفوضات (تظهر للكل - مراجع وأدمن) -->
     <div id="tab-rejections" style="display: none;">
-      <div class="kpi-grid" style="grid-template-columns: 1fr;">
+      <div class="kpi-grid" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));">
         <div class="kpi-card">
           <div class="kpi-title">إجمالي الطلبات المرفوضة</div>
           <div class="kpi-value" style="color: var(--badge-reject-text)" id="rejections-stat-total">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">⏳ بانتظار المراجع</div>
+          <div class="kpi-value" style="color: var(--badge-pending-text)" id="rejections-stat-pending">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">✅ تم التعديل</div>
+          <div class="kpi-value" style="color: var(--badge-accept-text)" id="rejections-stat-edited">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">🚫 تم الرفض للشركة</div>
+          <div class="kpi-value" style="color: var(--badge-reject-text)" id="rejections-stat-final-rejected">0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">🖨️ تم الطباعة</div>
+          <div class="kpi-value" style="color: var(--badge-accept-text)" id="rejections-stat-printed">0</div>
         </div>
       </div>
 
@@ -560,6 +576,7 @@
             <span id="rejections-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
             <h3 style="font-size: 16px;">قائمة الطلبات المرفوضة</h3>
             <div style="display: flex; gap: 10px;">
+              <button class="btn btn-secondary" id="refresh-rejections-btn" onclick="refreshRejectionsData()">🔄 تحديث يدوي</button>
               <button class="btn btn-secondary" onclick="exportRejectionsOrderNumbers()">📥 تصدير أرقام الطلبات (Excel)</button>
               <button class="btn btn-secondary" onclick="toggleRejectionsStatsSidebar()">📊 إحصائيات المراجعين</button>
             </div>
@@ -584,8 +601,9 @@
             <select id="rejections-substatus-filter" class="filter-select" onchange="renderRejectionsTab()">
               <option value="ALL">الكل</option>
               <option value="PENDING">بانتظار المراجع</option>
-              <option value="تم التعديل">تم التعديل</option>
-              <option value="تم الرفض للشركة">تم الرفض للشركة</option>
+              <option value="EDITED">تم التعديل</option>
+              <option value="FINAL_REJECTED">تم الرفض للشركة</option>
+              <option value="PRINTED">تم الطباعة</option>
             </select>
 
             <label style="font-size: 13px; color: var(--text-muted);">تاريخ الرفض:</label>

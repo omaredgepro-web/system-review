@@ -4620,12 +4620,22 @@ function exportRejectionsOrderNumbers() {
   const rows = getFilteredRejectionsRows();
   if (rows.length === 0) { alert('لا توجد طلبات مطابقة للتصدير'); return; }
 
-  const exportRows = rows.map(o => ({ 'رقم الطلب': o.order_number || '-' }));
+  const substatusLabelsAr = { PENDING: 'بانتظار المراجع', EDITED: 'تم التعديل', FINAL_REJECTED: 'تم الرفض للشركة', PRINTED: 'تم الطباعة' };
+
+  const exportRows = rows.map(o => ({
+    'رقم الطلب': o.order_number || '-',
+    'النوع': o.cert_type || 'عادي',
+    'المسؤول': getDisplayName(o.Layout || o.layout || '-'),
+    'المراجع': getDisplayName(o.reviewer || '-'),
+    'السبب': o.reason || '-',
+    'حالة المراجعة': substatusLabelsAr[getRejectionSubstatus(o)] || '-',
+    'التاريخ': o.date || '-'
+  }));
   const worksheet = XLSX.utils.json_to_sheet(exportRows);
-  worksheet['!cols'] = [{ wch: 28 }];
+  worksheet['!cols'] = [{ wch: 26 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 40 }, { wch: 18 }, { wch: 12 }];
 
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام الطلبات المرفوضة');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'الطلبات المرفوضة');
 
   const substatusValue = document.getElementById('rejections-substatus-filter').value;
   const substatusLabels = { PENDING: 'بانتظار_المراجع', EDITED: 'تم_التعديل', FINAL_REJECTED: 'تم_الرفض_للشركة', PRINTED: 'تم_الطباعة' };

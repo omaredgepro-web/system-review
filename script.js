@@ -111,6 +111,14 @@ let printOrderAssignments = {}; // order_number -> اسم الأدمن المخ�
 let printDistUserSelection = null;
 let selectedOrderNumbers = new Set();
 
+// بتتفعّل مؤقتًا أثناء أي عملية دفعية (زي الإضافة السريعة) عشان توقف إعادة الرسم التلقائي
+// الجاي من التحديث اللحظي (Realtime) لحد ما العملية تخلص وتعمل تحديث/رسم واحد نضيف في الآخر،
+// بدل ما الشاشة تومض أو تتحدث مع كل صف بيتضاف لوحده.
+let suppressLiveRender = false;
+function finishLiveSuppressedAction() {
+  suppressLiveRender = false;
+}
+
 // ============ حالة تاب المواقف وتاب جهة الولاية ============
 let mawaqefMasterData = [];
 let mawaqefAllData = [];
@@ -803,6 +811,7 @@ function patchMasterDataRow(masterArray, eventType, newRow, oldRow) {
 // دفعة واحدة)، الشاشة تتحدث مرة واحدة بس في الآخر، بدل ما تومض/تتحدث مع كل صف لوحده.
 let liveReviewRenderTimer = null;
 function scheduleLiveReviewRender() {
+  if (suppressLiveRender) return; // مؤجل: هيتم رسم الشاشة مرة واحدة في الآخر بعد ما العملية الدفعية تخلص
   clearTimeout(liveReviewRenderTimer);
   liveReviewRenderTimer = setTimeout(() => applyDateFiltering(), 250);
 }

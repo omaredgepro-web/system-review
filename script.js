@@ -759,6 +759,10 @@ async function setupUserSession(profile) {
 
   loadData();
   subscribeToLiveUpdates();
+  startRejectionNagTimer();
+  // بعد ما البيانات تحمل (لودTData شغالة async)، نتأكد فورًا لو المراجع عنده طلبات
+  // مرفوضة قديمة اتجاهلت من قبل - بدل ما يستنى أول تكرار للتايمر (بعد 5 دقايق)
+  setTimeout(() => showRejectionNagModal(), 3000);
 }
 
 // بيملأ قوايم الحالة الخاصة بتاب المواقف (فلتر الجدول + نافذة التعديل + التعديل الجماعي)
@@ -847,6 +851,7 @@ function notifyReviewerIfNewlyRejected(eventType, newRow, oldRow) {
   if (!isForMe) return;
 
   showRejectionToast(newRow);
+  showRejectionNagModal(); // ينبه فورًا في نص الشاشة، مش بس التوست الصغير في الزاوية
 }
 
 function showRejectionToast(row) {
@@ -878,6 +883,71 @@ function showRejectionToast(row) {
     if (el) el.remove();
   }, 60000);
 }
+
+// ============================================================
+// تنبيه مركزي (نص الشاشة) للمراجع لما يترفضله طلب - وبيفضل يرجعله
+// كل شوية تلقائيًا لو سابه من غير ما يتصرف فيه (يعدّله أو يرفضه نهائي للشركة).
+// ============================================================
+const REJECTION_NAG_INTERVAL_MS = 5 * 60 * 1000; // كل 5 دقايق - غيّر الرقم هنا لو عايز مدة تانية
+let rejectionNagTimer = null;
+
+// الطلبات المرفوضة اللي لسه المراجع الحالي ما اتصرفش فيها خالص
+// (حالتها "مرفوض" ولسه reviewer_action فاضي = "بانتظار المراجع")
+function getMyPendingRejections() {
+  if (!currentUser || currentUser.role === 'admin') return [];
+  return (certMasterData || []).filter(o =>
+    o.status === 'مرفوض' &&
+    !o.reviewer_action &&
+    (o.reviewer === currentUser.username || o.reviewer === currentUser.name)
+  );
+}
+
+function showRejectionNagModal() {
+  const pending = getMyPendingRejections();
+  if (pending.length === 0) { closeRejectionNagModal(); return; }
+
+  let overlay = document.getElementById('rejection-nag-modal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'rejection-nag-modal';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:420px; text-align:center;">
+        <div style="font-size:38px; margin-bottom:8px;">⚠️</div>
+        <div style="font-weight:800; font-size:16px; margin-bottom:10px; color: var(--badge-reject-text);" id="rejection-nag-title"></div>
+        <div style="font-size:13px; color:var(--text-muted); margin-bottom:16px;" id="rejection-nag-body"></div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-primary" style="flex:1; padding:10px;" onclick="switchTab('rejections'); closeRejectionNagModal();">📋 روح لمرفوضاتي</button>
+          <button class="btn" style="flex:1; padding:10px;" onclick="closeRejectionNagModal();">تذكرني بعدين</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  const orderList = pending.slice(0, 5).map(o => o.order_number).join('، ');
+  const moreCount = pending.length > 5 ? ` (+${pending.length - 5} كمان)` : '';
+  document.getElementById('rejection-nag-title').innerText =
+    pending.length === 1 ? 'عندك طلب مرفوض محتاج تعديل' : `عندك ${pending.length} طلبات مرفوضة محتاجة تعديل`;
+  document.getElementById('rejection-nag-body').innerText = `رقم الطلب: ${orderList}${moreCount}`;
+
+  overlay.classList.add('active');
+  overlay.style.display = 'flex';
+}
+
+function closeRejectionNagModal() {
+  const overlay = document.getElementById('rejection-nag-modal');
+  if (overlay) { overlay.classList.remove('active'); overlay.style.display = 'none'; }
+}
+
+// بيشغّل تايمر متكرر - لو لسه فيه طلبات متجاهَلة، يرجّع يورّي النافذة تاني كل فترة.
+// (getMyPendingRejections بترجع مصفوفة فاضية تلقائيًا للأدمن، فالتايمر مالوش أي تأثير عليه)
+function startRejectionNagTimer() {
+  if (rejectionNagTimer) return; // شغال بالفعل، متبدأش تاني
+  rejectionNagTimer = setInterval(() => {
+    if (getMyPendingRejections().length > 0) showRejectionNagModal();
+  }, REJECTION_NAG_INTERVAL_MS);
+}
+
 
 let liveUpdatesChannel = null;
 function subscribeToLiveUpdates() {
@@ -4252,7 +4322,9 @@ function getRejectedCertRows() {
   const rejected = (certMasterData || []).filter(o => o.status === 'مرفوض' || o.was_rejected === true);
   const isAdmin = currentUser && currentUser.role === 'admin';
   if (isAdmin) return rejected;
-  return rejected.filter(o => currentUser && o.reviewer === currentUser.username);
+  // المراجع ميشوفش الطلبات اللي خلصت وطُبعت خالص - بتختفي من عنده أول ما الأدمن يحوّلها
+  // "تم الطباعة"، وتفضل ظاهرة للأدمن بس في سجل المرفوضات.
+  return rejected.filter(o => currentUser && o.reviewer === currentUser.username && o.status !== 'تم الطباعة');
 }
 
 // بيفلتر تاب المرفوضات حسب التاريخ المختار (لو موجود)، ولو مفيش تاريخ محدد بيعرض كل الطلبات

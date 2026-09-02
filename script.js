@@ -1150,8 +1150,10 @@ function switchTab(tabName) {
     document.getElementById('cert-date-filter').value = ''; // كل نوع له تاريخه الأحدث المستقل
     selectedCertOrderNumbers.clear();
     updateCertSelectedCount();
-    if (!certDataLoaded) loadCertificatesData();
-    else applyCertDateFiltering();
+    // كل مرة يفتح فيها المسؤول التاب، الافتراضي إنه يشوف طلباته هو بس (بالظبط زي التاريخ الأحدث
+    // اللي بيترجع افتراضي فوق) - وله زرار "عرض كل الطلبات" لو عايز يشوف الكل وقت ما يحتاج.
+    if (!certDataLoaded) loadCertificatesData().then(resetCertLayoutFilterToMine);
+    else { resetCertLayoutFilterToMine(); applyCertDateFiltering(); }
   } else if (tabName === 'rejections') {
     document.getElementById('rejections-tab-btn').classList.add('active');
     document.getElementById('tab-rejections').style.display = 'block';
@@ -4726,6 +4728,26 @@ function verifyAndSelectCertOrders() {
 function onCertDateFilterChange() { certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 
+// بيحدد فلتر "المسؤول" على اسم المستخدم الحالي (لو موجود ضمن الخيارات)، عشان أول ما يفتح
+// التاب يشوف طلباته هو بس بشكل افتراضي. لو مش موجود لأي سبب (مثلاً مش من ضمن الأدمنز)، يفضل "الكل".
+function resetCertLayoutFilterToMine() {
+  const sel = document.getElementById('cert-layout-filter');
+  if (!sel || !currentUser) return;
+  const hasOwnOption = Array.from(sel.options).some(o => o.value === currentUser.username);
+  sel.value = hasOwnOption ? currentUser.username : 'ALL';
+  certCurrentPage = 1;
+  renderCertPage();
+}
+
+// زرار "عرض كل الطلبات": بيشيل فلتر "طلباتي بس" ويرجّع يعرض كل المسؤولين مع بعض
+function viewAllCertOrders() {
+  const sel = document.getElementById('cert-layout-filter');
+  if (!sel) return;
+  sel.value = 'ALL';
+  certCurrentPage = 1;
+  renderCertPage();
+}
+
 // حالات الشهادات المعروفة مسبقًا لكارت الـ KPI (بترتيبها المعتاد، شاملة "لم يتم الطباعة")
 // أي حالة تانية موجودة فعليًا في الداتا هتتضاف تلقائيًا بعدهم زي ما بيحصل في تاب المواقف بالظبط
 const CERT_KPI_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'معلق', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'لم يتم الطباعة'];
@@ -4945,7 +4967,9 @@ function updateCertSelectedCount() {
   if (countEl) countEl.innerText = selectedCertOrderNumbers.size;
 }
 
-// تحديد أول N طلب "غير موزّع" (لسه معندوش مسؤول) ضمن الفلتر الحالي، بدون التكرار على المحدد بالفعل
+// تحديد أول N طلب "غير موزّع" (لسه معندوش مسؤول)، بداية من الصفحة اللي واقف فيها الأدمن دلوقتي
+// (مش من أول نتيجة في الفلتر كله دايمًا) - وبيتخطى أي طلب متحدد بالفعل، فلو دست الزرار تاني
+// هيكمل ياخد اللي بعد كده تلقائيًا (فلكسابلتي في التحديد المتتابع).
 function selectNextCertBatch() {
   const input = document.getElementById('cert-bulk-count-input');
   const count = parseInt(input.value, 10);
@@ -4953,22 +4977,31 @@ function selectNextCertBatch() {
   if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
   if (!window.certFilteredData || window.certFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
 
-  const unassigned = window.certFilteredData.filter(o => {
+  const startIndex = (certCurrentPage - 1) * certPageSize;
+  const poolFromCurrentPage = window.certFilteredData.slice(startIndex);
+
+  const unassigned = poolFromCurrentPage.filter(o => {
     const layout = o.Layout || o.layout || '';
     return !layout && !selectedCertOrderNumbers.has(o.order_number);
   });
 
-  if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد ضمن الفلتر الحالي'); return; }
+  if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد من الصفحة الحالية لآخر النتائج'); return; }
 
   const batch = unassigned.slice(0, count);
   batch.forEach(o => selectedCertOrderNumbers.add(o.order_number));
+
+  // ينقل تلقائيًا لآخر صفحة فيها طلب اتحدد، عشان تشوف نتيجة التحديد على طول، وعشان لو دست
+  // الزرار تاني يكمل من هنا (من غير ما ترجع بنفسك لأول صفحة).
+  const lastSelected = batch[batch.length - 1];
+  const lastIndexInFiltered = window.certFilteredData.findIndex(o => o.order_number === lastSelected.order_number);
+  if (lastIndexInFiltered >= 0) certCurrentPage = Math.floor(lastIndexInFiltered / certPageSize) + 1;
 
   updateCertSelectedCount();
   renderCertPage();
   input.value = '';
 
   if (batch.length < count) {
-    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح غير الموزّع ضمن الفلتر الحالي)`);
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح غير الموزّع من الصفحة الحالية لآخر النتائج)`);
   }
 }
 
@@ -4978,8 +5011,9 @@ function clearCertSelection() {
   if (showOnlySelectedCert) toggleShowOnlySelectedCert(); else renderCertPage();
 }
 
-// تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع أو لا) — مفيد لو أنت
-// فلترت بالفعل على اسمك في "المسؤول" وعايز تصدّر أرقام طلباتك على دفعات (مثلاً 100 في كل مرة)
+// تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع أو لا)، بداية من الصفحة
+// اللي واقف فيها الأدمن دلوقتي — مفيد لو فلترت بالفعل على اسمك في "المسؤول" وعايز تصدّر أرقام
+// طلباتك على دفعات (مثلاً 100 في كل مرة)، وكل دوسة على الزرار تكمل من بعد آخر تحديد تلقائيًا.
 function selectNextCertFromFiltered() {
   const input = document.getElementById('cert-export-count-input');
   const count = parseInt(input.value, 10);
@@ -4987,19 +5021,26 @@ function selectNextCertFromFiltered() {
   if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
   if (!window.certFilteredData || window.certFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
 
-  const unselected = window.certFilteredData.filter(o => !selectedCertOrderNumbers.has(o.order_number));
+  const startIndex = (certCurrentPage - 1) * certPageSize;
+  const poolFromCurrentPage = window.certFilteredData.slice(startIndex);
 
-  if (unselected.length === 0) { alert('كل الطلبات المطابقة للفلتر الحالي متحددة بالفعل'); return; }
+  const unselected = poolFromCurrentPage.filter(o => !selectedCertOrderNumbers.has(o.order_number));
+
+  if (unselected.length === 0) { alert('كل الطلبات من الصفحة الحالية لآخر النتائج متحددة بالفعل'); return; }
 
   const batch = unselected.slice(0, count);
   batch.forEach(o => selectedCertOrderNumbers.add(o.order_number));
+
+  const lastSelected = batch[batch.length - 1];
+  const lastIndexInFiltered = window.certFilteredData.findIndex(o => o.order_number === lastSelected.order_number);
+  if (lastIndexInFiltered >= 0) certCurrentPage = Math.floor(lastIndexInFiltered / certPageSize) + 1;
 
   updateCertSelectedCount();
   renderCertPage();
   input.value = '';
 
   if (batch.length < count) {
-    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح ضمن الفلتر الحالي)`);
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح من الصفحة الحالية لآخر النتائج)`);
   }
 }
 

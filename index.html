@@ -26,6 +26,77 @@
   
   <!-- ربط ملف التنسيقات CSS -->
   <link rel="stylesheet" href="style.css">
+
+  <!-- تنسيقات فلتر Checkbox المتعدد (Multi-select) - مستخدم في فلاتر المراجع/المسؤول -->
+  <style>
+    .multi-select-filter { position: relative; display: inline-block; }
+    .multi-select-btn {
+      cursor: pointer;
+      text-align: right;
+      min-width: 150px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .multi-select-panel {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      z-index: 70;
+      min-width: 230px;
+      max-width: 300px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      padding: 8px;
+    }
+    .multi-select-panel.open { display: block; }
+    .multi-select-search {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+      background: var(--bg-dark);
+      color: inherit;
+      font-size: 12px;
+    }
+    .multi-select-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .multi-select-actions button {
+      flex: 1;
+      background: var(--bg-dark);
+      border: 1px solid var(--card-border);
+      color: inherit;
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .multi-select-actions button:hover { border-color: var(--accent-purple); }
+    .multi-select-options-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+    .multi-select-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 6px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .multi-select-option:hover { background: var(--bg-dark); }
+    .multi-select-option input { cursor: pointer; }
+    .multi-select-empty { text-align: center; font-size: 12px; color: var(--text-muted); padding: 10px 0; }
+  </style>
 </head>
 <body>
 
@@ -151,9 +222,10 @@
             </select>
 
             <label id="reviewer-filter-label" style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
-            <select id="reviewer-filter" class="filter-select">
-              <option value="ALL">كل المراجعين</option>
-            </select>
+            <div class="multi-select-filter" id="reviewer-filter-wrapper">
+              <button type="button" class="filter-select multi-select-btn" id="reviewer-filter-btn" onclick="toggleMultiSelectPanel('reviewer-filter')">كل المراجعين ▾</button>
+              <div class="multi-select-panel" id="reviewer-filter-panel"></div>
+            </div>
 
             <label id="date-filter-label" style="font-size: 13px; color: var(--text-muted);">تاريخ الطلب:</label>
             <input type="date" id="date-filter" class="date-input" onchange="onDateFilterChange()">
@@ -566,9 +638,17 @@
             <input type="text" id="rejections-search-input" class="search-input" placeholder="ابحث برقم الطلب..." oninput="renderRejectionsTab()">
 
             <label id="rejections-reviewer-filter-label" style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
-            <select id="rejections-reviewer-filter" class="filter-select" onchange="renderRejectionsTab()">
-              <option value="ALL">كل المراجعين</option>
-            </select>
+            <div class="multi-select-filter" id="rejections-reviewer-filter-wrapper">
+              <button type="button" class="filter-select multi-select-btn" id="rejections-reviewer-filter-btn" onclick="toggleMultiSelectPanel('rejections-reviewer-filter')">كل المراجعين ▾</button>
+              <div class="multi-select-panel" id="rejections-reviewer-filter-panel"></div>
+            </div>
+
+            <label id="rejections-layout-filter-label" style="font-size: 13px; color: var(--text-muted);">المسؤول:</label>
+            <div class="multi-select-filter" id="rejections-layout-filter-wrapper">
+              <button type="button" class="filter-select multi-select-btn" id="rejections-layout-filter-btn" onclick="toggleMultiSelectPanel('rejections-layout-filter')">كل المسؤولين ▾</button>
+              <div class="multi-select-panel" id="rejections-layout-filter-panel"></div>
+            </div>
+            <button class="btn btn-secondary" id="rejections-layout-only-me-btn" style="padding: 6px 12px; font-size: 12px; display: none;" onclick="filterRejectionsByMeAsLayout()">👤 تم رفضه من خلالي</button>
 
             <label style="font-size: 13px; color: var(--text-muted);">النوع:</label>
             <select id="rejections-type-filter" class="filter-select" onchange="renderRejectionsTab()">

@@ -4548,6 +4548,13 @@ async function refreshCertDashboardData() {
 // في الجدول ده كله مش بس جوه النوع الواحد.
 // ============================================================
 async function auditCertDuplicates() {
+  // فحص أول حاجة إن عناصر النافذة (modal) موجودة في الصفحة أصلاً - لو ملف index.html
+  // المرفوع مش فيه آخر تحديث، هنعرف فورًا بدل ما الزرار "يعمل حاجة صامتة"
+  if (!document.getElementById('cert-duplicates-modal') || !document.getElementById('cert-duplicates-summary') || !document.getElementById('cert-duplicates-list')) {
+    alert('⚠️ نافذة "فحص التكرار" مش موجودة في صفحة index.html الحالية. تأكد إنك رفعت آخر نسخة محدّثة من ملف index.html كامل على السيرفر (مش بس script.js)، وبعدين اعمل Hard Refresh (Ctrl+Shift+R).');
+    return;
+  }
+
   const btn = document.getElementById('cert-check-duplicates-btn');
   const originalText = btn ? btn.innerText : '';
   if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري الفحص...'; }

@@ -321,7 +321,7 @@ async function selectQuickAddOrders() {
     document.getElementById('date-filter').value = '';
     document.getElementById('search-input').value = '';
     document.getElementById('status-filter').value = 'ALL';
-    document.getElementById('reviewer-filter').value = 'ALL';
+    resetMultiSelectFilter('reviewer-filter');
     document.getElementById('company-filter').value = 'ALL';
 
     const isAdmin = currentUser && currentUser.role === 'admin';
@@ -758,11 +758,18 @@ async function setupUserSession(profile) {
   const teamsStatsBtn = document.getElementById('stats-view-btn-teams');
   if (teamsStatsBtn) teamsStatsBtn.style.display = canSeeTeamsStats ? 'inline-flex' : 'none';
 
-  // تاب "مرفوضات": فلتر اختيار المراجع مفيد للأدمن بس (يشوف الكل)، المراجع العادي أصلاً بيشوف طلباته هو بس
+  // تاب "مرفوضات": فلتر اختيار المراجع/المسؤول مفيد للأدمن بس (يشوف الكل)، المراجع العادي أصلاً بيشوف طلباته هو بس
   const rejFilterLabel = document.getElementById('rejections-reviewer-filter-label');
-  const rejFilterSelect = document.getElementById('rejections-reviewer-filter');
+  const rejFilterWrapper = document.getElementById('rejections-reviewer-filter-wrapper');
   if (rejFilterLabel) rejFilterLabel.style.display = isAdmin ? 'inline' : 'none';
-  if (rejFilterSelect) rejFilterSelect.style.display = isAdmin ? 'inline-block' : 'none';
+  if (rejFilterWrapper) rejFilterWrapper.style.display = isAdmin ? 'inline-block' : 'none';
+
+  const rejLayoutLabel = document.getElementById('rejections-layout-filter-label');
+  const rejLayoutWrapper = document.getElementById('rejections-layout-filter-wrapper');
+  const rejLayoutOnlyMeBtn = document.getElementById('rejections-layout-only-me-btn');
+  if (rejLayoutLabel) rejLayoutLabel.style.display = isAdmin ? 'inline' : 'none';
+  if (rejLayoutWrapper) rejLayoutWrapper.style.display = isAdmin ? 'inline-block' : 'none';
+  if (rejLayoutOnlyMeBtn) rejLayoutOnlyMeBtn.style.display = isAdmin ? 'inline-flex' : 'none';
 
   ALL_PROFILES = await fetchAllProfiles();
   populateReviewerDropdowns();
@@ -935,8 +942,8 @@ function showRejectionNagModal() {
         <div style="font-weight:800; font-size:16px; margin-bottom:10px; color: var(--badge-reject-text);" id="rejection-nag-title"></div>
         <div style="font-size:13px; color:var(--text-muted); margin-bottom:16px;" id="rejection-nag-body"></div>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-primary" style="flex:1; padding:10px;" onclick="switchTab('rejections'); closeRejectionNagModal();">📋 روح لمرفوضاتي</button>
-          <button class="btn" style="flex:1; padding:10px;" onclick="closeRejectionNagModal();">تذكرني بعدين</button>
+          <button class="btn btn-primary" style="flex:1; padding:10px;" onclick="switchTab('rejections'); closeRejectionNagModal();">📋 الذهاب الي مرفوضاتي</button>
+          <button class="btn" style="flex:1; padding:10px;" onclick="closeRejectionNagModal();">ذكرني لاحقاً</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -1002,22 +1009,178 @@ function subscribeToLiveUpdates() {
     });
 }
 
-function populateReviewerDropdowns() {
-  const filterSelect = document.getElementById('reviewer-filter');
-  const reassignSelect = document.getElementById('bulk-reassign-select');
+// ============================================================
+// فلتر Checkbox متعدد الاختيار (Multi-select) - مستخدم في فلاتر
+// "المراجع" و"المسؤول" في تاب المراجعة الرئيسي وتاب المرفوضات.
+// بيسمح باختيار أكتر من شخص مرة واحدة (زي فلتر أربع مراجعين مع بعض)
+// بدل ما تبقى قيمة واحدة بس زي الـ <select> العادي.
+// اختيار فاضي (مفيش حد متحدد) = "الكل"، بالظبط زي ما كانت قيمة "ALL" بتشتغل قبل كده.
+// ============================================================
+const multiSelectFilters = {};
 
-  filterSelect.innerHTML = `<option value="ALL">كل المراجعين</option><option value="UNASSIGNED">⛔ غير موزّع</option>`;
+function initMultiSelectFilter(id, { allLabel, onChange }) {
+  multiSelectFilters[id] = { selected: new Set(), options: [], allLabel, onChange };
+}
+
+function setMultiSelectOptions(id, options) {
+  const state = multiSelectFilters[id];
+  if (!state) return;
+  // نحافظ على أي قيم متحددة سابقًا لو لسه موجودة في القايمة الجديدة، ونشيل أي قيمة اتشالت
+  const validValues = new Set(options.map(o => o.value));
+  state.selected = new Set([...state.selected].filter(v => validValues.has(v)));
+  state.options = options;
+  renderMultiSelectPanel(id);
+  updateMultiSelectButtonLabel(id);
+}
+
+function renderMultiSelectPanel(id) {
+  const state = multiSelectFilters[id];
+  const panel = document.getElementById(id + '-panel');
+  if (!state || !panel) return;
+
+  const searchId = id + '-search';
+  const existingSearch = panel.querySelector('#' + searchId);
+  const searchTerm = existingSearch ? existingSearch.value.trim().toLowerCase() : '';
+  const wasSearchFocused = existingSearch && document.activeElement === existingSearch;
+  const caretPos = wasSearchFocused ? existingSearch.selectionStart : null;
+
+  const filteredOptions = state.options.filter(o => !searchTerm || o.label.toLowerCase().includes(searchTerm));
+
+  let html = '';
+  // خانة البحث بتظهر بس لو القايمة طويلة (أكتر من 6 عناصر) عشان متبقاش زيادة على القوايم القصيرة
+  if (state.options.length > 6) {
+    const escapedVal = (existingSearch ? existingSearch.value : '').replace(/"/g, '&quot;');
+    html += `<input type="text" id="${searchId}" class="multi-select-search" placeholder="بحث..." oninput="onMultiSelectSearch('${id}')" value="${escapedVal}">`;
+  }
+  html += `
+    <div class="multi-select-actions">
+      <button type="button" onclick="selectAllMultiSelect('${id}')">تحديد الكل</button>
+      <button type="button" onclick="clearMultiSelect('${id}')">إلغاء الكل</button>
+    </div>
+    <div class="multi-select-options-list">`;
+  filteredOptions.forEach(opt => {
+    const checked = state.selected.has(opt.value) ? 'checked' : '';
+    const safeValue = String(opt.value).replace(/"/g, '&quot;');
+    html += `
+      <label class="multi-select-option">
+        <input type="checkbox" value="${safeValue}" ${checked} onchange="toggleMultiSelectValue('${id}', this.value, this.checked)">
+        <span>${opt.label}</span>
+      </label>`;
+  });
+  if (filteredOptions.length === 0) html += `<div class="multi-select-empty">لا توجد نتائج</div>`;
+  html += `</div>`;
+
+  panel.innerHTML = html;
+
+  // لو المستخدم كان بيكتب في خانة البحث، نرجّع التركيز عليها بعد إعادة الرسم عشان الكتابة متتقطعش
+  if (wasSearchFocused) {
+    const newSearch = panel.querySelector('#' + searchId);
+    if (newSearch) {
+      newSearch.focus();
+      newSearch.setSelectionRange(caretPos, caretPos);
+    }
+  }
+}
+
+function onMultiSelectSearch(id) { renderMultiSelectPanel(id); }
+
+function toggleMultiSelectValue(id, value, checked) {
+  const state = multiSelectFilters[id];
+  if (!state) return;
+  if (checked) state.selected.add(value); else state.selected.delete(value);
+  updateMultiSelectButtonLabel(id);
+  if (state.onChange) state.onChange();
+}
+
+function selectAllMultiSelect(id) {
+  const state = multiSelectFilters[id];
+  if (!state) return;
+  state.options.forEach(o => state.selected.add(o.value));
+  renderMultiSelectPanel(id);
+  updateMultiSelectButtonLabel(id);
+  if (state.onChange) state.onChange();
+}
+
+function clearMultiSelect(id) {
+  const state = multiSelectFilters[id];
+  if (!state) return;
+  state.selected.clear();
+  renderMultiSelectPanel(id);
+  updateMultiSelectButtonLabel(id);
+  if (state.onChange) state.onChange();
+}
+
+// بيمسح الاختيار (يرجع لوضع "الكل") من غير ما يستدعي onChange - مستخدم وقت إعادة ضبط الفلاتر
+function resetMultiSelectFilter(id) {
+  const state = multiSelectFilters[id];
+  if (!state) return;
+  state.selected.clear();
+  renderMultiSelectPanel(id);
+  updateMultiSelectButtonLabel(id);
+}
+
+function updateMultiSelectButtonLabel(id) {
+  const state = multiSelectFilters[id];
+  const btn = document.getElementById(id + '-btn');
+  if (!state || !btn) return;
+  const count = state.selected.size;
+  if (count === 0) {
+    btn.innerText = `${state.allLabel} ▾`;
+  } else if (count === 1) {
+    const onlyValue = [...state.selected][0];
+    const opt = state.options.find(o => o.value === onlyValue);
+    btn.innerText = `${opt ? opt.label : '1 محدد'} ▾`;
+  } else {
+    btn.innerText = `${count} محددين ▾`;
+  }
+}
+
+function toggleMultiSelectPanel(id) {
+  // نقفل أي بانلات فلاتر تانية مفتوحة قبل ما نفتح البانل ده
+  document.querySelectorAll('.multi-select-panel.open').forEach(p => {
+    if (p.id !== id + '-panel') p.classList.remove('open');
+  });
+  const panel = document.getElementById(id + '-panel');
+  if (panel) panel.classList.toggle('open');
+}
+
+// قفل أي بانل مفتوح لو المستخدم ضغط في أي مكان تاني بره الفلتر نفسه
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.multi-select-filter').forEach(wrapper => {
+    if (!wrapper.contains(e.target)) {
+      const panel = wrapper.querySelector('.multi-select-panel');
+      if (panel) panel.classList.remove('open');
+    }
+  });
+});
+
+// بيرجع مصفوفة القيم المتحددة حاليًا - مصفوفة فاضية معناها "الكل"
+function getMultiSelectValues(id) {
+  const state = multiSelectFilters[id];
+  return state ? [...state.selected] : [];
+}
+
+function isMultiSelectAll(id) {
+  const state = multiSelectFilters[id];
+  return !state || state.selected.size === 0;
+}
+
+function populateReviewerDropdowns() {
+  const reassignSelect = document.getElementById('bulk-reassign-select');
   reassignSelect.innerHTML = `<option value="">تغيير المراجع إلى...</option>`;
 
   // بيشمل المراجعين والأدمن كمان، لإمكانية توزيع الطلبات على الأدمن برضو لو احتاج الأمر
+  const reviewerOptions = [{ value: 'UNASSIGNED', label: '⛔ غير موزّع' }];
   ALL_PROFILES.filter(p => p.role === 'reviewer').forEach(p => {
-    filterSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
+    reviewerOptions.push({ value: p.username, label: p.name });
     reassignSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
   });
   ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
-    filterSelect.innerHTML += `<option value="${p.username}">${p.name} (أدمن)</option>`;
+    reviewerOptions.push({ value: p.username, label: `${p.name} (أدمن)` });
     reassignSelect.innerHTML += `<option value="${p.username}">${p.name} (أدمن)</option>`;
   });
+
+  setMultiSelectOptions('reviewer-filter', reviewerOptions);
 }
 
 // بيبني قايمة الشركات في فلتر الداشبورد من طلبات التاريخ المحدد حاليًا بس (مش كل الطلبات اللي اترفعت قبل كده)،
@@ -1532,7 +1695,7 @@ function renderCurrentPage() {
 
   const searchValue = document.getElementById('search-input').value.trim().toLowerCase();
   const statusValue = document.getElementById('status-filter').value;
-  const reviewerValue = document.getElementById('reviewer-filter').value;
+  const selectedReviewers = getMultiSelectValues('reviewer-filter'); // مصفوفة فاضية = الكل
   const companyValue = document.getElementById('company-filter').value;
 
   // لو المستخدم بيدور برقم الطلب، البحث لازم يشمل كل التواريخ (كل الداتا) مش بس تاريخ اليوم المحدد فوق.
@@ -1558,9 +1721,9 @@ function renderCurrentPage() {
     const matchesStatus = (statusValue === 'ALL') || (reviewStatus === statusValue);
     
     const reviewer = item.reviewer || item['المراجع'] || '';
-    const matchesReviewer = (reviewerValue === 'ALL')
-      || (reviewerValue === 'UNASSIGNED' ? !reviewer
-        : (reviewer === reviewerValue || getDisplayName(reviewer) === getDisplayName(reviewerValue)));
+    const matchesReviewer = isMultiSelectAll('reviewer-filter')
+      || selectedReviewers.some(rv => rv === 'UNASSIGNED' ? !reviewer
+        : (reviewer === rv || getDisplayName(reviewer) === getDisplayName(rv)));
 
     const company = (item.company || item['الشركة'] || '').normalize('NFC').trim();
     const matchesCompany = (companyValue === 'ALL') || (company === companyValue);
@@ -4377,10 +4540,12 @@ function populateCertLayoutFilter() {
   modalSelect.innerHTML = '';
   bulkReassignSelect.innerHTML = `<option value="">توزيع على المسؤول...</option>`;
 
+  const adminOptions = [];
   ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
     filterSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
     modalSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
     bulkReassignSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
+    adminOptions.push({ value: p.username, label: p.name });
   });
 
   const reviewerSelect = document.getElementById('cert-modal-reviewer');
@@ -4389,11 +4554,16 @@ function populateCertLayoutFilter() {
       ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
   }
 
-  const rejectionsReviewerFilter = document.getElementById('rejections-reviewer-filter');
-  if (rejectionsReviewerFilter) {
-    rejectionsReviewerFilter.innerHTML = `<option value="ALL">كل المراجعين</option>` +
-      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
-  }
+  // فلتر "المراجع" في تاب المرفوضات (Multi-select)
+  const rejectionsReviewerOptions = ALL_PROFILES.map(p => ({
+    value: p.username,
+    label: `${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}`
+  }));
+  setMultiSelectOptions('rejections-reviewer-filter', rejectionsReviewerOptions);
+
+  // فلتر "المسؤول" الجديد في تاب المرفوضات (Multi-select) - بيسمح للأدمن يفلتر على المسؤول
+  // (أو أكتر من مسؤول) المخصص على الطلب، عشان مثلاً كل أدمن يقدر يشوف بس اللي هو رفضه
+  setMultiSelectOptions('rejections-layout-filter', [{ value: 'UNASSIGNED', label: '⛔ غير موزّع' }, ...adminOptions]);
 }
 
 // ============ تاب مرفوضات ============
@@ -4402,6 +4572,18 @@ let rejectionsAllData = [];
 
 function toggleRejectionsStatsSidebar() {
   document.getElementById('rejections-stats-sidebar').classList.toggle('active');
+}
+
+// اختصار سريع: بيحدد المستخدم الحالي (الأدمن) بس في فلتر "المسؤول"، عشان يشوف
+// فورًا الطلبات اللي هو رفضها/مخصصة عليه هو بس، من غير ما يدور عليه في القايمة يدويًا
+function filterRejectionsByMeAsLayout() {
+  if (!currentUser) return;
+  const state = multiSelectFilters['rejections-layout-filter'];
+  if (!state) return;
+  state.selected = new Set([currentUser.username]);
+  renderMultiSelectPanel('rejections-layout-filter');
+  updateMultiSelectButtonLabel('rejections-layout-filter');
+  renderRejectionsTab();
 }
 
 function getRejectedCertRows() {
@@ -4501,13 +4683,21 @@ function getRejectionSubstatus(o) {
 // الأربعة في لوحة الإحصائيات (KPIs) مع بعض، بغض النظر عن أي حالة مراجعة مختارة حاليًا.
 function getRejectionsRowsBeforeSubstatus() {
   const searchValue = (document.getElementById('rejections-search-input').value || '').trim().toLowerCase();
-  const reviewerValue = document.getElementById('rejections-reviewer-filter').value;
+  const selectedReviewers = getMultiSelectValues('rejections-reviewer-filter');
+  const selectedLayouts = getMultiSelectValues('rejections-layout-filter');
   const typeValue = document.getElementById('rejections-type-filter').value;
 
   let rows = rejectionsAllData || [];
 
-  if (reviewerValue && reviewerValue !== 'ALL') {
-    rows = rows.filter(o => o.reviewer === reviewerValue || getDisplayName(o.reviewer) === getDisplayName(reviewerValue));
+  if (!isMultiSelectAll('rejections-reviewer-filter')) {
+    rows = rows.filter(o => selectedReviewers.some(rv => o.reviewer === rv || getDisplayName(o.reviewer) === getDisplayName(rv)));
+  }
+  // فلتر "المسؤول" - بيقارن على عمود Layout/layout (المسؤول المخصص على طلب الشهادة)
+  if (!isMultiSelectAll('rejections-layout-filter')) {
+    rows = rows.filter(o => {
+      const layoutVal = o.Layout || o.layout || '';
+      return selectedLayouts.some(lv => lv === 'UNASSIGNED' ? !layoutVal : layoutVal === lv);
+    });
   }
   if (typeValue && typeValue !== 'ALL') {
     rows = rows.filter(o => (o.cert_type || 'عادي') === typeValue);
@@ -5583,8 +5773,13 @@ document.getElementById('search-input').addEventListener('input', async () => {
   renderCurrentPage();
 });
 document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); updateKPIs(window.visibleData || []); });
-document.getElementById('reviewer-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
 document.getElementById('company-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });
+
+// تسجيل فلاتر الـ Checkbox المتعددة (Multi-select): فلتر "المراجع" في الداشبورد، وفلتري
+// "المراجع" و"المسؤول" في تاب المرفوضات - كل واحد بيعيد الرسم المناسب له لما يتغير اختياره
+initMultiSelectFilter('reviewer-filter', { allLabel: 'كل المراجعين', onChange: () => { currentPage = 1; renderCurrentPage(); } });
+initMultiSelectFilter('rejections-reviewer-filter', { allLabel: 'كل المراجعين', onChange: () => renderRejectionsTab() });
+initMultiSelectFilter('rejections-layout-filter', { allLabel: 'كل المسؤولين', onChange: () => renderRejectionsTab() });
 
 // ============================================================
 // ترتيب الطلبات بعد أي توزيع (متوازن أو مخصص) بحيث طلبات كل مراجع

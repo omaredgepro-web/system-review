@@ -2939,18 +2939,29 @@ async function uploadPrintOrdersToSupabase() {
 
     const batches = chunkArray(newRows, 150);
     let insertedCount = 0;
+    let dbConflictCount = 0;
     let firstError = null;
 
     for (const batch of batches) {
-      const { error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch);
+      // upsert + ignoreDuplicates بدل insert عادي: طبقة حماية إضافية على مستوى الداتابيز نفسها
+      // (فوق فحص الفرونت إند اللي فات) - لو حصل تعارض (نفس رقم الطلب اتضاف من مكان تاني في
+      // نفس اللحظة مثلاً)، الصف ده بس بيتجاهل من غير ما يوقف رفع باقي الدفعة بخطأ.
+      const { data, error } = await supabaseClient
+        .from(CERT_TABLE_NAME)
+        .upsert(batch, { onConflict: 'order_number', ignoreDuplicates: true })
+        .select();
       if (error) { firstError = error; break; }
-      insertedCount += batch.length;
+      insertedCount += (data || []).length;
+      dbConflictCount += batch.length - (data || []).length;
     }
 
     if (firstError) {
       alert(`تم رفع ${insertedCount} رقم طلب بنجاح قبل ما يحصل خطأ: ${firstError.message}\nجرب تاني للأرقام الباقية.`);
     } else {
-      const skippedNote = skippedCount > 0 ? ` (${skippedCount} كانوا مكررين واتجاهلوا)` : '';
+      const skippedParts = [];
+      if (skippedCount > 0) skippedParts.push(`${skippedCount} كانوا مكررين واتجاهلوا`);
+      if (dbConflictCount > 0) skippedParts.push(`${dbConflictCount} اتجاهلوا من الداتابيز مباشرة (كانوا اتضافوا من مكان تاني في نفس الوقت)`);
+      const skippedNote = skippedParts.length > 0 ? ` (${skippedParts.join(' و')})` : '';
       alert(`تم رفع ${insertedCount} رقم طلب جديد بنجاح!${skippedNote}`);
       resetPrintUploadData();
     }
@@ -4531,6 +4542,110 @@ async function refreshCertDashboardData() {
   }
 }
 
+// ============================================================
+// فحص التكرار في جدول الطباعة (layout) - بيدور على أي رقم طلب متكرر أكتر من مرة
+// في الداتابيز، بغض النظر عن نوعه (عادي أو تعمير)، لأن رقم الطلب المفروض يبقى فريد
+// في الجدول ده كله مش بس جوه النوع الواحد.
+// ============================================================
+async function auditCertDuplicates() {
+  const btn = document.getElementById('cert-check-duplicates-btn');
+  const originalText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري الفحص...'; }
+
+  try {
+    // بيجيب أحدث نسخة من الداتابيز فعليًا وقت الفحص، مش بس يعتمد على النسخة المخزنة عندك محليًا
+    certDataLoaded = false;
+    await loadCertificatesData();
+    renderCertDuplicatesReport();
+    document.getElementById('cert-duplicates-modal').classList.add('active');
+  } catch (err) {
+    alert('حصل خطأ أثناء الفحص: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
+
+function getCertDuplicateGroups() {
+  const groups = {};
+  (certMasterData || []).forEach(o => {
+    const key = String(o.order_number || '').trim();
+    if (!key) return;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(o);
+  });
+  return Object.entries(groups)
+    .filter(([, rows]) => rows.length > 1)
+    .sort((a, b) => b[1].length - a[1].length);
+}
+
+function renderCertDuplicatesReport() {
+  const duplicateGroups = getCertDuplicateGroups();
+  const summaryEl = document.getElementById('cert-duplicates-summary');
+  const listEl = document.getElementById('cert-duplicates-list');
+
+  if (duplicateGroups.length === 0) {
+    summaryEl.innerHTML = `<span style="color: var(--badge-accept-text); font-weight:700;">✅ تمام، مفيش أي رقم طلب مكرر في جدول الطباعة (عادي أو تعمير) دلوقتي.</span>`;
+    listEl.innerHTML = '';
+    return;
+  }
+
+  const totalExtraRows = duplicateGroups.reduce((sum, [, rows]) => sum + (rows.length - 1), 0);
+  summaryEl.innerHTML = `<span style="color: var(--badge-reject-text); font-weight:700;">⚠️ فيه ${duplicateGroups.length} رقم طلب متكرر (${totalExtraRows} صف زيادة محتاج يتحذف). راجع كل مجموعة واحذف النسخ الزيادة.</span>`;
+
+  listEl.innerHTML = duplicateGroups.map(([orderNum, rows]) => {
+    const rowsHtml = rows.map(o => {
+      const typeLabel = (o.cert_type === 'تعمير') ? '📠 تعمير' : '🖨️ عادي';
+      const statusLabel = o.status || '⛔ لم يتم الطباعة';
+      const layoutLabel = getDisplayName(o.Layout || o.layout) || '-';
+      const dateLabel = extractDateString(o) || '-';
+      return `
+        <tr>
+          <td style="padding:6px; font-size:12px;">${typeLabel}</td>
+          <td style="padding:6px; font-size:12px;">${statusLabel}</td>
+          <td style="padding:6px; font-size:12px;">${dateLabel}</td>
+          <td style="padding:6px; font-size:12px;">${layoutLabel}</td>
+          <td style="padding:6px; font-size:12px; color: var(--text-muted);">#${o.id}</td>
+          <td style="padding:6px;"><button class="btn btn-danger" style="padding:3px 8px; font-size:11px;" onclick="deleteCertDuplicateRow(${o.id}, '${String(orderNum).replace(/'/g, "\\'")}')">🗑️ حذف هذه النسخة</button></td>
+        </tr>`;
+    }).join('');
+
+    return `
+      <div style="border: 1px solid var(--card-border); border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+        <div style="font-weight:700; margin-bottom:8px; color: var(--badge-reject-text);">رقم الطلب: ${orderNum} (${rows.length} نسخ)</div>
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr style="color: var(--text-muted); font-size:11px; text-align:right;">
+              <th style="padding:6px;">النوع</th>
+              <th style="padding:6px;">الحالة</th>
+              <th style="padding:6px;">التاريخ</th>
+              <th style="padding:6px;">المسؤول</th>
+              <th style="padding:6px;">ID</th>
+              <th style="padding:6px;"></th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>`;
+  }).join('');
+}
+
+async function deleteCertDuplicateRow(id, orderNum) {
+  if (!confirm(`تأكيد حذف هذه النسخة المكررة من الطلب رقم ${orderNum} (ID: ${id})؟ العملية دي نهائية.`)) return;
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).delete().eq('id', id);
+    if (error) { alert('فشل الحذف: ' + error.message); return; }
+    certMasterData = (certMasterData || []).filter(o => o.id !== id);
+    renderCertDuplicatesReport();
+    applyCertDateFiltering();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+function closeCertDuplicatesModal() {
+  document.getElementById('cert-duplicates-modal').classList.remove('active');
+}
+
 function populateCertLayoutFilter() {
   const filterSelect = document.getElementById('cert-layout-filter');
   const modalSelect = document.getElementById('cert-modal-layout');
@@ -5564,6 +5679,10 @@ async function executeCertBulkStatusUpdate() {
   if (!newStatus) { alert('برجاء اختيار الحالة من القائمة'); return; }
   if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل لتغيير حالته'); return; }
 
+  // "لم يتم الطباعة" مش حالة فعلية متخزنة كنص - هي معناها إن عمود status فاضي (null)،
+  // فبنعاملها كـ"رجوع لوضع البداية" بدل ما نخزن النص ده حرفيًا في العمود.
+  const isResetToUnprinted = newStatus === 'لم يتم الطباعة';
+
   let reason = '-';
   if (CERT_REASON_REQUIRED_STATUSES.includes(newStatus)) {
     const enteredReason = prompt(`اكتب السبب اللي هيتسجل مع كل الـ (${selectedCertOrderNumbers.size}) طلب المحدد لحالة "${newStatus}":`);
@@ -5579,7 +5698,7 @@ async function executeCertBulkStatusUpdate() {
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
-  const updateData = { status: newStatus, reason: reason };
+  const updateData = isResetToUnprinted ? { status: null, reason: '-' } : { status: newStatus, reason: reason };
   // نفس العلامة الدائمة، بس هنا لتحديث جماعي لأكتر من طلب مرة واحدة
   if (newStatus === 'مرفوض') updateData.was_rejected = true;
 
@@ -5588,7 +5707,11 @@ async function executeCertBulkStatusUpdate() {
     if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); }
     else {
       alert(`تم تغيير حالة ${selectedCertOrderNumbers.size} طلب بنجاح إلى "${newStatus}"!`);
-      targetOrders.forEach(o => { o.status = newStatus; o.reason = reason; if (newStatus === 'مرفوض') o.was_rejected = true; });
+      targetOrders.forEach(o => {
+        o.status = updateData.status;
+        o.reason = updateData.reason;
+        if (newStatus === 'مرفوض') o.was_rejected = true;
+      });
       selectedCertOrderNumbers.clear();
       if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
@@ -6515,11 +6638,23 @@ async function exportGehatWlayaRemainderToPrint() {
   if (!certDataLoaded) await loadCertificatesData();
   const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
 
-  const newRows = remainderRows
+  // بنشيل أي رقم طلب مكرر جوه الملف نفسه (نسيب أول ظهور بس) قبل ما نستبعد الموجود بالفعل في
+  // جدول الطباعة - نفس فكرة تصدير المواقف فوق بالظبط، عشان محدش يتضاف مرتين في نفس العملية
+  const seenInFile = new Set();
+  const dedupedFromFile = [];
+  let duplicateWithinFileCount = 0;
+  remainderRows.forEach(r => {
+    const key = String(r.order_number);
+    if (seenInFile.has(key)) { duplicateWithinFileCount++; return; }
+    seenInFile.add(key);
+    dedupedFromFile.push(r);
+  });
+
+  const newRows = dedupedFromFile
     .filter(r => !existingNumbers.has(String(r.order_number)))
     .map(r => ({ order_number: r.order_number, cert_type: certTypeForBatch }));
 
-  const skippedCount = remainderRows.length - newRows.length;
+  const skippedCount = remainderRows.length - newRows.length - duplicateWithinFileCount;
 
   if (newRows.length === 0) {
     alert(`كل الـ ${remainderRows.length} طلب "الباقية" موجودين بالفعل في جدول الطباعة، مفيش جديد يتضاف.`);
@@ -6527,7 +6662,12 @@ async function exportGehatWlayaRemainderToPrint() {
   }
 
   const targetLabel = certTypeForBatch === 'تعمير' ? 'تاب طباعة شهادات التعمير' : 'تاب طباعة الشهادات العادي';
-  const confirmExport = confirm(`هيتم إضافة ${newRows.length} طلب جديد لـ "${targetLabel}"${skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`);
+  const confirmExport = confirm(
+    `هيتم إضافة ${newRows.length} طلب جديد لـ "${targetLabel}"` +
+    (skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : '') +
+    (duplicateWithinFileCount > 0 ? ` (${duplicateWithinFileCount} كان مكرر جوه الملف نفسه هيتجاهل)` : '') +
+    `. تأكيد؟`
+  );
   if (!confirmExport) return;
 
   const btn = document.getElementById('gehat-remainder-export-btn');
@@ -6537,12 +6677,20 @@ async function exportGehatWlayaRemainderToPrint() {
   try {
     const batches = chunkArray(newRows, 150);
     let firstError = null;
+    let insertedCount = 0;
+    let dbConflictCount = 0;
     for (const batch of batches) {
-      const { error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch);
+      const { data, error } = await supabaseClient
+        .from(CERT_TABLE_NAME)
+        .upsert(batch, { onConflict: 'order_number', ignoreDuplicates: true })
+        .select();
       if (error) { firstError = error; break; }
+      insertedCount += (data || []).length;
+      dbConflictCount += batch.length - (data || []).length;
     }
     if (firstError) { alert('حصل خطأ أثناء التصدير: ' + firstError.message); return; }
-    alert(`تم تصدير ${newRows.length} طلب بنجاح إلى "${targetLabel}"!`);
+    const conflictNote = dbConflictCount > 0 ? ` (${dbConflictCount} كانوا اتضافوا من مكان تاني في نفس الوقت واتجاهلوا)` : '';
+    alert(`تم تصدير ${insertedCount} طلب بنجاح إلى "${targetLabel}"!${conflictNote}`);
     certDataLoaded = false;
     await loadCertificatesData();
     switchTab(certTypeForBatch === 'تعمير' ? 'certificates-renovation' : 'certificates');
@@ -6627,9 +6775,15 @@ async function submitGehatQuickAdd() {
 
     if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التنفيذ...'; }
     try {
-      const { error } = await supabaseClient.from(CERT_TABLE_NAME).insert(newRows);
+      const { data, error } = await supabaseClient
+        .from(CERT_TABLE_NAME)
+        .upsert(newRows, { onConflict: 'order_number', ignoreDuplicates: true })
+        .select();
       if (error) { alert('خطأ: ' + error.message); return; }
-      resultsEl.innerHTML = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم إضافة ${newRows.length} طلب لجدول الطباعة (${certType}) بنجاح.</p>`;
+      const actuallyInserted = (data || []).length;
+      const dbConflictCount = newRows.length - actuallyInserted;
+      const conflictNote = dbConflictCount > 0 ? ` (${dbConflictCount} كانوا اتضافوا من مكان تاني في نفس الوقت واتجاهلوا)` : '';
+      resultsEl.innerHTML = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم إضافة ${actuallyInserted} طلب لجدول الطباعة (${certType}) بنجاح.${conflictNote}</p>`;
       document.getElementById('gehat-quick-order-numbers').value = '';
       certDataLoaded = false;
       await loadCertificatesData();

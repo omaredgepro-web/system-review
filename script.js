@@ -1385,6 +1385,28 @@ function extractDateString(item) {
   return parseToIsoDate(item.date || item.created_at || item['التاريخ'] || item['تاريخ الطلب'] || '');
 }
 
+// بيبني فلتر "OR" يقارن عمود date في قاعدة البيانات بكل الصيغ المحتملة لنفس التاريخ (ISO زي
+// 2026-08-07، وM/D/Y وMM/DD/YYYY وD/M/Y بكل احتمالات الأصفار) - عشان لو فيه صفوف قديمة اتسجلت
+// بصيغة تاريخ مختلفة عن اللي بيحطها حقل اختيار التاريخ (type="date")، لسه تتفلتر وتظهر صح بدل
+// ما تختفي بسبب مطابقة نصية حرفية مش مطابقة لصيغتها.
+function buildDateEqOrFilter(isoDate) {
+  const parts = String(isoDate || '').split('-').map(Number);
+  const [y, m, d] = parts;
+  if (!y || !m || !d) return `date.eq.${isoDate}`;
+
+  const pad = n => String(n).padStart(2, '0');
+  const variants = new Set([
+    isoDate,                      // 2026-08-07
+    `${m}/${d}/${y}`,             // 8/7/2026
+    `${pad(m)}/${pad(d)}/${y}`,   // 08/07/2026
+    `${d}/${m}/${y}`,             // 7/8/2026 (لو اتسجلت غلط يوم/شهر معكوسين)
+    `${pad(d)}/${pad(m)}/${y}`,   // 07/08/2026
+  ]);
+
+  return [...variants].map(v => `date.eq.${v}`).join(',');
+}
+
+
 // ============ تحميل البيانات بذكاء: تاريخ واحد بسرعة، وباقي الجدول بس لما يتحتاج فعلاً ============
 // السبب: كان loadData() بيجيب الجدول كله (system_review1) بالكامل، كل مرة تتفتح/تتحدّث فيها
 // لوحة المراجعة، حتى لو المطلوب فعليًا هو بس طلبات تاريخ واحد. ده كان بيسبب بطء واضح مع نمو
@@ -1485,6 +1507,21 @@ async function fetchAllRowsFromTable(tableName, extraFilter) {
 
 // بيجيب باقي الجدول كله (كل التواريخ) مرة واحدة بس، ويخزنه في window.masterData. لو النداء اتكرر
 // وهو لسه شغال، بينضم لنفس الطلب الجاري بدل ما يبعت طلب تاني منفصل لـ Supabase.
+// بحث سريع في السيرفر برقم الطلب عبر كل التواريخ - بيجيب بس الصفوف اللي فعلاً بتطابق البحث
+// (لحد 300 نتيجة)، بدل ما نحمّل الجدول كله في المتصفح زي الأسلوب القديم. ده أسرع بكتير جدًا
+// خصوصًا مع الجداول الكبيرة، لأن السيرفر هو اللي بيفلتر مش المتصفح.
+async function searchOrdersAcrossAllDates(searchValue) {
+  const { data, error } = await supabaseClient
+    .from(TABLE_NAME)
+    .select('*')
+    .ilike('order_number', `%${searchValue}%`)
+    .order('id', { ascending: false })
+    .limit(300);
+  if (error) throw error;
+  mergeRowsIntoMasterData(data || []);
+  window.__searchScopeCoversMasterData = true;
+}
+
 async function ensureFullMasterData() {
   if (window.__masterDataScope === 'full') return window.masterData;
   if (_fullMasterDataPromise) return _fullMasterDataPromise;
@@ -1533,9 +1570,10 @@ async function loadData() {
       targetDate = (lastInsertedRow && parseToIsoDate(lastInsertedRow.date)) || '';
     }
 
-    // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله
+    // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله. بنقارن بكل صيغ
+    // التاريخ المحتملة (مش بس ISO) عشان الصفوف القديمة بصيغة تانية تظهر برضو.
     const dateRows = targetDate
-      ? await fetchAllRowsFromTable(TABLE_NAME, q => q.eq('date', targetDate))
+      ? await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)))
       : [];
 
     // لو مفيش تاريخ خالص في الجدول، أو التاريخ المحدد (سواء يدوي أو متبقّي من المتصفح) مفيهوش
@@ -1614,7 +1652,7 @@ async function onDateFilterChange() {
     const tbody = document.getElementById('orders-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
-      const dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.eq('date', targetDate));
+      const dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
       mergeRowsIntoMasterData(dateRows);
     } catch (err) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
@@ -5883,24 +5921,35 @@ document.getElementById('cert-search-input').addEventListener('input', () => { c
 document.getElementById('cert-status-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 document.getElementById('cert-layout-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 
-// البحث برقم الطلب بيدور عبر كل التواريخ (مش بس التاريخ المعروض)، فمحتاج كل الجدول متحمّل. أول
-// مرة يتكتب فيها حرف في البحث، بنجيب باقي التواريخ الأول (مرة واحدة، بعد كده بيفضل محفوظ).
-document.getElementById('search-input').addEventListener('input', async () => {
+// البحث برقم الطلب بيدور عبر كل التواريخ (مش بس التاريخ المعروض). بدل ما نحمّل الجدول كله في
+// المتصفح (كان بياخد وقت طويل جدًا مع الجداول الكبيرة)، بنستنى المستخدم يوقف عن الكتابة شوية
+// (Debounce) وبعدين نبعت استعلام واحد للسيرفر بيجيب بس الصفوف المطابقة فعلاً - أسرع بكتير.
+let _searchInputDebounceTimer = null;
+document.getElementById('search-input').addEventListener('input', () => {
   currentPage = 1;
-  const hasSearchValue = document.getElementById('search-input').value.trim().length > 0;
+  const searchValue = document.getElementById('search-input').value.trim();
 
-  if (hasSearchValue && window.__masterDataScope !== 'full') {
-    const tbody = document.getElementById('orders-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل باقي التواريخ للبحث الشامل...</td></tr>`;
-    try {
-      await ensureFullMasterData();
-    } catch (err) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
-      return;
-    }
+  if (_searchInputDebounceTimer) clearTimeout(_searchInputDebounceTimer);
+
+  if (!searchValue) {
+    renderCurrentPage();
+    return;
   }
 
-  renderCurrentPage();
+  const tbody = document.getElementById('orders-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري البحث...</td></tr>`;
+
+  _searchInputDebounceTimer = setTimeout(async () => {
+    // لو المستخدم غيّر خانة البحث تاني قبل ما الطلب ده يخلص، متجاهلينه ومنعرضش نتيجته القديمة
+    const stillSameValue = () => document.getElementById('search-input').value.trim() === searchValue;
+    try {
+      await searchOrdersAcrossAllDates(searchValue);
+    } catch (err) {
+      if (stillSameValue() && tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      return;
+    }
+    if (stillSameValue()) renderCurrentPage();
+  }, 400);
 });
 document.getElementById('status-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); updateKPIs(window.visibleData || []); });
 document.getElementById('company-filter').addEventListener('change', () => { currentPage = 1; renderCurrentPage(); });

@@ -2948,6 +2948,52 @@ function handlePrintFileDrop(event) {
   handleMultiplePrintFiles(files);
 }
 
+// بيصنّف الأرقام المطلوب إضافتها: جديد تمامًا / مكرر (موجود بالفعل).
+// لو فيه مكرر، بيوضح بالتفصيل كل رقم موجود بتاريخ إيه ونوعه، ويسأل هل يسمح
+// بإضافته كنسخة زيادة (سماحية بالتكرار) ولا يتجاهله. بيرجع القائمة النهائية
+// مقسّمة لجزئين: fresh (جديد تمامًا، آمن دايمًا) و allowedDuplicates (اتسمح
+// له بالتكرار بعد تأكيد صريح من المستخدم - يحتاج إدراج مباشر بدون تجاهل تعارض).
+function checkForDuplicatesAndConfirm(orderNumbers) {
+  const existingByNumber = {};
+  (certMasterData || []).forEach(o => {
+    const key = String(o.order_number || '').trim();
+    if (!key) return;
+    if (!existingByNumber[key]) existingByNumber[key] = [];
+    existingByNumber[key].push(o);
+  });
+
+  const fresh = [];
+  const duplicates = [];
+  orderNumbers.forEach(num => {
+    const key = String(num).trim();
+    if (existingByNumber[key]) duplicates.push({ num, existing: existingByNumber[key] });
+    else fresh.push(num);
+  });
+
+  if (duplicates.length === 0) {
+    return { fresh: orderNumbers, allowedDuplicates: [], skippedCount: 0 };
+  }
+
+  const maxShown = 15;
+  const detailsLines = duplicates.slice(0, maxShown).map((d) => {
+    const dates = d.existing.map((o) => extractDateString(o) || 'بدون تاريخ').join('، ');
+    const types = d.existing.map((o) => (o.cert_type === 'تعمير' ? 'تعمير' : 'عادي')).join('، ');
+    return `• ${d.num} — موجود بتاريخ: ${dates} (${types})`;
+  });
+  const moreNote = duplicates.length > maxShown ? `\n... و ${duplicates.length - maxShown} رقم تاني مكرر` : '';
+
+  const allowDuplicates = confirm(
+    `⚠️ فيه ${duplicates.length} رقم طلب موجود بالفعل في جدول الطباعة:\n\n${detailsLines.join('\n')}${moreNote}\n\n` +
+    `عايز تضيفهم برضو كنسخة زيادة (سماحية بالتكرار)؟\n` +
+    `"موافق" = يتضافوا كمان كنسخة زيادة. "إلغاء" = يتجاهلوا ويتم رفع الأرقام الجديدة بس.`
+  );
+
+  if (allowDuplicates) {
+    return { fresh, allowedDuplicates: duplicates.map((d) => d.num), skippedCount: 0 };
+  }
+  return { fresh, allowedDuplicates: [], skippedCount: duplicates.length };
+}
+
 async function uploadPrintOrdersToSupabase() {
   if (parsedPrintOrderNumbers.length === 0) return;
   const btn = document.getElementById('btn-upload-print');
@@ -2955,35 +3001,34 @@ async function uploadPrintOrdersToSupabase() {
   btn.disabled = true;
 
   try {
-    // استبعاد أي رقم طلب موجود بالفعل في جدول الطباعة عشان نتفادى التكرار
+    // فحص التكرار: نفصل الأرقام الجديدة تمامًا عن أي رقم موجود بالفعل، ولو فيه تكرار
+    // نوضحله بتاريخ كل نسخة موجودة ونسأله هل يسمح بإضافته كنسخة زيادة ولا يتجاهله
     if (!certDataLoaded) await loadCertificatesData();
     const certTypeForBatch = document.getElementById('print-cert-type-select').value || 'عادي';
-    const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
-    const newRows = parsedPrintOrderNumbers
-      .filter(num => !existingNumbers.has(String(num)))
-      .map(num => {
-        const row = { order_number: num, cert_type: certTypeForBatch };
-        if (printOrderAssignments[num]) row.Layout = printOrderAssignments[num];
-        return row;
-      });
-    const skippedCount = parsedPrintOrderNumbers.length - newRows.length;
+    const { fresh, allowedDuplicates, skippedCount } = checkForDuplicatesAndConfirm(parsedPrintOrderNumbers);
 
-    if (newRows.length === 0) {
+    const buildRow = (num) => {
+      const row = { order_number: num, cert_type: certTypeForBatch };
+      if (printOrderAssignments[num]) row.Layout = printOrderAssignments[num];
+      return row;
+    };
+    const freshRows = fresh.map(buildRow);
+    const allowedDuplicateRows = allowedDuplicates.map(buildRow);
+
+    if (freshRows.length === 0 && allowedDuplicateRows.length === 0) {
       alert('كل أرقام الطلبات دي موجودة بالفعل في جدول الطباعة، مفيش جديد يتضاف.');
       btn.innerText = 'تأكيد ورفع الطلبات لجدول الطباعة';
       btn.disabled = false;
       return;
     }
 
-    const batches = chunkArray(newRows, 150);
     let insertedCount = 0;
     let dbConflictCount = 0;
     let firstError = null;
 
-    for (const batch of batches) {
-      // upsert + ignoreDuplicates بدل insert عادي: طبقة حماية إضافية على مستوى الداتابيز نفسها
-      // (فوق فحص الفرونت إند اللي فات) - لو حصل تعارض (نفس رقم الطلب اتضاف من مكان تاني في
-      // نفس اللحظة مثلاً)، الصف ده بس بيتجاهل من غير ما يوقف رفع باقي الدفعة بخطأ.
+    // الأرقام الجديدة تمامًا: upsert + ignoreDuplicates كطبقة حماية إضافية (فوق فحصنا)
+    // ضد أي تعارض لحظي (لو حد تاني ضاف نفس الرقم في نفس الوقت بالظبط)
+    for (const batch of chunkArray(freshRows, 150)) {
       const { data, error } = await supabaseClient
         .from(CERT_TABLE_NAME)
         .upsert(batch, { onConflict: 'order_number', ignoreDuplicates: true })
@@ -2993,6 +3038,16 @@ async function uploadPrintOrdersToSupabase() {
       dbConflictCount += batch.length - (data || []).length;
     }
 
+    // الأرقام اللي اتسمح لها بالتكرار بعد تأكيد صريح: إدراج مباشر بدون تجاهل تعارض،
+    // عشان فعلاً تتضاف كنسخة زيادة (مش تتجاهل زي الأرقام الجديدة العادية)
+    if (!firstError && allowedDuplicateRows.length > 0) {
+      for (const batch of chunkArray(allowedDuplicateRows, 150)) {
+        const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch).select();
+        if (error) { firstError = error; break; }
+        insertedCount += (data || []).length;
+      }
+    }
+
     if (firstError) {
       alert(`تم رفع ${insertedCount} رقم طلب بنجاح قبل ما يحصل خطأ: ${firstError.message}\nجرب تاني للأرقام الباقية.`);
     } else {
@@ -3000,7 +3055,7 @@ async function uploadPrintOrdersToSupabase() {
       if (skippedCount > 0) skippedParts.push(`${skippedCount} كانوا مكررين واتجاهلوا`);
       if (dbConflictCount > 0) skippedParts.push(`${dbConflictCount} اتجاهلوا من الداتابيز مباشرة (كانوا اتضافوا من مكان تاني في نفس الوقت)`);
       const skippedNote = skippedParts.length > 0 ? ` (${skippedParts.join(' و')})` : '';
-      alert(`تم رفع ${insertedCount} رقم طلب جديد بنجاح!${skippedNote}`);
+      alert(`تم رفع ${insertedCount} رقم طلب بنجاح!${skippedNote}`);
       resetPrintUploadData();
     }
 
@@ -5408,7 +5463,12 @@ function renderCertPage() {
   const statusValue = document.getElementById('cert-status-filter').value;
   const layoutValue = document.getElementById('cert-layout-filter').value;
 
-  let filtered = certAllData.filter(item => {
+  // لو فيه نص في خانة البحث، نبحث في كل التواريخ (لنفس النوع: عادي/تعمير) مش بس
+  // التاريخ المعروض حاليًا - عشان يلاقي أي طلب حتى لو اتسجل بتاريخ مختلف تمامًا.
+  const searchingAllDates = !!searchValue;
+  const baseData = searchingAllDates ? getCertMasterDataForActiveType() : certAllData;
+
+  let filtered = baseData.filter(item => {
     const orderNum = String(item.order_number || '').toLowerCase();
     const matchesSearch = !searchValue || orderNum.includes(searchValue);
     const status = item.status || '';
@@ -5419,6 +5479,15 @@ function renderCertPage() {
         : (layout === layoutValue || getDisplayName(layout) === getDisplayName(layoutValue)));
     return matchesSearch && matchesStatus && matchesLayout;
   });
+
+  const dateLabelEl = document.getElementById('cert-active-date-label');
+  if (searchingAllDates) {
+    dateLabelEl.innerText = `🔍 نتائج البحث من كل التواريخ (${filtered.length} نتيجة)`;
+  } else if (dateLabelEl.innerText.startsWith('🔍')) {
+    // المستخدم مسح البحث - نرجّع نص التاريخ العادي بدل نص البحث القديم
+    applyCertDateFiltering();
+    return;
+  }
 
   certTotalRecordsCount = filtered.length;
   const from = (certCurrentPage - 1) * certPageSize;
@@ -6692,10 +6761,9 @@ async function exportGehatWlayaRemainderToPrint() {
   const certTypeForBatch = document.getElementById('gehat-remainder-cert-type').value || 'عادي';
 
   if (!certDataLoaded) await loadCertificatesData();
-  const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
 
-  // بنشيل أي رقم طلب مكرر جوه الملف نفسه (نسيب أول ظهور بس) قبل ما نستبعد الموجود بالفعل في
-  // جدول الطباعة - نفس فكرة تصدير المواقف فوق بالظبط، عشان محدش يتضاف مرتين في نفس العملية
+  // بنشيل أي رقم طلب مكرر جوه الملف نفسه (نسيب أول ظهور بس) قبل ما نفحص التكرار مع
+  // الموجود بالفعل في جدول الطباعة - عشان محدش يتضاف مرتين في نفس العملية
   const seenInFile = new Set();
   const dedupedFromFile = [];
   let duplicateWithinFileCount = 0;
@@ -6706,20 +6774,18 @@ async function exportGehatWlayaRemainderToPrint() {
     dedupedFromFile.push(r);
   });
 
-  const newRows = dedupedFromFile
-    .filter(r => !existingNumbers.has(String(r.order_number)))
-    .map(r => ({ order_number: r.order_number, cert_type: certTypeForBatch }));
+  const { fresh, allowedDuplicates, skippedCount } = checkForDuplicatesAndConfirm(dedupedFromFile.map(r => r.order_number));
+  const freshRows = fresh.map(num => ({ order_number: num, cert_type: certTypeForBatch }));
+  const allowedDuplicateRows = allowedDuplicates.map(num => ({ order_number: num, cert_type: certTypeForBatch }));
 
-  const skippedCount = remainderRows.length - newRows.length - duplicateWithinFileCount;
-
-  if (newRows.length === 0) {
+  if (freshRows.length === 0 && allowedDuplicateRows.length === 0) {
     alert(`كل الـ ${remainderRows.length} طلب "الباقية" موجودين بالفعل في جدول الطباعة، مفيش جديد يتضاف.`);
     return;
   }
 
   const targetLabel = certTypeForBatch === 'تعمير' ? 'تاب طباعة شهادات التعمير' : 'تاب طباعة الشهادات العادي';
   const confirmExport = confirm(
-    `هيتم إضافة ${newRows.length} طلب جديد لـ "${targetLabel}"` +
+    `هيتم إضافة ${freshRows.length + allowedDuplicateRows.length} طلب لـ "${targetLabel}"` +
     (skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : '') +
     (duplicateWithinFileCount > 0 ? ` (${duplicateWithinFileCount} كان مكرر جوه الملف نفسه هيتجاهل)` : '') +
     `. تأكيد؟`
@@ -6731,11 +6797,11 @@ async function exportGehatWlayaRemainderToPrint() {
   btn.innerText = '⏳ جاري التصدير...';
 
   try {
-    const batches = chunkArray(newRows, 150);
     let firstError = null;
     let insertedCount = 0;
     let dbConflictCount = 0;
-    for (const batch of batches) {
+
+    for (const batch of chunkArray(freshRows, 150)) {
       const { data, error } = await supabaseClient
         .from(CERT_TABLE_NAME)
         .upsert(batch, { onConflict: 'order_number', ignoreDuplicates: true })
@@ -6744,6 +6810,15 @@ async function exportGehatWlayaRemainderToPrint() {
       insertedCount += (data || []).length;
       dbConflictCount += batch.length - (data || []).length;
     }
+
+    if (!firstError && allowedDuplicateRows.length > 0) {
+      for (const batch of chunkArray(allowedDuplicateRows, 150)) {
+        const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch).select();
+        if (error) { firstError = error; break; }
+        insertedCount += (data || []).length;
+      }
+    }
+
     if (firstError) { alert('حصل خطأ أثناء التصدير: ' + firstError.message); return; }
     const conflictNote = dbConflictCount > 0 ? ` (${dbConflictCount} كانوا اتضافوا من مكان تاني في نفس الوقت واتجاهلوا)` : '';
     alert(`تم تصدير ${insertedCount} طلب بنجاح إلى "${targetLabel}"!${conflictNote}`);
@@ -6820,24 +6895,38 @@ async function submitGehatQuickAdd() {
     const certType = document.getElementById('gehat-quick-print-type').value;
 
     if (!certDataLoaded) await loadCertificatesData();
-    const existingNumbers = new Set((certMasterData || []).map(o => String(o.order_number)));
-    const newRows = orderNumbers
-      .filter(n => !existingNumbers.has(String(n)))
-      .map(n => ({ order_number: n, cert_type: certType }));
-    const skipped = orderNumbers.length - newRows.length;
+    const { fresh, allowedDuplicates, skippedCount } = checkForDuplicatesAndConfirm(orderNumbers);
+    const freshRows = fresh.map(n => ({ order_number: n, cert_type: certType }));
+    const allowedDuplicateRows = allowedDuplicates.map(n => ({ order_number: n, cert_type: certType }));
 
-    if (newRows.length === 0) { alert('كل الأرقام دي موجودة بالفعل في جدول الطباعة.'); return; }
-    if (!confirm(`هيتم إضافة ${newRows.length} طلب لجدول الطباعة (${certType})${skipped > 0 ? ` (${skipped} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`)) return;
+    if (freshRows.length === 0 && allowedDuplicateRows.length === 0) { alert('كل الأرقام دي موجودة بالفعل في جدول الطباعة.'); return; }
+    if (!confirm(`هيتم إضافة ${freshRows.length + allowedDuplicateRows.length} طلب لجدول الطباعة (${certType})${skippedCount > 0 ? ` (${skippedCount} كان موجود بالفعل هيتجاهل)` : ''}. تأكيد؟`)) return;
 
     if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التنفيذ...'; }
     try {
-      const { data, error } = await supabaseClient
-        .from(CERT_TABLE_NAME)
-        .upsert(newRows, { onConflict: 'order_number', ignoreDuplicates: true })
-        .select();
-      if (error) { alert('خطأ: ' + error.message); return; }
-      const actuallyInserted = (data || []).length;
-      const dbConflictCount = newRows.length - actuallyInserted;
+      let actuallyInserted = 0;
+      let dbConflictCount = 0;
+      let firstError = null;
+
+      for (const batch of chunkArray(freshRows, 150)) {
+        const { data, error } = await supabaseClient
+          .from(CERT_TABLE_NAME)
+          .upsert(batch, { onConflict: 'order_number', ignoreDuplicates: true })
+          .select();
+        if (error) { firstError = error; break; }
+        actuallyInserted += (data || []).length;
+        dbConflictCount += batch.length - (data || []).length;
+      }
+
+      if (!firstError && allowedDuplicateRows.length > 0) {
+        for (const batch of chunkArray(allowedDuplicateRows, 150)) {
+          const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch).select();
+          if (error) { firstError = error; break; }
+          actuallyInserted += (data || []).length;
+        }
+      }
+
+      if (firstError) { alert('خطأ: ' + firstError.message); return; }
       const conflictNote = dbConflictCount > 0 ? ` (${dbConflictCount} كانوا اتضافوا من مكان تاني في نفس الوقت واتجاهلوا)` : '';
       resultsEl.innerHTML = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم إضافة ${actuallyInserted} طلب لجدول الطباعة (${certType}) بنجاح.${conflictNote}</p>`;
       document.getElementById('gehat-quick-order-numbers').value = '';
@@ -6851,6 +6940,7 @@ async function submitGehatQuickAdd() {
 
   } else if (target === 'review') {
     const reviewStatus = document.getElementById('gehat-quick-review-status').value;
+
 
     const idx = getMasterDataIndex();
     const matched = [];

@@ -1333,7 +1333,7 @@ function switchTab(tabName) {
     updateCertSelectedCount();
     // كل مرة يفتح فيها المسؤول التاب، الافتراضي إنه يشوف طلباته هو بس (بالظبط زي التاريخ الأحدث
     // اللي بيترجع افتراضي فوق) - وله زرار "عرض كل الطلبات" لو عايز يشوف الكل وقت ما يحتاج.
-    if (!certDataLoaded) loadCertificatesData().then(resetCertLayoutFilterToMine);
+    if (!certDataLoaded) loadCertificatesData().then(resetCertLayoutFilterToMine).catch(() => {});
     else { resetCertLayoutFilterToMine(); applyCertDateFiltering(); }
   } else if (tabName === 'rejections') {
     document.getElementById('rejections-tab-btn').classList.add('active');
@@ -1341,13 +1341,13 @@ function switchTab(tabName) {
     // كل مرة يفتح فيها التاب، يرجع افتراضيًا لأحدث تاريخ بس (زي باقي التابات)
     rejectionsShowAllDates = false;
     document.getElementById('rejections-date-filter').value = '';
-    if (!certDataLoaded) { loadCertificatesData().then(applyRejectionsDateFiltering); }
+    if (!certDataLoaded) { loadCertificatesData().then(applyRejectionsDateFiltering).catch(() => {}); }
     else { applyRejectionsDateFiltering(); }
   } else if (tabName === 'print-distribute') {
     document.getElementById('print-distribute-tab-btn').classList.add('active');
     document.getElementById('tab-print-distribute').style.display = 'block';
     // نحمّل بيانات جدول الطباعة مقدمًا (لو لسه معملهاش) عشان فحص التكرار يقدر يشتغل فورًا
-    if (!certDataLoaded) loadCertificatesData().then(() => renderPrintDuplicatesPanel());
+    if (!certDataLoaded) loadCertificatesData().then(() => renderPrintDuplicatesPanel()).catch(() => {});
   } else if (tabName === 'mawaqef') {
     document.getElementById('mawaqef-tab-btn').classList.add('active');
     document.getElementById('tab-mawaqef').style.display = 'block';
@@ -1458,7 +1458,7 @@ function mergeRowsIntoMasterData(newRows) {
 // خطأ "statement timeout" (بيحصل لو الجدول كبر أوي وحجم الدفعة الافتراضي بقى بياخد وقت أطول من
 // المسموح به في إعدادات قاعدة البيانات). بدل ما العملية كلها توقف بغلطة، بنعيد محاولة نفس الدفعة
 // بنص الحجم وهكذا لحد ما تنجح، وبعدين نفتكر آخر حجم نجح ونكمل بيه باقي الدفعات.
-async function fetchAllRowsPaginated(runQuery, initialStep = 300) {
+async function fetchAllRowsPaginated(runQuery, initialStep = 300, onProgress = null) {
   let allFetched = [];
   let from = 0;
   let step = initialStep;
@@ -1482,6 +1482,7 @@ async function fetchAllRowsPaginated(runQuery, initialStep = 300) {
         }
         step = attemptStep;
         succeeded = true;
+        if (onProgress) onProgress(allFetched.length);
         break;
       }
 
@@ -4603,12 +4604,12 @@ function updatePaginationControls(from, to) {
 function changePage(direction) { currentPage += direction; renderCurrentPage(); }
 
 // ============ تاب طباعة الشهادات (أدمن فقط) ============
-async function loadCertificatesData() {
+async function loadCertificatesData(onProgress = null) {
   document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     const allFetched = await fetchAllRowsPaginated((from, to) =>
       supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, to)
-    );
+    , 300, onProgress);
 
     certMasterData = allFetched;
     certDataLoaded = true;
@@ -4616,6 +4617,7 @@ async function loadCertificatesData() {
     applyCertDateFiltering();
   } catch (err) {
     document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    throw err;
   }
 }
 
@@ -4640,6 +4642,16 @@ async function refreshCertDashboardData() {
 // في الداتابيز، بغض النظر عن نوعه (عادي أو تعمير)، لأن رقم الطلب المفروض يبقى فريد
 // في الجدول ده كله مش بس جوه النوع الواحد.
 // ============================================================
+// بيحط حد أقصى لأي Promise - لو مخلصش في الوقت ده، بيرفض برسالة واضحة بدل ما يفضل معلّق
+// للأبد من غير أي رد فعل ظاهر للمستخدم.
+function withTimeout(promise, ms, timeoutMessage) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function auditCertDuplicates() {
   // فحص أول حاجة إن عناصر النافذة (modal) موجودة في الصفحة أصلاً - لو ملف index.html
   // المرفوع مش فيه آخر تحديث، هنعرف فورًا بدل ما الزرار "يعمل حاجة صامتة"
@@ -4650,12 +4662,18 @@ async function auditCertDuplicates() {
 
   const btn = document.getElementById('cert-check-duplicates-btn');
   const originalText = btn ? btn.innerText : '';
-  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري الفحص...'; }
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري الفحص... (0 صف)'; }
 
   try {
-    // بيجيب أحدث نسخة من الداتابيز فعليًا وقت الفحص، مش بس يعتمد على النسخة المخزنة عندك محليًا
+    // بيجيب أحدث نسخة من الداتابيز فعليًا وقت الفحص، مش بس يعتمد على النسخة المخزنة عندك محليًا.
+    // بنحدّث نص الزرار كل ما صف جديد يوصل، عشان تتأكد إنها فعلاً شغالة مش واقفة. ولو عدّت دقيقتين
+    // من غير ما تخلص، بتوقف نفسها وتديك رسالة واضحة بدل ما تفضل معلّقة للأبد.
     certDataLoaded = false;
-    await loadCertificatesData();
+    await withTimeout(
+      loadCertificatesData((count) => { if (btn) btn.innerText = `⏳ جاري الفحص... (${count} صف)`; }),
+      120000,
+      'الفحص ياخد وقت أطول من المتوقع (أكتر من دقيقتين) - غالبًا في مشكلة في الاتصال بالإنترنت أو بقاعدة البيانات. جرب تاني أو تأكد من اتصالك بالنت.'
+    );
     renderCertDuplicatesReport();
     document.getElementById('cert-duplicates-modal').classList.add('active');
   } catch (err) {

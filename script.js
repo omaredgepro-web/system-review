@@ -122,6 +122,7 @@ function finishLiveSuppressedAction() {
 // ============ حالة تاب المواقف وتاب جهة الولاية ============
 let mawaqefMasterData = [];
 let mawaqefAllData = [];
+let mawaqefMultiSelectFileRows = [];
 let mawaqefDataLoaded = false;
 let mawaqefCurrentPage = 1;
 const mawaqefPageSize = 100;
@@ -5009,7 +5010,7 @@ function renderRejectionsTab() {
   const tbody = document.getElementById('rejections-tbody');
   if (!tbody) return;
 
-  const rows = getFilteredRejectionsRows();
+  let rows = getFilteredRejectionsRows();
   const isAdmin = currentUser && currentUser.role === 'admin';
 
   // لوحة توزيع الحالات الأربعة - بتحسب على كل الفلاتر ما عدا فلتر "حالة المراجعة" نفسه،
@@ -5019,8 +5020,13 @@ function renderRejectionsTab() {
   kpiBaseRows.forEach(o => { kpiCounts[getRejectionSubstatus(o)]++; });
   renderRejectionsKpis(kpiBaseRows.length, kpiCounts);
 
+  // "عرض المحدد فقط" - بيضيّق العرض على الطلبات المتحددة بس، بغض النظر عن باقي الفلاتر
+  if (showOnlySelectedRejections) {
+    rows = rows.filter(o => selectedRejectionOrderNumbers.has(o.order_number));
+  }
+
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
   } else {
     tbody.innerHTML = rows.map(o => {
       const orderNum = o.order_number || '-';
@@ -5054,8 +5060,11 @@ function renderRejectionsTab() {
       }
       if (!actionsHtml) actionsHtml = '-';
 
+      const isChecked = selectedRejectionOrderNumbers.has(orderNum) ? 'checked' : '';
+
       return `
         <tr>
+          <td style="text-align:center;"><input type="checkbox" class="rejections-row-checkbox" value="${orderNum}" ${isChecked} onchange="toggleRejectionSelection('${orderNum}', this.checked)"></td>
           <td class="order-no-cell">${orderNum}</td>
           <td>${o.cert_type === 'تعمير' ? '📠 تعمير' : '🖨️ عادي'}</td>
           <td>${layout}</td>
@@ -5068,8 +5077,120 @@ function renderRejectionsTab() {
     }).join('');
   }
 
+  updateRejectionsSelectedCount();
+  const headerCb = document.getElementById('rejections-select-all-checkbox');
+  if (headerCb) {
+    const selectedInFilter = rows.filter(o => selectedRejectionOrderNumbers.has(o.order_number)).length;
+    if (selectedInFilter === 0) { headerCb.checked = false; headerCb.indeterminate = false; }
+    else if (selectedInFilter === rows.length) { headerCb.checked = true; headerCb.indeterminate = false; }
+    else { headerCb.checked = false; headerCb.indeterminate = true; }
+  }
+
   renderRejectionsReviewerStats();
 }
+
+// ============ التحديد والإجراءات الجماعية لتاب المرفوضات ============
+let selectedRejectionOrderNumbers = new Set();
+let showOnlySelectedRejections = false;
+
+function toggleRejectionSelection(orderNumber, checked) {
+  if (checked) selectedRejectionOrderNumbers.add(orderNumber);
+  else selectedRejectionOrderNumbers.delete(orderNumber);
+  updateRejectionsSelectedCount();
+}
+
+// بيحدد/يشيل كل الصفوف المطابقة للفلتر الحالي (مش بس اللي ظاهرة على الشاشة)
+function toggleRejectionsSelectAll(checkbox) {
+  const rows = getFilteredRejectionsRows();
+  if (checkbox.checked) {
+    rows.forEach(o => selectedRejectionOrderNumbers.add(o.order_number));
+  } else {
+    selectedRejectionOrderNumbers.clear();
+  }
+  renderRejectionsTab();
+}
+
+function clearRejectionsSelection() {
+  selectedRejectionOrderNumbers.clear();
+  if (showOnlySelectedRejections) { showOnlySelectedRejections = false; const b = document.getElementById('show-selected-only-rejections-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+  renderRejectionsTab();
+}
+
+function toggleShowOnlySelectedRejections() {
+  showOnlySelectedRejections = !showOnlySelectedRejections;
+  const btn = document.getElementById('show-selected-only-rejections-btn');
+  if (btn) btn.innerText = showOnlySelectedRejections ? '📋 عرض الكل' : '📌 عرض المحدد فقط';
+  renderRejectionsTab();
+}
+
+function updateRejectionsSelectedCount() {
+  const el = document.getElementById('rejections-selected-count');
+  if (el) el.innerText = selectedRejectionOrderNumbers.size;
+}
+
+// تطبيق حالة مراجعة (تم التعديل / رفض نهائي) على كل الطلبات المحددة دفعة واحدة
+async function executeRejectionsBulkAction() {
+  const action = document.getElementById('rejections-bulk-action-select').value;
+  if (!action) { alert('برجاء اختيار الحالة من القائمة'); return; }
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(o.order_number));
+  if (targetRows.length === 0) return;
+
+  if (!confirm(`هل أنت متأكد من تطبيق حالة "${action}" على (${targetRows.length}) طلب؟`)) return;
+
+  try {
+    const ids = targetRows.map(o => o.id);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', ids, 'update', { reviewer_action: action });
+    if (error) { alert('فشل التحديث: ' + error.message); return; }
+    targetRows.forEach(o => { o.reviewer_action = action; });
+    alert(`تم تطبيق "${action}" على ${targetRows.length} طلب بنجاح.`);
+    selectedRejectionOrderNumbers.clear();
+    renderRejectionsTab();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+// تطبيق "تم الطباعة" على كل الطلبات المحددة دفعة واحدة
+async function executeRejectionsBulkPrinted() {
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(o.order_number));
+  if (targetRows.length === 0) return;
+
+  if (!confirm(`تأكيد تحويل حالة (${targetRows.length}) طلب إلى "تم الطباعة"؟`)) return;
+
+  try {
+    const ids = targetRows.map(o => o.id);
+    const updateData = { status: 'تم الطباعة', reason: '-', reviewer_action: null };
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', ids, 'update', updateData);
+    if (error) { alert('فشل التحديث: ' + error.message); return; }
+    targetRows.forEach(o => Object.assign(o, updateData));
+    alert(`تم تحويل ${targetRows.length} طلب إلى "تم الطباعة" بنجاح.`);
+    selectedRejectionOrderNumbers.clear();
+    applyRejectionsDateFiltering();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+function exportSelectedRejectionsOrderNumbers() {
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+  const exportRows = [...selectedRejectionOrderNumbers].map(num => ({ 'رقم الطلب': num }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 26 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام محددة');
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  XLSX.writeFile(workbook, `أرقام_طلبات_مرفوضة_محددة_${stamp}.xlsx`);
+}
+
+
 
 async function setRejectionReviewerAction(orderNum, action) {
   const row = (certMasterData || []).find(o => String(o.order_number) === String(orderNum));
@@ -6209,6 +6330,131 @@ function populateMawaqefStatusFilter() {
   const allStatuses = [...new Set([...MAWAQEF_STATUSES, ...statusesInData])];
   select.innerHTML = '<option value="ALL">كل الحالات</option>' + allStatuses.map(s => `<option value="${s}">${s}</option>`).join('');
   if (currentValue) select.value = currentValue;
+}
+
+// ============ تحديد متعدد (نسخ/لصق أو ملف) لتاب المواقف - نفس فكرة تاب الشهادات بالظبط ============
+function toggleMawaqefMultiSelectPanel() {
+  const panel = document.getElementById('mawaqef-multiselect-panel');
+  panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+}
+
+function clearMawaqefMultiSelectInput() {
+  document.getElementById('mawaqef-multiselect-textarea').value = '';
+  document.getElementById('mawaqef-multiselect-file-name').innerText = '';
+  document.getElementById('mawaqef-multiselect-results').innerHTML = '';
+  mawaqefMultiSelectFileRows = [];
+}
+
+function handleMawaqefMultiSelectDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('mawaqef-multiselect-dropzone').classList.add('drag-over');
+}
+
+function handleMawaqefMultiSelectDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('mawaqef-multiselect-dropzone').classList.remove('drag-over');
+}
+
+function handleMawaqefMultiSelectDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('mawaqef-multiselect-dropzone').classList.remove('drag-over');
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (files && files.length > 0) processMawaqefMultiSelectFile(files[0]);
+}
+
+function handleMawaqefMultiSelectFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (file) processMawaqefMultiSelectFile(file);
+  event.target.value = '';
+}
+
+async function processMawaqefMultiSelectFile(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+    alert('برجاء رفع ملف CSV أو Excel بس');
+    return;
+  }
+
+  document.getElementById('mawaqef-multiselect-file-name').innerText = `جاري قراءة: ${file.name} ...`;
+
+  try {
+    const rawRows = await parseFileToRows(file);
+    const extracted = extractOrderNumbersFromRows(rawRows);
+    if (extracted.length === 0) {
+      alert('معرفتش ألاقي عمود رقم الطلب في الملف ده. تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.');
+      document.getElementById('mawaqef-multiselect-file-name').innerText = '';
+      return;
+    }
+    mawaqefMultiSelectFileRows = extracted;
+    document.getElementById('mawaqef-multiselect-file-name').innerText = `تم رفع: ${file.name} (${extracted.length} رقم)`;
+  } catch (err) {
+    alert('تعذّر قراءة الملف: ' + err.message);
+  }
+}
+
+// بيدور على أرقام الطلبات (من المربع + الملف) في كل التواريخ، ويحددهم تلقائيًا (checkboxes)
+// من غير ما يعمل أي Sort أو تغيير في ترتيب الجدول نفسه.
+function verifyAndSelectMawaqefOrders() {
+  const textValue = document.getElementById('mawaqef-multiselect-textarea').value;
+  const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
+  const combined = [...new Set([...fromText, ...mawaqefMultiSelectFileRows])];
+
+  if (combined.length === 0) {
+    alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
+    return;
+  }
+
+  if (!mawaqefMasterData || mawaqefMasterData.length === 0) {
+    alert('لا يوجد بيانات محمّلة حاليًا.');
+    return;
+  }
+
+  const availableNumbers = new Set(mawaqefMasterData.map(o => String(o.order_number)));
+  const found = [];
+  const notFound = [];
+
+  combined.forEach(num => {
+    if (availableNumbers.has(num)) {
+      found.push(num);
+      selectedMawaqefOrderNumbers.add(num);
+    } else {
+      notFound.push(num);
+    }
+  });
+
+  updateMawaqefSelectedCount();
+
+  if (found.length > 0) {
+    // الأرقام المتحددة ممكن تكون منتشرة على تواريخ مختلفة، فبنشيل فلتر التاريخ وأي فلتر
+    // تاني ممكن يخفيهم (بحث/حالة)، عشان نضمن ظهورهم كلهم، وننقل تلقائيًا لأول صفحة فيها
+    // أول رقم اتحدد - عشان تشوفه فورًا من غير ما تدور عليه بنفسك.
+    document.getElementById('mawaqef-date-filter').value = '';
+    document.getElementById('mawaqef-search-input').value = '';
+    document.getElementById('mawaqef-status-filter').value = 'ALL';
+
+    mawaqefAllData = mawaqefMasterData; // كل التواريخ
+    document.getElementById('mawaqef-active-date-label').innerText = `يعرض كل التواريخ (بحث عن ${found.length} رقم محدد)`;
+
+    const foundSet = new Set(found);
+    const firstFoundIndex = mawaqefAllData.findIndex(o => foundSet.has(String(o.order_number)));
+    mawaqefCurrentPage = firstFoundIndex >= 0 ? Math.floor(firstFoundIndex / mawaqefPageSize) + 1 : 1;
+  }
+
+  renderMawaqefPage(); // بيعيد رسم البيانات بترتيبها، والـ checkboxes بتتظبط تلقائيًا حسب التحديد
+
+  const table = document.querySelector('#tab-mawaqef .admin-container');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const resultsEl = document.getElementById('mawaqef-multiselect-results');
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل) - بحثنا في كل التواريخ ونقلناك على طول لأول صفحة فيها أول رقم متحدد.</p>`;
+  if (notFound.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود أصلاً (بأي تاريخ):</p>`;
+    html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
+  }
+  resultsEl.innerHTML = html;
 }
 
 function applyMawaqefDateFiltering() {

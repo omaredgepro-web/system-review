@@ -6727,6 +6727,34 @@ async function executeMawaqefBulkStatusUpdate() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
+// تطبيق تعليق واحد على كل الطلبات المحددة دفعة واحدة (بيستبدل أي تعليق قديم لكل واحد منهم)
+async function executeMawaqefBulkComment() {
+  const commentInput = document.getElementById('mawaqef-bulk-comment-input');
+  const newComment = commentInput.value.trim();
+  if (!newComment) { alert('برجاء كتابة التعليق أولاً'); return; }
+  if (selectedMawaqefOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const confirmChange = confirm(`هل أنت متأكد من تطبيق هذا التعليق على (${selectedMawaqefOrderNumbers.size}) طلب؟\n\n"${newComment}"\n\n⚠️ ده هيستبدل أي تعليق قديم موجود على كل طلب من الطلبات المحددة.`);
+  if (!confirmChange) return;
+
+  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(MAWAQEF_TABLE_NAME, 'id', matchValues, 'update', { comment: newComment });
+    if (error) { alert('حدث خطأ أثناء تطبيق التعليق: ' + error.message); }
+    else {
+      alert(`تم تطبيق التعليق على ${targetOrders.length} طلب بنجاح!`);
+      targetOrders.forEach(o => { o.comment = newComment; });
+      commentInput.value = '';
+      selectedMawaqefOrderNumbers.clear();
+      if (showOnlySelectedMawaqef) { showOnlySelectedMawaqef = false; const __b = document.getElementById('show-selected-only-mawaqef-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
+      applyMawaqefDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 async function executeMawaqefBulkDelete() {
   if (!canDeleteMawaqef()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   if (selectedMawaqefOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }

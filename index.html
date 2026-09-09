@@ -844,7 +844,7 @@
       <div class="admin-container">
         <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;">
           <input type="text" id="mawaqef-search-input" class="filter-select" placeholder="ابحث برقم الطلب أو رقم التقنين..." style="flex: 1; min-width: 220px;" oninput="renderMawaqefPage()">
-          <label style="font-size: 13px; color: var(--text-muted);">الحالة:</label>
+          <label style="font-size: 13px; color: var(--text-muted);">جهة الولاية:</label>
           <select id="mawaqef-status-filter" class="filter-select" onchange="renderMawaqefPage()">
             <option value="ALL">كل الحالات</option>
           </select>
@@ -879,9 +879,9 @@
           <button class="btn btn-secondary" onclick="clearMawaqefSelection()" style="padding: 4px 10px; font-size: 12px;">مسح التحديد</button>
           <button id="show-selected-only-mawaqef-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedMawaqef()" style="padding: 4px 10px; font-size: 12px;">📌 عرض المحدد فقط</button>
           <select id="mawaqef-bulk-status-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
-            <option value="">تغيير الحالة إلى...</option>
+            <option value="">تغيير جهة الولاية إلى...</option>
           </select>
-          <button class="btn btn-secondary" onclick="executeMawaqefBulkStatusUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق الحالة</button>
+          <button class="btn btn-secondary" onclick="executeMawaqefBulkStatusUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق</button>
           <button class="btn btn-danger" onclick="executeMawaqefBulkDelete()" style="padding: 4px 10px; font-size: 12px;">🗑️ حذف المحدد</button>
         </div>
 
@@ -892,14 +892,17 @@
                 <th><input type="checkbox" id="mawaqef-select-all-header-checkbox" onchange="selectAllFilteredMawaqef(this.checked)"></th>
                 <th>رقم الطلب</th>
                 <th>رقم طلب التقنين</th>
-                <th>الحالة</th>
-                <th>ملاحظات</th>
+                <th>جهة الولاية</th>
+                <th>المحافظة</th>
+                <th>جهة التنسيق</th>
+                <th>المدينة</th>
                 <th>التاريخ</th>
+                <th>تعليق</th>
                 <th>إجراء</th>
               </tr>
             </thead>
             <tbody id="mawaqef-tbody">
-              <tr><td colspan="7" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+              <tr><td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1031,20 +1034,54 @@
         <input type="text" id="mawaqef-modal-tanzeen" class="form-control">
       </div>
       <div class="form-group">
-        <label>الحالة</label>
+        <label>جهة الولاية</label>
         <select id="mawaqef-modal-status" class="filter-select form-control"></select>
       </div>
       <div class="form-group">
-        <label>ملاحظات</label>
-        <textarea id="mawaqef-modal-notes" class="form-control" placeholder="اكتب ملاحظاتك هنا..."></textarea>
+        <label>المحافظة</label>
+        <input type="text" id="mawaqef-modal-governorate" class="form-control" placeholder="اسم المحافظة">
+      </div>
+      <div class="form-group">
+        <label>جهة التنسيق</label>
+        <input type="text" id="mawaqef-modal-coordination" class="form-control" placeholder="جهة التنسيق">
+      </div>
+      <div class="form-group">
+        <label>المدينة</label>
+        <input type="text" id="mawaqef-modal-city" class="form-control" placeholder="اسم المدينة">
       </div>
       <div class="form-group">
         <label>التاريخ</label>
         <input type="date" id="mawaqef-modal-date" class="form-control">
       </div>
+      <div class="form-group">
+        <label>تعليق</label>
+        <textarea id="mawaqef-modal-comment" class="form-control" placeholder="اكتب أي تعليق أو ملاحظة على الطلب..."></textarea>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeMawaqefModal()">إلغاء</button>
         <button class="btn btn-primary" onclick="saveMawaqefUpdate()" style="width: auto;">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal تعليق سريع على طلب في تاب المواقف -->
+  <div class="modal-overlay" id="mawaqef-comment-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>💬 تعليق على الطلب</h3>
+        <button class="close-btn" onclick="closeMawaqefCommentModal()">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>رقم الطلب</label>
+        <input type="text" id="mawaqef-comment-modal-order-no" class="form-control" disabled>
+      </div>
+      <div class="form-group">
+        <label>التعليق</label>
+        <textarea id="mawaqef-comment-modal-textarea" class="form-control" style="min-height: 100px;" placeholder="اكتب تعليقك هنا..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeMawaqefCommentModal()">إلغاء</button>
+        <button class="btn btn-primary" onclick="saveMawaqefComment()" style="width: auto;">حفظ التعليق</button>
       </div>
     </div>
   </div>

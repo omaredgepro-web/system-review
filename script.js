@@ -6292,7 +6292,7 @@ function exportMyOrdersToExcel() {
 
 async function loadMawaqefData() {
   const tbody = document.getElementById('mawaqef-tbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
 
   try {
     const allFetched = await fetchAllRowsPaginated((from, to) =>
@@ -6304,7 +6304,7 @@ async function loadMawaqefData() {
     populateMawaqefStatusFilter();
     applyMawaqefDateFiltering();
   } catch (err) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
   }
 }
 
@@ -6609,7 +6609,7 @@ function renderMawaqefPage() {
   if (!tbody) return;
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     document.getElementById('mawaqef-pagination-info').innerText = '';
     return;
   }
@@ -6621,14 +6621,21 @@ function renderMawaqefPage() {
 
   tbody.innerHTML = pageRows.map(o => {
     const isChecked = selectedMawaqefOrderNumbers.has(o.order_number) ? 'checked' : '';
+    const hasComment = o.comment && o.comment.trim();
+    const commentBtn = hasComment
+      ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" title="${String(o.comment).replace(/"/g, '&quot;')}" onclick="openMawaqefCommentModal('${o.id}')">💬 ${String(o.comment).length > 15 ? String(o.comment).slice(0, 15) + '…' : o.comment}</button>`
+      : `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; opacity:0.7;" onclick="openMawaqefCommentModal('${o.id}')">➕ إضافة</button>`;
     return `
       <tr>
         <td><input type="checkbox" class="mawaqef-row-checkbox" value="${o.order_number}" ${isChecked} onchange="toggleMawaqefSelection('${o.order_number}', this.checked)"></td>
         <td class="order-no-cell">${o.order_number || '-'}</td>
         <td>${o.tanzeen_number || '-'}</td>
         <td>${o.status || '-'}</td>
-        <td>${o.notes || '-'}</td>
+        <td>${o.governorate || '-'}</td>
+        <td>${o.coordination_body || '-'}</td>
+        <td>${o.city || '-'}</td>
         <td>${extractDateString(o) || '-'}</td>
+        <td>${commentBtn}</td>
         <td style="display:flex; gap:6px; flex-wrap:wrap;">
           <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="openMawaqefEditModal('${o.id}')">تحديث</button>
           ${canDeleteMawaqef() ? `<button class="btn-delete-row" onclick="deleteSingleMawaqefRow('${o.id}')">🗑️ مسح</button>` : ''}
@@ -6763,8 +6770,11 @@ function openMawaqefEditModal(id) {
   document.getElementById('mawaqef-modal-order-no').value = selectedMawaqefOrder.order_number || '';
   document.getElementById('mawaqef-modal-tanzeen').value = selectedMawaqefOrder.tanzeen_number || '';
   document.getElementById('mawaqef-modal-status').value = selectedMawaqefOrder.status || '';
-  document.getElementById('mawaqef-modal-notes').value = selectedMawaqefOrder.notes || '';
+  document.getElementById('mawaqef-modal-governorate').value = selectedMawaqefOrder.governorate || '';
+  document.getElementById('mawaqef-modal-coordination').value = selectedMawaqefOrder.coordination_body || '';
+  document.getElementById('mawaqef-modal-city').value = selectedMawaqefOrder.city || '';
   document.getElementById('mawaqef-modal-date').value = extractDateString(selectedMawaqefOrder) || '';
+  document.getElementById('mawaqef-modal-comment').value = selectedMawaqefOrder.comment || '';
   document.getElementById('mawaqef-edit-modal').style.display = 'flex';
 }
 
@@ -6778,8 +6788,11 @@ async function saveMawaqefUpdate() {
   const updateData = {
     tanzeen_number: document.getElementById('mawaqef-modal-tanzeen').value || null,
     status: document.getElementById('mawaqef-modal-status').value || null,
-    notes: document.getElementById('mawaqef-modal-notes').value || null,
-    date: document.getElementById('mawaqef-modal-date').value || null
+    governorate: document.getElementById('mawaqef-modal-governorate').value || null,
+    coordination_body: document.getElementById('mawaqef-modal-coordination').value || null,
+    city: document.getElementById('mawaqef-modal-city').value || null,
+    date: document.getElementById('mawaqef-modal-date').value || null,
+    comment: document.getElementById('mawaqef-modal-comment').value || null
   };
 
   try {
@@ -6791,18 +6804,50 @@ async function saveMawaqefUpdate() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
+// ============ تعليق سريع على طلب موقف - نافذة صغيرة منفصلة عن نموذج التعديل الكامل ============
+let mawaqefCommentTargetOrder = null;
+
+function openMawaqefCommentModal(id) {
+  mawaqefCommentTargetOrder = (mawaqefMasterData || []).find(o => String(o.id) === String(id));
+  if (!mawaqefCommentTargetOrder) return;
+  document.getElementById('mawaqef-comment-modal-order-no').value = mawaqefCommentTargetOrder.order_number || '';
+  document.getElementById('mawaqef-comment-modal-textarea').value = mawaqefCommentTargetOrder.comment || '';
+  document.getElementById('mawaqef-comment-modal').style.display = 'flex';
+}
+
+function closeMawaqefCommentModal() {
+  document.getElementById('mawaqef-comment-modal').style.display = 'none';
+  mawaqefCommentTargetOrder = null;
+}
+
+async function saveMawaqefComment() {
+  if (!mawaqefCommentTargetOrder) return;
+  const newComment = document.getElementById('mawaqef-comment-modal-textarea').value || null;
+
+  try {
+    const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).update({ comment: newComment }).eq('id', mawaqefCommentTargetOrder.id);
+    if (error) { alert('حصل خطأ أثناء حفظ التعليق: ' + error.message); return; }
+    mawaqefCommentTargetOrder.comment = newComment;
+    closeMawaqefCommentModal();
+    renderMawaqefPage();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 function exportMawaqefExcel() {
   const rows = getFilteredMawaqefRows();
   if (rows.length === 0) { alert('لا توجد بيانات لتصديرها'); return; }
   const exportRows = rows.map(o => ({
     'رقم الطلب': o.order_number || '-',
     'رقم طلب التقنين': o.tanzeen_number || '-',
-    'الحالة': o.status || '-',
-    'ملاحظات': o.notes || '-',
-    'التاريخ': extractDateString(o) || '-'
+    'جهة الولاية': o.status || '-',
+    'المحافظة': o.governorate || '-',
+    'جهة التنسيق': o.coordination_body || '-',
+    'المدينة': o.city || '-',
+    'التاريخ': extractDateString(o) || '-',
+    'تعليق': o.comment || '-'
   }));
   const worksheet = XLSX.utils.json_to_sheet(exportRows);
-  worksheet['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 20 }, { wch: 30 }, { wch: 14 }];
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 30 }];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'المواقف');
   XLSX.writeFile(workbook, `مواقف_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -6971,7 +7016,8 @@ async function exportGehatWlayaToMawaqef() {
     .map(r => ({
       order_number: r.order_number,
       status: r.gehat_wlaya,
-      notes: [r.gov_name, r.city].filter(Boolean).join(' - ') || null,
+      governorate: r.gov_name || null,
+      city: r.city || null,
       date: new Date().toISOString().split('T')[0]
     }));
 

@@ -1057,53 +1057,109 @@ function patchReviewerStatsAlltime(eventType, newRow, oldRow) {
 // "معلق" أو "Qc" خالص، لأن المطلوب هنا أداء المراجعة الفعلي بس.
 // ============================================================
 async function renderReviewerStatsTab(forceRefresh) {
-  const container = document.getElementById('reviewer-stats-cards-container');
-  if (!container) return;
-  container.innerHTML = `<div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>`;
+  const emptyMsg = document.getElementById('reviewer-stats-empty-msg');
+  const canvas = document.getElementById('reviewer-stats-chart');
+  if (!emptyMsg || !canvas) return;
+  emptyMsg.style.display = 'block';
+  canvas.style.display = 'none';
+  emptyMsg.innerText = '⏳ جاري تحميل الإحصائية...';
 
   const stats = await loadReviewerStatsAlltime(forceRefresh);
   if (!stats) {
-    container.innerHTML = `<div class="stat-empty-msg">تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".</div>`;
+    emptyMsg.innerText = 'تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".';
     return;
   }
   renderReviewerStatsCards();
 }
 
-// الرسم الفعلي للكروت من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان التحديث
-// اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير ما يعيد تحميل حاجة من الداتابيز
-function renderReviewerStatsCards() {
-  const container = document.getElementById('reviewer-stats-cards-container');
-  if (!container || !reviewerStatsAlltime) return;
+// أسماء مستبعدة من رسم "أداء المراجعين" لأنها مش مراجعين فعليين (أدمن/قادة تيمات،
+// بيانات قديمة بدون مراجع محدد، أو حسابات فحص جودة مش جزء من أداء المراجعة الفعلي)
+const REVIEWER_STATS_EXCLUDED_NAMES = ['ابو هيبة', 'غير محدد', 'كيو سي', 'QC', 'Qc'];
 
-  const rows = Object.keys(reviewerStatsAlltime).map(name => {
-    const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
-    const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
-    return { name, accepted, rejected, reviewed: accepted + rejected };
-  }).filter(r => r.reviewed > 0)
+let reviewerStatsChartInstance = null;
+
+// الرسم الفعلي (رسم بياني أعمدة) من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان
+// التحديث اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير أي طلب جديد للداتابيز
+function renderReviewerStatsCards() {
+  const emptyMsg = document.getElementById('reviewer-stats-empty-msg');
+  const canvas = document.getElementById('reviewer-stats-chart');
+  if (!emptyMsg || !canvas || !reviewerStatsAlltime) return;
+
+  const excludedLower = REVIEWER_STATS_EXCLUDED_NAMES.map(n => n.trim().toLowerCase());
+  const rows = Object.keys(reviewerStatsAlltime)
+    .filter(name => !excludedLower.includes(String(name).trim().toLowerCase()))
+    .map(name => {
+      const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
+      const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
+      return { name, accepted, rejected, reviewed: accepted + rejected };
+    })
+    .filter(r => r.reviewed > 0)
     .sort((a, b) => b.reviewed - a.reviewed);
 
   if (rows.length === 0) {
-    container.innerHTML = `<div class="stat-empty-msg">لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.</div>`;
+    emptyMsg.innerText = 'لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.';
+    emptyMsg.style.display = 'block';
+    canvas.style.display = 'none';
     return;
   }
 
-  container.innerHTML = rows.map(r => {
-    const acceptedPct = r.reviewed > 0 ? Math.round((r.accepted / r.reviewed) * 100) : 0;
-    const rejectedPct = 100 - acceptedPct;
-    return `
-      <div class="stat-card">
-        <div class="stat-name">${r.name}</div>
-        <div class="stat-total">تم المراجعة: ${r.reviewed.toLocaleString('ar-EG')} طلب</div>
-        <div class="stat-bar">
-          <div class="stat-bar-accepted" style="width:${acceptedPct}%;"></div>
-          <div class="stat-bar-rejected" style="width:${rejectedPct}%;"></div>
-        </div>
-        <div class="stat-legend">
-          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span> مقبول</span><span>${r.accepted.toLocaleString('ar-EG')} (${acceptedPct}%)</span></div>
-          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span> مرفوض</span><span>${r.rejected.toLocaleString('ar-EG')} (${rejectedPct}%)</span></div>
-        </div>
-      </div>`;
-  }).join('');
+  emptyMsg.style.display = 'none';
+  canvas.style.display = 'block';
+
+  // ارتفاع الرسم بيكبر مع عدد المراجعين عشان الأعمدة متتزنقش على بعضها
+  const wrapper = document.getElementById('reviewer-stats-chart-wrapper');
+  const chartHeight = Math.max(420, rows.length * 34 + 80);
+  wrapper.style.height = chartHeight + 'px';
+
+  const labels = rows.map(r => r.name);
+  const acceptedData = rows.map(r => r.accepted);
+  const rejectedData = rows.map(r => r.rejected);
+
+  if (reviewerStatsChartInstance) {
+    reviewerStatsChartInstance.destroy();
+  }
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const acceptColor = rootStyles.getPropertyValue('--badge-accept-text').trim() || '#4ade80';
+  const rejectColor = rootStyles.getPropertyValue('--badge-reject-text').trim() || '#f87171';
+  const textColor = rootStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
+  const gridColor = rootStyles.getPropertyValue('--card-border').trim() || 'rgba(255,255,255,0.08)';
+
+  reviewerStatsChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'مقبول', data: acceptedData, backgroundColor: acceptColor, stack: 'reviewed' },
+        { label: 'مرفوض', data: rejectedData, backgroundColor: rejectColor, stack: 'reviewed' }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 400 },
+      plugins: {
+        legend: { position: 'top', rtl: true, labels: { color: textColor, font: { size: 13 } } },
+        tooltip: {
+          rtl: true,
+          callbacks: {
+            afterBody: (items) => {
+              if (!items || items.length === 0) return '';
+              const idx = items[0].dataIndex;
+              const r = rows[idx];
+              const pct = r.reviewed > 0 ? Math.round((r.accepted / r.reviewed) * 100) : 0;
+              return `الإجمالي: ${r.reviewed.toLocaleString('ar-EG')} طلب (نسبة القبول ${pct}%)`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, ticks: { color: textColor }, grid: { color: gridColor } },
+        y: { stacked: true, ticks: { color: textColor, font: { size: 12, weight: '600' } }, grid: { display: false } }
+      }
+    }
+  });
 }
 
 let liveUpdatesChannel = null;

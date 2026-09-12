@@ -743,6 +743,7 @@ async function setupUserSession(profile) {
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   document.getElementById('gehat-wlaya-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
+  document.getElementById('reviewer-stats-tab-btn').style.display = isAdmin ? 'block' : 'none';
 
   // زرار "لوحة الأدمن" المنسدل نفسه يظهر بس لو فيه عنصر واحد على الأقل جواه هيظهر للمستخدم ده
   document.getElementById('admin-menu-toggle-btn').style.display = (canDelete() || isAdmin || canViewMawaqef()) ? 'inline-flex' : 'none';
@@ -854,6 +855,7 @@ function handleLiveChange(tableName, payload) {
 
   if (tableName === TABLE_NAME) {
     window.masterData = patchMasterDataRow(window.masterData || [], eventType, newRow, oldRow);
+    patchReviewerStatsAlltime(eventType, newRow, oldRow);
     scheduleLiveReviewRender();
   } else if (tableName === CERT_TABLE_NAME) {
     certMasterData = patchMasterDataRow(certMasterData || [], eventType, newRow, oldRow);
@@ -974,6 +976,135 @@ function startRejectionNagTimer() {
   }, REJECTION_NAG_INTERVAL_MS);
 }
 
+
+// ============================================================
+// إحصائية المراجعين "من أول تاريخ لحد دلوقتي" - محمّلة مرة واحدة بس من
+// الداتابيز (استعلام تجميعي خفيف جدًا، بيرجّع أرقام مش صفوف خام)، وبعد كده
+// بتفضل محدَّثة لحظيًا محليًا مع كل تغيير بيوصل من الـ Realtime - من غير
+// أي طلب إضافي تاني للداتابيز خالص، عشان تفضل "لايف" ومايتقلش عليها.
+// ============================================================
+let reviewerStatsAlltime = null; // null = لسه ما اتحمّلتش
+
+async function loadReviewerStatsAlltime(forceRefresh) {
+  if (reviewerStatsAlltime && !forceRefresh) return reviewerStatsAlltime;
+
+  const { data, error } = await supabaseClient.rpc('get_reviewer_stats_alltime');
+  if (error) { console.error('فشل تحميل إحصائية المراجعين الكاملة:', error); return null; }
+
+  const labels = CONTEXT_STATUS_LABELS.main;
+  const fallback = labels[labels.length - 1];
+  const stats = {};
+
+  (data || []).forEach(row => {
+    const key = getDisplayName(row.reviewer) || row.reviewer || 'غير محدد';
+    if (!stats[key]) {
+      stats[key] = { total: 0 };
+      labels.forEach(l => { stats[key][l] = 0; });
+    }
+    const status = labels.includes(row.review_status) ? row.review_status : fallback;
+    stats[key][status] += Number(row.cnt) || 0;
+    stats[key].total += Number(row.cnt) || 0;
+  });
+
+  reviewerStatsAlltime = stats;
+  return stats;
+}
+
+// بيحدّث النسخة المحمّلة (لو موجودة) فورًا مع كل إضافة/تعديل/حذف - محليًا بالكامل،
+// من غير أي استعلام جديد للداتابيز. لو الإحصائية لسه ما اتفتحتش أصلاً في السيشن دي،
+// الفانكشن بترجع فورًا من غير ما تعمل حاجة (توفير - مفيش داعي نحدّث حاجة محدش شايفها).
+function patchReviewerStatsAlltime(eventType, newRow, oldRow) {
+  if (!reviewerStatsAlltime) return;
+
+  const labels = CONTEXT_STATUS_LABELS.main;
+  const fallback = labels[labels.length - 1];
+
+  function bucketFor(row) {
+    const key = getDisplayName(row.reviewer) || row.reviewer || 'غير محدد';
+    if (!reviewerStatsAlltime[key]) {
+      reviewerStatsAlltime[key] = { total: 0 };
+      labels.forEach(l => { reviewerStatsAlltime[key][l] = 0; });
+    }
+    return reviewerStatsAlltime[key];
+  }
+  function statusFor(row) {
+    const s = row.review_status || 'لم يتم المراجعة';
+    return labels.includes(s) ? s : fallback;
+  }
+
+  if ((eventType === 'DELETE' || eventType === 'UPDATE') && oldRow) {
+    const bucket = bucketFor(oldRow);
+    const status = statusFor(oldRow);
+    bucket[status] = Math.max(0, bucket[status] - 1);
+    bucket.total = Math.max(0, bucket.total - 1);
+  }
+  if ((eventType === 'INSERT' || eventType === 'UPDATE') && newRow) {
+    const bucket = bucketFor(newRow);
+    const status = statusFor(newRow);
+    bucket[status]++;
+    bucket.total++;
+  }
+
+  // لو تاب "أداء المراجعين" مفتوح فعليًا دلوقتي، حدّث الكروت على طول بنفس البيانات المحدَّثة -
+  // من غير أي طلب جديد للداتابيز، عشان يفضل لايف فعليًا
+  const reviewerStatsTabEl = document.getElementById('tab-reviewer-stats');
+  if (reviewerStatsTabEl && reviewerStatsTabEl.style.display !== 'none') renderReviewerStatsCards();
+}
+
+// ============================================================
+// تاب "أداء المراجعين": بيعرض لكل مراجع (من أول تاريخ لحد الآن) عدد المقبول،
+// المرفوض، وإجمالي "تم المراجعة" (مقبول + مرفوض) - بدون "لم يتم المراجعة" أو
+// "معلق" أو "Qc" خالص، لأن المطلوب هنا أداء المراجعة الفعلي بس.
+// ============================================================
+async function renderReviewerStatsTab(forceRefresh) {
+  const container = document.getElementById('reviewer-stats-cards-container');
+  if (!container) return;
+  container.innerHTML = `<div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>`;
+
+  const stats = await loadReviewerStatsAlltime(forceRefresh);
+  if (!stats) {
+    container.innerHTML = `<div class="stat-empty-msg">تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".</div>`;
+    return;
+  }
+  renderReviewerStatsCards();
+}
+
+// الرسم الفعلي للكروت من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان التحديث
+// اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير ما يعيد تحميل حاجة من الداتابيز
+function renderReviewerStatsCards() {
+  const container = document.getElementById('reviewer-stats-cards-container');
+  if (!container || !reviewerStatsAlltime) return;
+
+  const rows = Object.keys(reviewerStatsAlltime).map(name => {
+    const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
+    const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
+    return { name, accepted, rejected, reviewed: accepted + rejected };
+  }).filter(r => r.reviewed > 0)
+    .sort((a, b) => b.reviewed - a.reviewed);
+
+  if (rows.length === 0) {
+    container.innerHTML = `<div class="stat-empty-msg">لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.</div>`;
+    return;
+  }
+
+  container.innerHTML = rows.map(r => {
+    const acceptedPct = r.reviewed > 0 ? Math.round((r.accepted / r.reviewed) * 100) : 0;
+    const rejectedPct = 100 - acceptedPct;
+    return `
+      <div class="stat-card">
+        <div class="stat-name">${r.name}</div>
+        <div class="stat-total">تم المراجعة: ${r.reviewed.toLocaleString('ar-EG')} طلب</div>
+        <div class="stat-bar">
+          <div class="stat-bar-accepted" style="width:${acceptedPct}%;"></div>
+          <div class="stat-bar-rejected" style="width:${rejectedPct}%;"></div>
+        </div>
+        <div class="stat-legend">
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span> مقبول</span><span>${r.accepted.toLocaleString('ar-EG')} (${acceptedPct}%)</span></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span> مرفوض</span><span>${r.rejected.toLocaleString('ar-EG')} (${rejectedPct}%)</span></div>
+        </div>
+      </div>`;
+  }).join('');
+}
 
 let liveUpdatesChannel = null;
 function subscribeToLiveUpdates() {
@@ -1298,8 +1429,10 @@ function switchTab(tabName) {
   document.getElementById('tab-rejections').style.display = 'none';
   document.getElementById('tab-mawaqef').style.display = 'none';
   document.getElementById('tab-gehat-wlaya').style.display = 'none';
+  const reviewerStatsTabEl = document.getElementById('tab-reviewer-stats');
+  if (reviewerStatsTabEl) reviewerStatsTabEl.style.display = 'none';
 
-  const adminSubTabs = ['admin', 'certificates', 'certificates-renovation', 'print-distribute', 'mawaqef', 'gehat-wlaya'];
+  const adminSubTabs = ['admin', 'certificates', 'certificates-renovation', 'print-distribute', 'mawaqef', 'gehat-wlaya', 'reviewer-stats'];
   if (adminSubTabs.includes(tabName)) {
     document.getElementById('admin-menu-toggle-btn').classList.add('active');
   }
@@ -1359,6 +1492,10 @@ function switchTab(tabName) {
     document.getElementById('gehat-wlaya-tab-btn').classList.add('active');
     document.getElementById('tab-gehat-wlaya').style.display = 'block';
     if (!mawaqefDataLoaded) loadMawaqefData();
+  } else if (tabName === 'reviewer-stats') {
+    document.getElementById('reviewer-stats-tab-btn').classList.add('active');
+    document.getElementById('tab-reviewer-stats').style.display = 'block';
+    renderReviewerStatsTab();
   }
 }
 
@@ -4426,11 +4563,11 @@ function buildGroupStats(data, keyFn) {
   return stats;
 }
 
-function renderGroupedChart(ctx, data, keyFn, titleText) {
+function renderGroupedChart(ctx, data, keyFn, titleText, prebuiltStats) {
   const textColor = getCssVar('--text-main');
   const gridColor = getCssVar('--card-border');
 
-  const stats = buildGroupStats(data, keyFn);
+  const stats = prebuiltStats || buildGroupStats(data, keyFn);
   const keys = Object.keys(stats).sort((a, b) => stats[b].total - stats[a].total).slice(0, 20);
 
   document.getElementById('charts-title').innerText = titleText.includes('الشركات') ? '🏢 ' + titleText : '👤 ' + titleText;

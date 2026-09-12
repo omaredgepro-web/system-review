@@ -22,6 +22,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   
   <!-- ربط ملف التنسيقات CSS -->
@@ -1030,8 +1031,9 @@
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
           إجمالي ما تمت مراجعته (مقبول + مرفوض) لكل مراجع منذ أول طلب مسجّل - بيتحدّث لحظيًا تلقائيًا مع أي تغيير جديد.
         </p>
-        <div id="reviewer-stats-cards-container" class="stats-card-grid">
-          <div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>
+        <div id="reviewer-stats-chart-wrapper" style="position: relative; width: 100%; min-height: 420px;">
+          <div id="reviewer-stats-empty-msg" class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>
+          <canvas id="reviewer-stats-chart" style="display: none;"></canvas>
         </div>
       </div>
     </div>

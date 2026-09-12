@@ -184,6 +184,7 @@
           <button class="tab-btn" id="print-distribute-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('print-distribute'); closeAdminTabsMenu();">📦 توزيع طلبات الطباعة</button>
           <button class="tab-btn" id="mawaqef-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('mawaqef'); closeAdminTabsMenu();">🅿️ المواقف</button>
           <button class="tab-btn" id="gehat-wlaya-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('gehat-wlaya'); closeAdminTabsMenu();">🏛️ جهة الولاية</button>
+          <button class="tab-btn" id="reviewer-stats-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('reviewer-stats'); closeAdminTabsMenu();">📈 أداء المراجعين</button>
         </div>
       </div>
     </div>
@@ -1015,6 +1016,22 @@
             </div>
             <button class="btn btn-secondary" id="gehat-remainder-export-btn" onclick="exportGehatWlayaRemainderToPrint()" style="width: auto;">📨 تصدير الباقي إلى الطباعة</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: 📈 أداء المراجعين (كل التاريخ، مش بس اليوم) -->
+    <div id="tab-reviewer-stats" style="display: none;">
+      <div class="admin-container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 10px;">
+          <h2 style="font-size: 20px;">📈 أداء المراجعين (من أول تاريخ لحد الآن)</h2>
+          <button class="btn btn-secondary" onclick="renderReviewerStatsTab(true)">🔄 تحديث</button>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+          إجمالي ما تمت مراجعته (مقبول + مرفوض) لكل مراجع منذ أول طلب مسجّل - بيتحدّث لحظيًا تلقائيًا مع أي تغيير جديد.
+        </p>
+        <div id="reviewer-stats-cards-container" class="stats-card-grid">
+          <div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>
         </div>
       </div>
     </div>

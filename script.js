@@ -1108,7 +1108,7 @@ function renderReviewerStatsCards() {
 
   // ارتفاع الرسم بيكبر مع عدد المراجعين عشان الأعمدة متتزنقش على بعضها
   const wrapper = document.getElementById('reviewer-stats-chart-wrapper');
-  const chartHeight = Math.max(420, rows.length * 34 + 80);
+  const chartHeight = Math.max(420, rows.length * 42 + 80);
   wrapper.style.height = chartHeight + 'px';
 
   const labels = rows.map(r => r.name);
@@ -1123,15 +1123,32 @@ function renderReviewerStatsCards() {
   const acceptColor = rootStyles.getPropertyValue('--badge-accept-text').trim() || '#4ade80';
   const rejectColor = rootStyles.getPropertyValue('--badge-reject-text').trim() || '#f87171';
   const textColor = rootStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
+  const mainTextColor = rootStyles.getPropertyValue('--text-main').trim() || '#e2e8f0';
   const gridColor = rootStyles.getPropertyValue('--card-border').trim() || 'rgba(255,255,255,0.08)';
+
+  if (window.ChartDataLabels) Chart.register(ChartDataLabels);
 
   reviewerStatsChartInstance = new Chart(canvas.getContext('2d'), {
     type: 'bar',
     data: {
       labels,
       datasets: [
-        { label: 'مقبول', data: acceptedData, backgroundColor: acceptColor, stack: 'reviewed' },
-        { label: 'مرفوض', data: rejectedData, backgroundColor: rejectColor, stack: 'reviewed' }
+        {
+          label: 'مقبول', data: acceptedData, backgroundColor: acceptColor, stack: 'reviewed',
+          datalabels: { display: false }
+        },
+        {
+          label: 'مرفوض', data: rejectedData, backgroundColor: rejectColor, stack: 'reviewed',
+          datalabels: {
+            display: true,
+            anchor: 'end',
+            align: 'end',
+            offset: 4,
+            color: mainTextColor,
+            font: { weight: '700', size: 13 },
+            formatter: (value, context) => rows[context.dataIndex].reviewed.toLocaleString('ar-EG')
+          }
+        }
       ]
     },
     options: {
@@ -1139,6 +1156,7 @@ function renderReviewerStatsCards() {
       responsive: true,
       maintainAspectRatio: false,
       animation: { duration: 400 },
+      layout: { padding: { left: 10, right: 70 } },
       plugins: {
         legend: { position: 'top', rtl: true, labels: { color: textColor, font: { size: 13 } } },
         tooltip: {
@@ -1156,7 +1174,7 @@ function renderReviewerStatsCards() {
       },
       scales: {
         x: { stacked: true, beginAtZero: true, ticks: { color: textColor }, grid: { color: gridColor } },
-        y: { stacked: true, ticks: { color: textColor, font: { size: 12, weight: '600' } }, grid: { display: false } }
+        y: { stacked: true, ticks: { color: mainTextColor, font: { size: 15, weight: '700' } }, grid: { display: false } }
       }
     }
   });

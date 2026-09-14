@@ -99,7 +99,11 @@ let currentUser = null;
 // أسماء المستخدمين المسموح لهم بالحذف فقط (باقي الأدمنز يقدروا يضيفوا/يعدلوا بس مش يحذفوا)
 const DELETE_ALLOWED_USERNAMES = ['umar', 'mondy'];
 function canDelete() {
-  return !!(currentUser && currentUser.role === 'admin' && DELETE_ALLOWED_USERNAMES.includes(currentUser.username));
+  if (!currentUser || currentUser.role !== 'admin' || !currentUser.username) return false;
+  // مقارنة مرنة (تتجاهل حروف كبيرة/صغيرة ومسافات زيادة) عشان أي اختلاف بسيط في
+  // شكل اسم المستخدم المخزّن مايأثرش على الصلاحية - المفروض تفضل ثابتة طول الجلسة
+  const normalized = String(currentUser.username).trim().toLowerCase();
+  return DELETE_ALLOWED_USERNAMES.some(u => u.toLowerCase() === normalized);
 }
 let currentPage = 1;
 const pageSize = 100;
@@ -3608,24 +3612,35 @@ function removeWithinFileDuplicatesFromCsv() {
 }
 
 // بيحمّل شيت إكسيل بالطلبات المكررة (الموجودة بالفعل في قاعدة البيانات) مع اسم الشركة
-// والمراجع وحالة المراجعة (مقبول/مرفوض) بتاعتها زي ما هي مسجلة حاليًا.
+// والمراجع وحالة المراجعة (مقبول/مرفوض) بتاعتها زي ما هي مسجلة حاليًا، وكمان عمود
+// "سبب التكرار" بصيغة واضحة توضح ليه الرقم ده معتبر مكرر.
 function downloadDuplicateOrdersExcel() {
   const dupExisting = window.lastCsvDupExisting || [];
   if (dupExisting.length === 0) { alert('لا توجد أرقام مكررة لتحميلها.'); return; }
 
+  const reasonForStatus = (status) => {
+    if (status === 'مقبول') return 'مكرر - كان مقبول قبل كده';
+    if (status === 'مرفوض') return 'مكرر - كان مرفوض قبل كده';
+    if (status === 'معلق') return 'مكرر - كان معلق قبل كده';
+    if (status === 'Qc') return 'مكرر - كان تحت مراجعة QC قبل كده';
+    return 'مكرر - لسه ما اتراجعش (لم يتم المراجعة) قبل كده';
+  };
+
   const exportRows = dupExisting.map(num => {
     const master = getMasterOrderByNumber(num);
+    const status = master ? (master.review_status || master['حالة المراجعة'] || '') : '';
     return {
       'رقم الطلب': num,
+      'سبب التكرار': reasonForStatus(status),
       'اسم الشركة': master ? (master.company || master['الشركة'] || '-') : '-',
       'المراجع': master ? (getDisplayName(master.reviewer || master['المراجع']) || '-') : '-',
-      'حالة المراجعة': master ? (master.review_status || master['حالة المراجعة'] || '-') : '-',
+      'حالة المراجعة': status || '-',
       'التاريخ': master ? (extractDateString(master) || '-') : '-'
     };
   });
 
   const worksheet = XLSX.utils.json_to_sheet(exportRows);
-  worksheet['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 14 }];
+  worksheet['!cols'] = [{ wch: 28 }, { wch: 34 }, { wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 14 }];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'الطلبات المكررة');

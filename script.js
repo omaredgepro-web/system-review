@@ -1057,127 +1057,53 @@ function patchReviewerStatsAlltime(eventType, newRow, oldRow) {
 // "معلق" أو "Qc" خالص، لأن المطلوب هنا أداء المراجعة الفعلي بس.
 // ============================================================
 async function renderReviewerStatsTab(forceRefresh) {
-  const emptyMsg = document.getElementById('reviewer-stats-empty-msg');
-  const canvas = document.getElementById('reviewer-stats-chart');
-  if (!emptyMsg || !canvas) return;
-  emptyMsg.style.display = 'block';
-  canvas.style.display = 'none';
-  emptyMsg.innerText = '⏳ جاري تحميل الإحصائية...';
+  const container = document.getElementById('reviewer-stats-cards-container');
+  if (!container) return;
+  container.innerHTML = `<div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>`;
 
   const stats = await loadReviewerStatsAlltime(forceRefresh);
   if (!stats) {
-    emptyMsg.innerText = 'تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".';
+    container.innerHTML = `<div class="stat-empty-msg">تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".</div>`;
     return;
   }
   renderReviewerStatsCards();
 }
 
-// أسماء مستبعدة من رسم "أداء المراجعين" لأنها مش مراجعين فعليين (أدمن/قادة تيمات،
-// بيانات قديمة بدون مراجع محدد، أو حسابات فحص جودة مش جزء من أداء المراجعة الفعلي)
-const REVIEWER_STATS_EXCLUDED_NAMES = ['ابو هيبة', 'غير محدد', 'كيو سي', 'QC', 'Qc'];
-
-let reviewerStatsChartInstance = null;
-
-// الرسم الفعلي (رسم بياني أعمدة) من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان
-// التحديث اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير أي طلب جديد للداتابيز
+// الرسم الفعلي للكروت من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان التحديث
+// اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير ما يعيد تحميل حاجة من الداتابيز
 function renderReviewerStatsCards() {
-  const emptyMsg = document.getElementById('reviewer-stats-empty-msg');
-  const canvas = document.getElementById('reviewer-stats-chart');
-  if (!emptyMsg || !canvas || !reviewerStatsAlltime) return;
+  const container = document.getElementById('reviewer-stats-cards-container');
+  if (!container || !reviewerStatsAlltime) return;
 
-  const excludedLower = REVIEWER_STATS_EXCLUDED_NAMES.map(n => n.trim().toLowerCase());
-  const rows = Object.keys(reviewerStatsAlltime)
-    .filter(name => !excludedLower.includes(String(name).trim().toLowerCase()))
-    .map(name => {
-      const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
-      const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
-      return { name, accepted, rejected, reviewed: accepted + rejected };
-    })
-    .filter(r => r.reviewed > 0)
+  const rows = Object.keys(reviewerStatsAlltime).map(name => {
+    const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
+    const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
+    return { name, accepted, rejected, reviewed: accepted + rejected };
+  }).filter(r => r.reviewed > 0)
     .sort((a, b) => b.reviewed - a.reviewed);
 
   if (rows.length === 0) {
-    emptyMsg.innerText = 'لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.';
-    emptyMsg.style.display = 'block';
-    canvas.style.display = 'none';
+    container.innerHTML = `<div class="stat-empty-msg">لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.</div>`;
     return;
   }
 
-  emptyMsg.style.display = 'none';
-  canvas.style.display = 'block';
-
-  // ارتفاع الرسم بيكبر مع عدد المراجعين عشان الأعمدة متتزنقش على بعضها
-  const wrapper = document.getElementById('reviewer-stats-chart-wrapper');
-  const chartHeight = Math.max(420, rows.length * 42 + 80);
-  wrapper.style.height = chartHeight + 'px';
-
-  const labels = rows.map(r => r.name);
-  const acceptedData = rows.map(r => r.accepted);
-  const rejectedData = rows.map(r => r.rejected);
-
-  if (reviewerStatsChartInstance) {
-    reviewerStatsChartInstance.destroy();
-  }
-
-  const rootStyles = getComputedStyle(document.documentElement);
-  const acceptColor = rootStyles.getPropertyValue('--badge-accept-text').trim() || '#4ade80';
-  const rejectColor = rootStyles.getPropertyValue('--badge-reject-text').trim() || '#f87171';
-  const textColor = rootStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
-  const mainTextColor = rootStyles.getPropertyValue('--text-main').trim() || '#e2e8f0';
-  const gridColor = rootStyles.getPropertyValue('--card-border').trim() || 'rgba(255,255,255,0.08)';
-
-  if (window.ChartDataLabels) Chart.register(ChartDataLabels);
-
-  reviewerStatsChartInstance = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'مقبول', data: acceptedData, backgroundColor: acceptColor, stack: 'reviewed',
-          datalabels: { display: false }
-        },
-        {
-          label: 'مرفوض', data: rejectedData, backgroundColor: rejectColor, stack: 'reviewed',
-          datalabels: {
-            display: true,
-            anchor: 'end',
-            align: 'end',
-            offset: 4,
-            color: mainTextColor,
-            font: { weight: '700', size: 13 },
-            formatter: (value, context) => rows[context.dataIndex].reviewed.toLocaleString('ar-EG')
-          }
-        }
-      ]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 400 },
-      layout: { padding: { left: 10, right: 70 } },
-      plugins: {
-        legend: { position: 'top', rtl: true, labels: { color: textColor, font: { size: 13 } } },
-        tooltip: {
-          rtl: true,
-          callbacks: {
-            afterBody: (items) => {
-              if (!items || items.length === 0) return '';
-              const idx = items[0].dataIndex;
-              const r = rows[idx];
-              const pct = r.reviewed > 0 ? Math.round((r.accepted / r.reviewed) * 100) : 0;
-              return `الإجمالي: ${r.reviewed.toLocaleString('ar-EG')} طلب (نسبة القبول ${pct}%)`;
-            }
-          }
-        }
-      },
-      scales: {
-        x: { stacked: true, beginAtZero: true, ticks: { color: textColor }, grid: { color: gridColor } },
-        y: { stacked: true, ticks: { color: mainTextColor, font: { size: 15, weight: '700' } }, grid: { display: false } }
-      }
-    }
-  });
+  container.innerHTML = rows.map(r => {
+    const acceptedPct = r.reviewed > 0 ? Math.round((r.accepted / r.reviewed) * 100) : 0;
+    const rejectedPct = 100 - acceptedPct;
+    return `
+      <div class="stat-card">
+        <div class="stat-name">${r.name}</div>
+        <div class="stat-total">تم المراجعة: ${r.reviewed.toLocaleString('ar-EG')} طلب</div>
+        <div class="stat-bar">
+          <div class="stat-bar-accepted" style="width:${acceptedPct}%;"></div>
+          <div class="stat-bar-rejected" style="width:${rejectedPct}%;"></div>
+        </div>
+        <div class="stat-legend">
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span> مقبول</span><span>${r.accepted.toLocaleString('ar-EG')} (${acceptedPct}%)</span></div>
+          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span> مرفوض</span><span>${r.rejected.toLocaleString('ar-EG')} (${rejectedPct}%)</span></div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 let liveUpdatesChannel = null;
@@ -1385,6 +1311,15 @@ function populateReviewerDropdowns() {
     reviewerOptions.push({ value: p.username, label: `${p.name} (أدمن)` });
     reassignSelect.innerHTML += `<option value="${p.username}">${p.name} (أدمن)</option>`;
   });
+
+  // قائمة توزيع الـ QC - أدمن بس، منفصلة عن قائمة توزيع المراجعين فوق
+  const qcAssignSelect = document.getElementById('bulk-qc-assign-select');
+  if (qcAssignSelect) {
+    qcAssignSelect.innerHTML = `<option value="">توزيع على QC...</option>`;
+    ALL_PROFILES.filter(p => p.role === 'admin').forEach(p => {
+      qcAssignSelect.innerHTML += `<option value="${p.username}">${p.name}</option>`;
+    });
+  }
 
   setMultiSelectOptions('reviewer-filter', reviewerOptions);
 }
@@ -1996,11 +1931,12 @@ function renderTable(orders) {
   tbody.innerHTML = '';
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
 
   const isAdmin = currentUser && currentUser.role === 'admin';
+  const adminProfiles = ALL_PROFILES.filter(p => p.role === 'admin'); // خانة QC بتتملي بأسماء الأدمن بس
 
   orders.forEach((order) => {
     const formattedDate = order.date || extractDateString(order) || '-';
@@ -2010,6 +1946,9 @@ function renderTable(orders) {
     const progressStatus = order.status || order['الحالة'] || '-';
     const reviewStatus = order.review_status || order['حالة المراجعة'] || 'لم يتم المراجعة';
     const rejectionReason = order.rejection_reason || order.reason || order['سبب الرفض'] || '-';
+    const qcValue = order.qc || '';
+    const qcStatusValue = order.qc_status || '';
+    const qcCommentValue = order.qc_comment || '';
 
     let reviewBadge = 'badge-unreviewed';
     if (reviewStatus === 'مقبول') reviewBadge = 'badge-accepted';
@@ -2020,6 +1959,30 @@ function renderTable(orders) {
     const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
     const adminCellHtml = isAdmin ? `<td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button>` : ''}</td>` : '';
+
+    // خانة QC: أدمن بس يقدر يعيّن/يغيّر المسؤول عن مراجعة الجودة لهذا الطلب
+    const qcCellHtml = isAdmin
+      ? `<select class="filter-select" style="padding:4px 8px; font-size:12px;" onchange="updateOrderQcAssignee('${orderNum}', this.value)">
+           <option value="">-</option>
+           ${adminProfiles.map(p => `<option value="${p.username}" ${qcValue === p.username ? 'selected' : ''}>${p.name}</option>`).join('')}
+         </select>`
+      : (getDisplayName(qcValue) || '-');
+
+    // خانة حالة الطلب من QC: لو اتحطت "مرفوض"، حالة المراجعة الأساسية بترجع "لم يتم المراجعة"
+    // تلقائيًا (يترجع الطلب تاني للمراجع) - المنطق ده في updateOrderQcStatus تحت
+    const qcStatusCellHtml = isAdmin
+      ? `<select class="filter-select" style="padding:4px 8px; font-size:12px;" onchange="updateOrderQcStatus('${orderNum}', this.value)">
+           <option value="" ${!qcStatusValue ? 'selected' : ''}>-</option>
+           <option value="مقبول" ${qcStatusValue === 'مقبول' ? 'selected' : ''}>✅ مقبول</option>
+           <option value="مرفوض" ${qcStatusValue === 'مرفوض' ? 'selected' : ''}>❌ مرفوض</option>
+         </select>`
+      : (qcStatusValue ? `<span class="badge ${qcStatusValue === 'مقبول' ? 'badge-accepted' : 'badge-rejected'}">${qcStatusValue}</span>` : '-');
+
+    // زرار تعليق الـ QC: بيبان بس لو فيه تعليق فعلاً (غالبًا اتسجل تلقائيًا وقت الرفض)،
+    // وبيقدر أي حد يشوفه أو يعدّله وقت ما يحتاج
+    const qcCommentCellHtml = qcCommentValue
+      ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" title="${qcCommentValue.replace(/"/g, '&quot;')}" onclick="openOrderQcCommentModal('${orderNum}')">💬 ${qcCommentValue.length > 15 ? qcCommentValue.slice(0, 15) + '…' : qcCommentValue}</button>`
+      : (isAdmin ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; opacity:0.7;" onclick="openOrderQcCommentModal('${orderNum}')">➕ تعليق</button>` : '-');
 
     tbody.innerHTML += `
       <tr>
@@ -2036,6 +1999,9 @@ function renderTable(orders) {
         <td>${reviewer}</td>
         <td><span class="badge badge-pending">${progressStatus}</span></td>
         <td><span class="badge ${reviewBadge}">${reviewStatus}</span></td>
+        <td>${qcCellHtml}</td>
+        <td>${qcStatusCellHtml}</td>
+        <td>${qcCommentCellHtml}</td>
         <td>${formattedDate}</td>
         <td>${rejectionReason}</td>
       </tr>
@@ -2047,6 +2013,83 @@ function renderTable(orders) {
     const allCurrentChecked = orders.length > 0 && orders.every(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
     selectAllCb.checked = allCurrentChecked;
   }
+}
+
+// خانة "QC": تعيين/تغيير الأدمن المسؤول عن مراجعة الجودة لطلب معيّن
+async function updateOrderQcAssignee(orderNum, newQc) {
+  const row = (window.masterData || []).find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
+  if (!row) return;
+  const matchColumn = row.id !== undefined ? 'id' : (row['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+
+  try {
+    const { error } = await supabaseClient.from(TABLE_NAME).update({ qc: newQc || null }).eq(matchColumn, row[matchColumn]);
+    if (error) { alert('فشل تحديث QC: ' + error.message); return; }
+    row.qc = newQc || null;
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// خانة "حالة الطلب من QC": لو الـ QC رفض الطلب، حالة المراجعة الأساسية بترجع "لم يتم
+// المراجعة" تلقائيًا (يترجع الطلب تاني للمراجع يراجعه من جديد) - قرار الـ QC نفسه ("مرفوض")
+// بيفضل متسجل في عموده المنفصل زي ما هو، كسجل دائم لقرار مراجعة الجودة. وبنطلب تعليق إجباري
+// وقت الرفض عشان المراجع يعرف السبب بالظبط.
+async function updateOrderQcStatus(orderNum, newQcStatus) {
+  const row = (window.masterData || []).find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
+  if (!row) return;
+  const matchColumn = row.id !== undefined ? 'id' : (row['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+
+  const updateData = { qc_status: newQcStatus || null };
+
+  if (newQcStatus === 'مرفوض') {
+    const comment = prompt('اكتب تعليق يوضّح سبب رفض الـ QC (هيظهر للمراجع):');
+    if (comment === null) return; // ألغى العملية
+    if (!comment.trim()) { alert('لازم تكتب تعليق عشان المراجع يعرف السبب'); return; }
+    updateData.qc_comment = comment.trim();
+    updateData.review_status = 'لم يتم المراجعة';
+  } else {
+    // لو رجع "مقبول" أو مسح الاختيار، مفيش داعي نسيب تعليق رفض قديم معلّق هناك
+    updateData.qc_comment = null;
+  }
+
+  try {
+    const { error } = await supabaseClient.from(TABLE_NAME).update(updateData).eq(matchColumn, row[matchColumn]);
+    if (error) { alert('فشل تحديث حالة QC: ' + error.message); return; }
+    Object.assign(row, updateData);
+    if (newQcStatus === 'مرفوض') {
+      alert(`تم تسجيل رفض الـ QC، وتم إرجاع حالة المراجعة لـ "لم يتم المراجعة" عشان الطلب يترجع للمراجع.`);
+    }
+    renderCurrentPage(); // نعيد الرسم عشان عمود "المراجعة" وعمود التعليق يتحدثوا كمان
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// ============ تعليق QC سريع على طلب - نافذة صغيرة منفصلة عن مودال المراجعة الكامل ============
+let orderQcCommentTarget = null;
+
+function openOrderQcCommentModal(orderNum) {
+  orderQcCommentTarget = (window.masterData || []).find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
+  if (!orderQcCommentTarget) return;
+  document.getElementById('order-qc-comment-modal-order-no').value = orderNum;
+  document.getElementById('order-qc-comment-modal-textarea').value = orderQcCommentTarget.qc_comment || '';
+  document.getElementById('order-qc-comment-modal').style.display = 'flex';
+}
+
+function closeOrderQcCommentModal() {
+  document.getElementById('order-qc-comment-modal').style.display = 'none';
+  orderQcCommentTarget = null;
+}
+
+async function saveOrderQcComment() {
+  if (!orderQcCommentTarget) return;
+  const row = orderQcCommentTarget;
+  const matchColumn = row.id !== undefined ? 'id' : (row['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+  const newComment = document.getElementById('order-qc-comment-modal-textarea').value.trim() || null;
+
+  try {
+    const { error } = await supabaseClient.from(TABLE_NAME).update({ qc_comment: newComment }).eq(matchColumn, row[matchColumn]);
+    if (error) { alert('حصل خطأ أثناء حفظ التعليق: ' + error.message); return; }
+    row.qc_comment = newComment;
+    closeOrderQcCommentModal();
+    renderCurrentPage();
+  } catch (err) { alert('خطأ: ' + err.message); }
 }
 
 function toggleRowSelect(cb, orderNum) {
@@ -2296,6 +2339,36 @@ async function executeBulkReviewDecisionUpdate() {
       updateSelectedCount();
       document.getElementById('bulk-review-decision-select').value = '';
       await loadData();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// توزيع جماعي لعدة طلبات محددة على مسؤول QC معيّن دفعة واحدة (نفس فكرة توزيع المراجع فوق)
+async function executeBulkQcAssign() {
+  const newQc = document.getElementById('bulk-qc-assign-select').value;
+  if (!newQc) { alert('برجاء اختيار مسؤول QC من القائمة'); return; }
+  if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  if (targetOrders.length === 0) return;
+  const qcName = getDisplayName(newQc);
+
+  if (!confirm(`هل أنت متأكد من توزيع (${selectedOrderNumbers.size}) طلب على "${qcName}" لمراجعة الجودة (QC)؟`)) return;
+
+  const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
+  const matchValues = targetOrders.map(o => o[matchColumn]);
+
+  try {
+    const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'update', { qc: newQc });
+    if (error) { alert('حدث خطأ أثناء التوزيع: ' + error.message); }
+    else {
+      alert(`تم توزيع ${selectedOrderNumbers.size} طلب على "${qcName}" بنجاح!`);
+      targetOrders.forEach(o => { o.qc = newQc; });
+      selectedOrderNumbers.clear();
+      if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
+      updateSelectedCount();
+      document.getElementById('bulk-qc-assign-select').value = '';
+      renderCurrentPage();
     }
   } catch (err) { alert('خطأ: ' + err.message); }
 }
@@ -4100,6 +4173,15 @@ function openEditModal(orderNum) {
   const currentStatus = selectedOrder.review_status || selectedOrder['حالة المراجعة'] || 'مقبول';
   document.getElementById('modal-review-status').value = ['مقبول', 'مرفوض', 'معلق', 'Qc'].includes(currentStatus) ? currentStatus : 'مقبول';
   document.getElementById('modal-rejection-reason').value = selectedOrder.rejection_reason || selectedOrder.reason || selectedOrder['سبب الرفض'] || '';
+
+  // لو الطلب راجع بسبب رفض QC، نوريه للمراجع بشكل واضح فوق قبل ما ياخد قرار جديد
+  const qcBanner = document.getElementById('modal-qc-rejection-banner');
+  if (selectedOrder.qc_status === 'مرفوض' && selectedOrder.qc_comment) {
+    document.getElementById('modal-qc-rejection-text').innerText = selectedOrder.qc_comment;
+    qcBanner.style.display = 'block';
+  } else {
+    qcBanner.style.display = 'none';
+  }
 
   document.getElementById('edit-modal').style.display = 'flex';
   toggleRejectionField();

@@ -22,8 +22,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   
   <!-- ربط ملف التنسيقات CSS -->
@@ -258,6 +256,10 @@
                 <option value="">تغيير المراجع إلى...</option>
               </select>
               <button class="btn btn-secondary" onclick="executeBulkReassign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التغيير</button>
+              <select id="bulk-qc-assign-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
+                <option value="">توزيع على QC...</option>
+              </select>
+              <button class="btn btn-secondary" onclick="executeBulkQcAssign()" style="padding: 4px 10px; font-size: 12px;">تطبيق التوزيع</button>
               <input type="date" id="bulk-date-input" class="date-input" style="padding: 4px 8px; font-size: 12px;">
               <button class="btn btn-secondary" onclick="executeBulkDateUpdate()" style="padding: 4px 10px; font-size: 12px;">تطبيق التاريخ</button>
               <select id="bulk-status-select" class="filter-select" style="padding: 4px 8px; font-size: 12px;">
@@ -292,12 +294,15 @@
                   <th>المراجع</th>
                   <th>الحالة</th>
                   <th>المراجعة</th>
+                  <th>QC</th>
+                  <th>حالة الطلب من QC</th>
+                  <th>تعليق QC</th>
                   <th>التاريخ</th>
                   <th>سبب الرفض</th>
                 </tr>
               </thead>
               <tbody id="orders-tbody">
-                <tr><td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+                <tr><td colspan="13" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1032,9 +1037,8 @@
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
           إجمالي ما تمت مراجعته (مقبول + مرفوض) لكل مراجع منذ أول طلب مسجّل - بيتحدّث لحظيًا تلقائيًا مع أي تغيير جديد.
         </p>
-        <div id="reviewer-stats-chart-wrapper" style="position: relative; width: 100%; min-height: 420px;">
-          <div id="reviewer-stats-empty-msg" class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>
-          <canvas id="reviewer-stats-chart" style="display: none;"></canvas>
+        <div id="reviewer-stats-cards-container" class="stats-card-grid">
+          <div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>
         </div>
       </div>
     </div>
@@ -1108,6 +1112,28 @@
     </div>
   </div>
 
+  <!-- Modal تعليق QC على طلب في لوحة المراجعة الرئيسية -->
+  <div class="modal-overlay" id="order-qc-comment-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>💬 تعليق QC</h3>
+        <button class="close-btn" onclick="closeOrderQcCommentModal()">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>رقم الطلب</label>
+        <input type="text" id="order-qc-comment-modal-order-no" class="form-control" disabled>
+      </div>
+      <div class="form-group">
+        <label>التعليق (هيظهر للمراجع)</label>
+        <textarea id="order-qc-comment-modal-textarea" class="form-control" style="min-height: 100px;" placeholder="اكتب سبب الرفض أو أي ملاحظة للمراجع..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeOrderQcCommentModal()">إلغاء</button>
+        <button class="btn btn-primary" onclick="saveOrderQcComment()" style="width: auto;">حفظ التعليق</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal المراجعة -->
   <div class="modal-overlay" id="edit-modal">
     <div class="modal">
@@ -1121,6 +1147,10 @@
           <input type="text" id="modal-order-no" class="form-control" disabled style="flex:1;">
           <button type="button" class="btn btn-secondary" style="padding: 10px 12px; white-space:nowrap;" onclick="copyOrderNumberFromInput('modal-order-no', this)" title="نسخ رقم الطلب">📋 نسخ</button>
         </div>
+      </div>
+      <div id="modal-qc-rejection-banner" style="display:none; background: var(--badge-reject-bg); border: 1px solid var(--badge-reject-text); color: var(--badge-reject-text); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; font-weight: 700;">
+        ⚠️ الطلب ده رجع من مراجعة الجودة (QC) - راجع التعليق تحت قبل ما تاخد قرار:
+        <div id="modal-qc-rejection-text" style="font-weight: 400; margin-top: 6px;"></div>
       </div>
       <div class="form-group">
         <label>قرار المراجعة</label>

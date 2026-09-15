@@ -1692,15 +1692,22 @@ async function ensureFullMasterData() {
   }
 }
 
-// بيحسب "أحدث تاريخ" فعليًا وبدقة (مش بس افتراضًا إن آخر id المتاح = أحدث تاريخ، لأن ده بيغلط
-// لو حصل تعديل/إعادة توزيع لصف قديم بعد إضافة صفوف أحدث - بيدي الصف القديم id أكبر بالغلط).
-// بيجيب عمود "date" بس (خفيف، مش الجدول كله)، وطبيعي إن ده بيحترم RLS: المراجع العادي هيرجعله
-// بس تواريخ طلباته هو، والأدمن هيرجعله كل التواريخ.
+// بيحسب "أحدث تاريخ" فعليًا وبدقة، من غير ما يجيب الجدول كله (ده اللي كان بيبطّئ التحميل).
+// بيجيب بس آخر 300 صف بترتيب الـ id (استعلام واحد سريع، عمود "date" بس)، وياخد أحدث تاريخ
+// حقيقي منهم بعد التطبيع (parseToIsoDate) - ده بيغطي حالة إن صف قديم اتعدّل/اتوزّع تاني
+// بعد ما صفوف أحدث اتضافت (300 صف مسافة كافية جدًا عمليًا)، من غير ما نجيب آلاف الصفوف.
+// طبيعي إن ده بيحترم RLS: المراجع العادي هيرجعله بس تواريخ طلباته هو، والأدمن هيرجعله كل التواريخ.
 async function findLatestVisibleDate() {
-  const dateRows = await fetchAllRowsPaginated((from, to) =>
-    supabaseClient.from(TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').range(from, to)
-  );
-  const dates = dateRows.map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+  const { data, error } = await supabaseClient
+    .from(TABLE_NAME)
+    .select('date')
+    .not('date', 'is', null)
+    .neq('date', '')
+    .order('id', { ascending: false })
+    .limit(300);
+  if (error) throw error;
+
+  const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
   return dates[0] || '';
 }
 

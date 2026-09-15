@@ -734,6 +734,7 @@ async function setupUserSession(profile) {
   document.getElementById('admin-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('select-all-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-action-header').style.display = isAdmin ? 'table-cell' : 'none';
+  document.getElementById('action-time-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
   const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
   if (bulkDeleteBtn) bulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
@@ -769,6 +770,8 @@ async function setupUserSession(profile) {
   const rejFilterWrapper = document.getElementById('rejections-reviewer-filter-wrapper');
   if (rejFilterLabel) rejFilterLabel.style.display = isAdmin ? 'inline' : 'none';
   if (rejFilterWrapper) rejFilterWrapper.style.display = isAdmin ? 'inline-block' : 'none';
+  const rejActionTimeHeader = document.getElementById('rejections-action-time-header');
+  if (rejActionTimeHeader) rejActionTimeHeader.style.display = isAdmin ? 'table-cell' : 'none';
 
   const rejLayoutLabel = document.getElementById('rejections-layout-filter-label');
   const rejLayoutWrapper = document.getElementById('rejections-layout-filter-wrapper');
@@ -1536,6 +1539,24 @@ function extractDateString(item) {
   return parseToIsoDate(item.date || item.created_at || item['التاريخ'] || item['تاريخ الطلب'] || '');
 }
 
+// بيرجّع "تاريخ ووقت آخر إجراء" اتسجل على الصف (عمود action_at) مُنسّق بتوقيت مصر (Africa/Cairo)،
+// للعرض للأدمن بس. بيرجع '-' لو العمود مش موجود لسه (قبل ما تشغّل سكريبت الـ SQL الخاص بيه).
+function formatActionTimestamp(item) {
+  const raw = item && item.action_at;
+  if (!raw) return '-';
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return '-';
+  try {
+    return d.toLocaleString('ar-EG', {
+      timeZone: 'Africa/Cairo',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: true
+    });
+  } catch (e) {
+    return d.toISOString();
+  }
+}
+
 // بيبني فلتر "OR" يقارن عمود date في قاعدة البيانات بكل الصيغ المحتملة لنفس التاريخ (ISO زي
 // 2026-08-07، وM/D/Y وMM/DD/YYYY وD/M/Y بكل احتمالات الأصفار) - عشان لو فيه صفوف قديمة اتسجلت
 // بصيغة تاريخ مختلفة عن اللي بيحطها حقل اختيار التاريخ (type="date")، لسه تتفلتر وتظهر صح بدل
@@ -1936,7 +1957,8 @@ function renderTable(orders) {
   tbody.innerHTML = '';
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    const isAdminEmpty = currentUser && currentUser.role === 'admin';
+    tbody.innerHTML = `<tr><td colspan="${isAdminEmpty ? 14 : 13}" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
 
@@ -1989,6 +2011,8 @@ function renderTable(orders) {
       ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" title="${qcCommentValue.replace(/"/g, '&quot;')}" onclick="openOrderQcCommentModal('${orderNum}')">💬 ${qcCommentValue.length > 15 ? qcCommentValue.slice(0, 15) + '…' : qcCommentValue}</button>`
       : (isAdmin ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; opacity:0.7;" onclick="openOrderQcCommentModal('${orderNum}')">➕ تعليق</button>` : '-');
 
+    const actionTimeCellHtml = isAdmin ? `<td class="action-time-cell">${formatActionTimestamp(order)}</td>` : '';
+
     tbody.innerHTML += `
       <tr>
         ${checkboxHtml}
@@ -2009,6 +2033,7 @@ function renderTable(orders) {
         <td>${qcCommentCellHtml}</td>
         <td>${formattedDate}</td>
         <td>${rejectionReason}</td>
+        ${actionTimeCellHtml}
       </tr>
     `;
   });
@@ -5345,7 +5370,7 @@ function renderRejectionsTab() {
   }
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 10 : 9}" style="text-align:center;">لا توجد طلبات مرفوضة مطابقة</td></tr>`;
   } else {
     tbody.innerHTML = rows.map(o => {
       const orderNum = o.order_number || '-';
@@ -5380,6 +5405,7 @@ function renderRejectionsTab() {
       if (!actionsHtml) actionsHtml = '-';
 
       const isChecked = selectedRejectionOrderNumbers.has(orderNum) ? 'checked' : '';
+      const actionTimeCellHtml = isAdmin ? `<td class="action-time-cell">${formatActionTimestamp(o)}</td>` : '';
 
       return `
         <tr>
@@ -5392,6 +5418,7 @@ function renderRejectionsTab() {
           <td>${date}</td>
           <td>${substatusBadge}</td>
           <td style="display:flex; gap:6px; flex-wrap:wrap;">${actionsHtml}</td>
+          ${actionTimeCellHtml}
         </tr>`;
     }).join('');
   }
@@ -5961,7 +5988,7 @@ function renderCertTable(orders) {
   tbody.innerHTML = '';
 
   if (orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
 
@@ -5997,6 +6024,7 @@ function renderCertTable(orders) {
         <td><span class="badge ${badgeClass}">${status}</span></td>
         <td ${dateClass}>${date}</td>
         <td>${reason}</td>
+        <td class="action-time-cell">${formatActionTimestamp(order)}</td>
       </tr>`;
   });
 
@@ -6933,7 +6961,7 @@ function renderMawaqefPage() {
   if (!tbody) return;
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     document.getElementById('mawaqef-pagination-info').innerText = '';
     return;
   }
@@ -6960,6 +6988,7 @@ function renderMawaqefPage() {
         <td>${o.city || '-'}</td>
         <td>${extractDateString(o) || '-'}</td>
         <td>${commentBtn}</td>
+        <td class="action-time-cell">${formatActionTimestamp(o)}</td>
         <td style="display:flex; gap:6px; flex-wrap:wrap;">
           <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="openMawaqefEditModal('${o.id}')">تحديث</button>
           ${canDeleteMawaqef() ? `<button class="btn-delete-row" onclick="deleteSingleMawaqefRow('${o.id}')">🗑️ مسح</button>` : ''}

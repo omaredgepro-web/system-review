@@ -224,6 +224,9 @@ td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--card-bo
 
 .order-no-cell { direction: ltr; text-align: right; font-family: monospace, 'Cairo', sans-serif; font-weight: 600; letter-spacing: 0.5px; }
 
+/* عمود "تاريخ ووقت آخر إجراء" - يظهر للأدمن بس في جداول المراجعة/الشهادات/المواقف/المرفوضات */
+.action-time-cell { font-size: 12px; color: var(--text-muted); white-space: nowrap; direction: ltr; text-align: right; }
+
 .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .badge-accepted { background: var(--badge-accept-bg); color: var(--badge-accept-text); }
 .badge-rejected { background: var(--badge-reject-bg); color: var(--badge-reject-text); }

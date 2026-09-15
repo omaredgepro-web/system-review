@@ -1692,34 +1692,28 @@ async function ensureFullMasterData() {
   }
 }
 
+// بيحسب "أحدث تاريخ" فعليًا وبدقة (مش بس افتراضًا إن آخر id المتاح = أحدث تاريخ، لأن ده بيغلط
+// لو حصل تعديل/إعادة توزيع لصف قديم بعد إضافة صفوف أحدث - بيدي الصف القديم id أكبر بالغلط).
+// بيجيب عمود "date" بس (خفيف، مش الجدول كله)، وطبيعي إن ده بيحترم RLS: المراجع العادي هيرجعله
+// بس تواريخ طلباته هو، والأدمن هيرجعله كل التواريخ.
+async function findLatestVisibleDate() {
+  const dateRows = await fetchAllRowsPaginated((from, to) =>
+    supabaseClient.from(TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').range(from, to)
+  );
+  const dates = dateRows.map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+  return dates[0] || '';
+}
+
 async function loadData() {
   const tbody = document.getElementById('orders-tbody');
   tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري جلب البيانات من Supabase...</td></tr>`;
 
   try {
-    // الخطوة 1: تحديد التاريخ المستهدف (المحدد يدويًا فوق، أو أحدث تاريخ موجود فعليًا في الجدول)
-    // - استعلام صغير جدًا (عمود واحد، صف واحد) بدل ما نجيب الجدول كله عشان نعرف أحدث تاريخ.
+    // الخطوة 1: تحديد التاريخ المستهدف (المحدد يدويًا فوق، أو أحدث تاريخ فعليًا مرئي للمستخدم الحالي)
     let targetDate = document.getElementById('date-filter').value;
 
     if (!targetDate) {
-      // بنجيب عمود "date" بس (مش الجدول كله) لكل الصفوف، وبنحسب أحدث تاريخ في المتصفح
-      // بعد ما نمرّره على parseToIsoDate - عشان لو فيه صفوف قديمة بصيغة تاريخ مختلفة
-      // (زي "3/5/2026" بدل "2026-05-03")، الترتيب النصي في قاعدة البيانات ميغلطش
-      // ويختار تاريخ غلط على إنه "الأحدث".
-      // أسرع طريقة وأدق من غير ما نجيب الجدول كله ومن غير ما نعتمد على ترتيب نصي للتاريخ:
-      // بما إن أحدث الطلبات دايمًا بتتضاف بأعلى id (ترقيم تلقائي تصاعدي)، بنجيب بس آخر صف
-      // اتضاف فعليًا (استعلام لصف واحد، سريع جدًا) وناخد تاريخه كـ "أحدث تاريخ".
-      const { data: lastInsertedRow, error: latestErr } = await supabaseClient
-        .from(TABLE_NAME)
-        .select('date')
-        .not('date', 'is', null)
-        .neq('date', '')
-        .order('id', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (latestErr) throw latestErr;
-
-      targetDate = (lastInsertedRow && parseToIsoDate(lastInsertedRow.date)) || '';
+      targetDate = await findLatestVisibleDate();
     }
 
     // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله. بنقارن بكل صيغ

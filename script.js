@@ -2383,7 +2383,10 @@ async function executeBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  // مهم: بنقصر البحث على window.allData (بيانات التاريخ المعروض حاليًا بس)، مش window.masterData
+  // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
+  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
@@ -2391,8 +2394,13 @@ async function executeBulkDelete() {
     const error = await runBatchedSupabaseAction(TABLE_NAME, matchColumn, matchValues, 'delete');
     if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); } 
     else {
-      alert(`تم حذف ${selectedOrderNumbers.size} طلب بنجاح!`);
-      window.masterData = window.masterData.filter(o => !selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+      alert(`تم حذف ${targetOrders.length} طلب بنجاح!`);
+      // بنشيل من الذاكرة بس نفس الصفوف اللي فعليًا اتحذفت (بالـ id لو متاح)، مش أي صف تاني بنفس رقم الطلب
+      const deletedIds = matchColumn === 'id' ? new Set(matchValues) : null;
+      window.masterData = window.masterData.filter(o => {
+        if (deletedIds) return !deletedIds.has(o.id);
+        return !selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']);
+      });
       selectedOrderNumbers.clear();
       if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateSelectedCount();
@@ -2448,7 +2456,9 @@ async function deleteSingleOrder(orderNum) {
     if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); } 
     else {
       alert('تم حذف الطلب بنجاح!');
-      window.masterData = window.masterData.filter(o => String(o.order_number || o.order_no || o['رقم الطلب']) !== String(orderNum));
+      // مهم: نشيل بس الصف اللي فعليًا اتحذف (نفس الـ id)، مش أي صف تاني بنفس رقم الطلب على تاريخ مختلف -
+      // لو رقم الطلب مكرر على أكتر من تاريخ، النسخة التانية لازم تفضل زي ما هي تمامًا.
+      window.masterData = window.masterData.filter(o => o.id !== targetOrder.id);
       selectedOrderNumbers.delete(orderNum);
       updateSelectedCount();
       applyDateFiltering();
@@ -6287,16 +6297,20 @@ async function executeCertBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedCertOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
-  if (targetOrders.length === 0) return;
+  // مهم: بنقصر البحث على certAllData (بيانات التاريخ المعروض حاليًا بس)، مش certMasterData
+  // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
   const matchValues = targetOrders.map(o => o.id);
 
   try {
     const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'delete');
     if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); }
     else {
-      alert(`تم حذف ${selectedCertOrderNumbers.size} طلب بنجاح!`);
-      certMasterData = certMasterData.filter(o => !selectedCertOrderNumbers.has(o.order_number));
+      alert(`تم حذف ${targetOrders.length} طلب بنجاح!`);
+      // بنشيل من الذاكرة بس نفس الصفوف اللي فعليًا اتحذفت (بالـ id)، مش أي صف تاني بنفس رقم الطلب
+      const deletedIds = new Set(matchValues);
+      certMasterData = certMasterData.filter(o => !deletedIds.has(o.id));
       selectedCertOrderNumbers.clear();
       if (showOnlySelectedCert) { showOnlySelectedCert = false; const __b = document.getElementById('show-selected-only-cert-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
       updateCertSelectedCount();
@@ -6318,7 +6332,8 @@ async function deleteSingleCertOrder(orderNum) {
     if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); }
     else {
       alert('تم حذف الطلب بنجاح!');
-      certMasterData = certMasterData.filter(o => String(o.order_number) !== String(orderNum));
+      // بنشيل بس نفس الصف اللي فعليًا اتحذف (بالـ id)، مش أي صف تاني بنفس رقم الطلب على تاريخ مختلف
+      certMasterData = certMasterData.filter(o => o.id !== targetOrder.id);
       selectedCertOrderNumbers.delete(orderNum);
       updateCertSelectedCount();
       applyCertDateFiltering();
@@ -7069,15 +7084,17 @@ async function executeMawaqefBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedMawaqefOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
-  if (targetOrders.length === 0) return;
+  // مهم: بنقصر البحث على mawaqefAllData (بيانات التاريخ المعروض حاليًا بس)، مش mawaqefMasterData
+  // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
+  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
   const matchValues = targetOrders.map(o => o.id);
 
   try {
     const error = await runBatchedSupabaseAction(MAWAQEF_TABLE_NAME, 'id', matchValues, 'delete');
     if (error) { alert('حدث خطأ أثناء الحذف: ' + error.message); }
     else {
-      alert(`تم حذف ${selectedMawaqefOrderNumbers.size} طلب بنجاح.`);
+      alert(`تم حذف ${targetOrders.length} طلب بنجاح.`);
       const idsToRemove = new Set(matchValues);
       mawaqefMasterData = mawaqefMasterData.filter(o => !idsToRemove.has(o.id));
       selectedMawaqefOrderNumbers.clear();

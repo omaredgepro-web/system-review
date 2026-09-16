@@ -5625,7 +5625,7 @@ function renderRejectionsTab() {
           <td>${reason}</td>
           <td>${date}</td>
           <td>${substatusBadge}</td>
-          <td style="display:flex; gap:6px; flex-wrap:wrap;">${actionsHtml}</td>
+          <td><div style="display:flex; gap:6px; flex-wrap:nowrap; align-items:center;">${actionsHtml}</div></td>
           ${actionTimeCellHtml}
         </tr>`;
     }).join('');
@@ -7256,9 +7256,11 @@ function renderMawaqefPage() {
         <td>${extractDateString(o) || '-'}</td>
         <td>${commentBtn}</td>
         <td class="action-time-cell">${formatActionTimestamp(o)}</td>
-        <td style="display:flex; gap:6px; flex-wrap:wrap;">
-          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="openMawaqefEditModal('${o.id}')">تحديث</button>
-          ${canDeleteMawaqef() ? `<button class="btn-delete-row" onclick="deleteSingleMawaqefRow('${o.id}')">🗑️ مسح</button>` : ''}
+        <td>
+          <div style="display:flex; gap:6px; flex-wrap:nowrap; align-items:center;">
+            <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="openMawaqefEditModal('${o.id}')">تحديث</button>
+            ${canDeleteMawaqef() ? `<button class="btn-delete-row" onclick="deleteSingleMawaqefRow('${o.id}')">🗑️ مسح</button>` : ''}
+          </div>
         </td>
       </tr>`;
   }).join('');

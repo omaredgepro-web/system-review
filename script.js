@@ -5621,29 +5621,85 @@ function exportRejectionsOrderNumbers() {
   XLSX.writeFile(workbook, `مرفوضات${substatusLabel}_${dateLabel}.xlsx`);
 }
 
+let rejectionsStatsChartInstance = null;
+
+// إحصائية مرفوضات الطباعة (من أول تاريخ لحد الآن): إجمالي الطلبات اللي لسه فعليًا "مرفوض"
+// لكل مراجع، من غير ما نحسب اللي اتعمله "تم التعديل" (يعني اتحل)، مرتبة من الأعلى للأقل.
 function renderRejectionsReviewerStats() {
-  const container = document.getElementById('rejections-reviewer-stats');
-  if (!container) return;
+  const emptyEl = document.getElementById('rejections-reviewer-stats-empty');
+  const wrapper = document.getElementById('rejections-reviewer-stats-chart-wrapper');
+  const canvas = document.getElementById('rejections-reviewer-stats-chart');
+  const totalEl = document.getElementById('rejections-reviewer-stats-total');
+  if (!canvas || !wrapper) return;
+
+  // ملحوظة: بنحسب من getRejectedCertRows() مباشرة (كل التواريخ) مش rejectionsAllData
+  // (اللي ممكن تكون متفلترة على تاريخ معيّن دلوقتي) - عشان الإحصائية دي دايمًا "من أول تاريخ لحد الآن"
+  const allTimeRejected = getRejectedCertRows().filter(o => getRejectionSubstatus(o) !== 'EDITED');
 
   const counts = {};
-  (rejectionsAllData || []).forEach(o => {
+  allTimeRejected.forEach(o => {
     const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
     const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || 'غير محدد');
     counts[reviewerName] = (counts[reviewerName] || 0) + 1;
   });
 
-  const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-  if (names.length === 0) {
-    container.innerHTML = '<p style="font-size:12px; color:var(--text-muted);">لا يوجد رفض مسجل لهذا التاريخ</p>';
+  const rows = Object.keys(counts)
+    .map(name => ({ name, total: counts[name] }))
+    .sort((a, b) => b.total - a.total);
+
+  if (rows.length === 0) {
+    emptyEl.innerText = 'لا يوجد أي طلب مرفوض مسجل حتى الآن.';
+    wrapper.style.display = 'none';
+    totalEl.innerText = '';
     return;
   }
+  emptyEl.innerText = '';
+  wrapper.style.display = 'block';
 
-  container.innerHTML = names.map(name => `
-    <div class="reviewer-stat">
-      <div class="reviewer-info"><div class="name">${name}</div></div>
-      <div class="reviewer-counts"><div class="count-rejected">${counts[name]} طلب</div></div>
-    </div>
-  `).join('');
+  const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
+  totalEl.innerText = `الإجمالي: ${grandTotal.toLocaleString('ar-EG')} طلب مرفوض`;
+
+  const chartHeight = Math.max(260, rows.length * 36 + 40);
+  wrapper.style.height = chartHeight + 'px';
+
+  if (rejectionsStatsChartInstance) rejectionsStatsChartInstance.destroy();
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const rejectColor = rootStyles.getPropertyValue('--badge-reject-text').trim() || '#f87171';
+  const textColor = rootStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
+  const mainTextColor = rootStyles.getPropertyValue('--text-main').trim() || '#e2e8f0';
+  const gridColor = rootStyles.getPropertyValue('--card-border').trim() || 'rgba(255,255,255,0.08)';
+
+  if (window.ChartDataLabels) Chart.register(ChartDataLabels);
+
+  rejectionsStatsChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: rows.map(r => r.name),
+      datasets: [{
+        label: 'مرفوض',
+        data: rows.map(r => r.total),
+        backgroundColor: rejectColor,
+        datalabels: {
+          display: true, anchor: 'end', align: 'end', offset: 4,
+          color: mainTextColor, font: { weight: '700', size: 12 },
+          formatter: (value) => value.toLocaleString('ar-EG')
+        }
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      layout: { padding: { right: 40 } },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: textColor }, grid: { color: gridColor } },
+        y: { ticks: { color: mainTextColor, font: { size: 12, weight: '600' } }, grid: { display: false } }
+      }
+    }
+  });
 }
 
 // بيرجّع صفوف certMasterData الخاصة بالنوع المعروض حاليًا بس (عادي أو تعمير)

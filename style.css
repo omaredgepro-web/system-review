@@ -193,7 +193,10 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 .count-rejected { color: var(--badge-reject-text); }
 
 .main-content { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; width: 100%; }
-.table-container { overflow-x: auto; position: relative; width: 100%; max-width: 100%; }
+.table-container { overflow-x: auto; overflow-y: auto; max-height: 75vh; position: relative; width: 100%; max-width: 100%; }
+.table-container thead th { position: sticky; top: 0; z-index: 15; background-color: var(--card-bg); }
+.table-container .sticky-action-col { z-index: 16; }
+.table-container thead th.sticky-action-col { z-index: 17; }
 
 /* جدول طباعة الشهادات (100 طلب في الصفحة) - سكرول رأسي مع تثبيت رأس الجدول
    عشان يفضل ظاهر وانت بتحدد وبتنزل تحت */

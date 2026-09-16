@@ -2286,6 +2286,20 @@ function renderCurrentPage() {
   updatePaginationControls(from + 1, Math.min(to, totalRecordsCount));
 }
 
+function getReviewStatusBadgeClass(reviewStatus) {
+  if (reviewStatus === 'مقبول') return 'badge-accepted';
+  if (reviewStatus === 'مرفوض') return 'badge-rejected';
+  if (reviewStatus === 'معلق') return 'badge-hold';
+  if (reviewStatus === 'Qc') return 'badge-qc';
+  return 'badge-unreviewed';
+}
+
+function buildQcCommentCellHtml(orderNum, qcCommentValue, isAdmin) {
+  return qcCommentValue
+    ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" title="${qcCommentValue.replace(/"/g, '&quot;')}" onclick="openOrderQcCommentModal('${orderNum}')">💬 ${qcCommentValue.length > 15 ? qcCommentValue.slice(0, 15) + '…' : qcCommentValue}</button>`
+    : (isAdmin ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; opacity:0.7;" onclick="openOrderQcCommentModal('${orderNum}')">➕ تعليق</button>` : '-');
+}
+
 function renderTable(orders) {
   const tbody = document.getElementById('orders-tbody');
   tbody.innerHTML = '';
@@ -2311,11 +2325,7 @@ function renderTable(orders) {
     const qcStatusValue = order.qc_status || '';
     const qcCommentValue = order.qc_comment || '';
 
-    let reviewBadge = 'badge-unreviewed';
-    if (reviewStatus === 'مقبول') reviewBadge = 'badge-accepted';
-    if (reviewStatus === 'مرفوض') reviewBadge = 'badge-rejected';
-    if (reviewStatus === 'معلق') reviewBadge = 'badge-hold';
-    if (reviewStatus === 'Qc') reviewBadge = 'badge-qc';
+    let reviewBadge = getReviewStatusBadgeClass(reviewStatus);
 
     const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
@@ -2341,14 +2351,12 @@ function renderTable(orders) {
 
     // زرار تعليق الـ QC: بيبان بس لو فيه تعليق فعلاً (غالبًا اتسجل تلقائيًا وقت الرفض)،
     // وبيقدر أي حد يشوفه أو يعدّله وقت ما يحتاج
-    const qcCommentCellHtml = qcCommentValue
-      ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" title="${qcCommentValue.replace(/"/g, '&quot;')}" onclick="openOrderQcCommentModal('${orderNum}')">💬 ${qcCommentValue.length > 15 ? qcCommentValue.slice(0, 15) + '…' : qcCommentValue}</button>`
-      : (isAdmin ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; opacity:0.7;" onclick="openOrderQcCommentModal('${orderNum}')">➕ تعليق</button>` : '-');
+    const qcCommentCellHtml = buildQcCommentCellHtml(orderNum, qcCommentValue, isAdmin);
 
     const actionTimeCellHtml = isAdmin ? `<td class="action-time-cell">${formatActionTimestamp(order)}</td>` : '';
 
     tbody.innerHTML += `
-      <tr>
+      <tr data-ordernum="${orderNum}">
         ${checkboxHtml}
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openEditModal('${orderNum}')">مراجعة</button></td>
         ${adminCellHtml}
@@ -2361,10 +2369,10 @@ function renderTable(orders) {
         <td>${company}</td>
         <td>${reviewer}</td>
         <td><span class="badge badge-pending">${progressStatus}</span></td>
-        <td><span class="badge ${reviewBadge}">${reviewStatus}</span></td>
+        <td class="review-status-cell"><span class="badge ${reviewBadge}">${reviewStatus}</span></td>
         <td>${qcCellHtml}</td>
         <td>${qcStatusCellHtml}</td>
-        <td>${qcCommentCellHtml}</td>
+        <td class="qc-comment-cell">${qcCommentCellHtml}</td>
         <td>${formattedDate}</td>
         <td>${rejectionReason}</td>
         ${actionTimeCellHtml}
@@ -2421,7 +2429,18 @@ async function updateOrderQcStatus(orderNum, newQcStatus) {
     if (newQcStatus === 'مرفوض') {
       alert(`تم تسجيل رفض الـ QC، وتم إرجاع حالة المراجعة لـ "لم يتم المراجعة" عشان الطلب يترجع للمراجع.`);
     }
-    renderCurrentPage(); // نعيد الرسم عشان عمود "المراجعة" وعمود التعليق يتحدثوا كمان
+    // بنحدّث خلية الصف ده بس (مش الجدول كله) - عشان لو فيه صفوف تانية متحددة بـ checkbox،
+    // إعادة رسم الجدول بالكامل كانت بتسيب أثر غريب وبتفقد التحديد. التحديث المباشر ده
+    // بيسيب باقي الصفوف والتحديدات زي ما هي تمامًا.
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    const tr = document.querySelector(`#orders-tbody tr[data-ordernum="${CSS.escape(String(orderNum))}"]`);
+    if (tr) {
+      const reviewStatus = row.review_status || 'لم يتم المراجعة';
+      const statusCell = tr.querySelector('.review-status-cell');
+      if (statusCell) statusCell.innerHTML = `<span class="badge ${getReviewStatusBadgeClass(reviewStatus)}">${reviewStatus}</span>`;
+      const commentCell = tr.querySelector('.qc-comment-cell');
+      if (commentCell) commentCell.innerHTML = buildQcCommentCellHtml(orderNum, row.qc_comment || '', isAdmin);
+    }
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
@@ -2452,7 +2471,15 @@ async function saveOrderQcComment() {
     if (error) { alert('حصل خطأ أثناء حفظ التعليق: ' + error.message); return; }
     row.qc_comment = newComment;
     closeOrderQcCommentModal();
-    renderCurrentPage();
+    // تحديث خلية التعليق بس في الصف ده، من غير ما نعيد رسم الجدول كله (يحافظ على أي تحديد
+    // بالـ checkbox في باقي الصفوف)
+    const orderNum = row.order_number || row.order_no || row['رقم الطلب'];
+    const tr = document.querySelector(`#orders-tbody tr[data-ordernum="${CSS.escape(String(orderNum))}"]`);
+    if (tr) {
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      const commentCell = tr.querySelector('.qc-comment-cell');
+      if (commentCell) commentCell.innerHTML = buildQcCommentCellHtml(orderNum, newComment || '', isAdmin);
+    }
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
@@ -5599,7 +5626,10 @@ function getRejectionsRowsBeforeSubstatus() {
   const selectedLayouts = getMultiSelectValues('rejections-layout-filter');
   const typeValue = document.getElementById('rejections-type-filter').value;
 
-  let rows = rejectionsAllData || [];
+  // لو فيه نص في خانة البحث، بندور في كل التواريخ مش بس التاريخ المعروض حاليًا - عشان
+  // نلاقي الطلب حتى لو مسجل بتاريخ مختلف تمامًا (نفس فكرة البحث في تاب الشهادات)
+  const searchingAllDates = !!searchValue;
+  let rows = searchingAllDates ? getRejectedCertRows() : (rejectionsAllData || []);
 
   if (!isMultiSelectAll('rejections-reviewer-filter')) {
     rows = rows.filter(o => selectedReviewers.some(rv => o.reviewer === rv || getDisplayName(o.reviewer) === getDisplayName(rv)));
@@ -5690,6 +5720,17 @@ function renderRejectionsTab() {
 
   let rows = getFilteredRejectionsRows();
   const isAdmin = currentUser && currentUser.role === 'admin';
+
+  // لو فيه بحث شغال، وضّح في الشريط العلوي إننا بندور في كل التواريخ مش التاريخ المعروض بس
+  const searchValue = (document.getElementById('rejections-search-input').value || '').trim();
+  const dateLabelEl = document.getElementById('rejections-active-date-label');
+  if (searchValue && dateLabelEl) {
+    dateLabelEl.innerText = `🔍 نتائج البحث من كل التواريخ عن "${searchValue}"`;
+  } else if (dateLabelEl && dateLabelEl.innerText.startsWith('🔍')) {
+    // اتمسح نص البحث - نرجّع نص التاريخ العادي بدل نص البحث القديم
+    applyRejectionsDateFiltering();
+    return;
+  }
 
   // لوحة توزيع الحالات الأربعة - بتحسب على كل الفلاتر ما عدا فلتر "حالة المراجعة" نفسه،
   // عشان تفضل توريك التوزيع الحقيقي بغض النظر عن أي حالة مختارة في الفلتر دلوقتي.

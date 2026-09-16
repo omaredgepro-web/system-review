@@ -737,8 +737,6 @@ async function setupUserSession(profile) {
   document.getElementById('action-time-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('rejections-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
-  const dashboardMultiSelectBtn = document.getElementById('dashboard-multiselect-btn');
-  if (dashboardMultiSelectBtn) dashboardMultiSelectBtn.style.display = isAdmin ? 'inline-flex' : 'none';
   const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
   if (bulkDeleteBtn) bulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   const certBulkDeleteBtn = document.getElementById('cert-bulk-delete-btn');

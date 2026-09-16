@@ -189,7 +189,7 @@
             </select>
           </div>
 
-          <!-- شريط الإجراءات الجماعية المنظم بـ Groups -->
+          <!-- شريط الإجراءات الجماعية للأدمن -->
           <div id="admin-bulk-bar" class="admin-bulk-actions">
             <!-- Group 1: التحديد -->
             <div class="bulk-group">
@@ -211,7 +211,7 @@
             </div>
             <!-- Group 4: تحديث الحالة والتاريخ والقرار -->
             <div class="bulk-group">
-              <input type="date" id="bulk-date-input" class="date-input btn-sm" style="width: 120px;">
+              <input type="date" id="bulk-date-input" class="date-input btn-sm" style="width: 130px;">
               <button class="btn btn-secondary btn-sm" onclick="executeBulkDateUpdate()">تطبيق التاريخ</button>
               <select id="bulk-status-select" class="filter-select btn-sm" style="width: 130px;">
                 <option value="">حالة المراجعة...</option>
@@ -224,7 +224,7 @@
                 <option value="مقبول">✅ مقبول</option>
                 <option value="مرفوض">❌ مرفوض</option>
                 <option value="معلق">⏸️ معلق</option>
-                <option value="لم يتم المراجعة">⏳ لم يتم المراجعة</option>
+                <option value="لم يتم المراجعة">⏳ لم يتم</option>
               </select>
               <button class="btn btn-secondary btn-sm" onclick="executeBulkReviewDecisionUpdate()">تطبيق القرار</button>
             </div>
@@ -492,7 +492,7 @@
             <button id="show-selected-only-cert-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedCert()">📌 عرض المحدد فقط</button>
           </div>
           <div class="bulk-group">
-            <input type="number" id="cert-bulk-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
+            <input type="number" id="cert-bulk-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 100px;">
             <button class="btn btn-secondary btn-sm" onclick="selectNextCertBatch()">تحديد التالي (غير موزع)</button>
           </div>
           <div class="bulk-group">
@@ -500,7 +500,7 @@
             <button class="btn btn-secondary btn-sm" onclick="executeCertBulkReassign()">تطبيق التوزيع</button>
           </div>
           <div class="bulk-group">
-            <input type="date" id="cert-bulk-date-input" class="date-input btn-sm" style="width: 120px;">
+            <input type="date" id="cert-bulk-date-input" class="date-input btn-sm" style="width: 130px;">
             <button class="btn btn-secondary btn-sm" onclick="executeCertBulkDateUpdate()">تطبيق التاريخ</button>
           </div>
           <div class="bulk-group">
@@ -518,7 +518,7 @@
             <button class="btn btn-secondary btn-sm" onclick="executeCertBulkStatusUpdate()">تطبيق الحالة</button>
           </div>
           <div class="bulk-group">
-            <select id="cert-bulk-type-select" class="filter-select btn-sm" style="width: 100px;">
+            <select id="cert-bulk-type-select" class="filter-select btn-sm" style="width: 110px;">
               <option value="">نقل النوع...</option>
               <option value="عادي">🖨️ عادي</option>
               <option value="تعمير">📠 تعمير</option>
@@ -526,7 +526,7 @@
             <button class="btn btn-secondary btn-sm" onclick="executeCertBulkTypeUpdate()">تطبيق النقل</button>
           </div>
           <div class="bulk-group">
-            <input type="number" id="cert-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 70px;">
+            <input type="number" id="cert-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
             <button class="btn btn-secondary btn-sm" onclick="selectNextCertFromFiltered()">تحديد الأول من النتائج</button>
             <button class="btn btn-secondary btn-sm" onclick="exportSelectedCertOrderNumbers()">📥 تصدير (Excel)</button>
             <button class="btn btn-secondary btn-sm" onclick="exportSelectedCertOrderNumbersTxt()">📄 تصدير (TXT)</button>
@@ -625,7 +625,7 @@
             <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
 
-          <!-- شريط الإجراءات الجماعية لتاب المرفوضات منظم بمجموعات -->
+          <!-- شريط الإجراءات الجماعية لتاب المرفوضات -->
           <div id="rejections-bulk-bar" class="admin-bulk-actions">
             <div class="bulk-group">
               <span class="bulk-label">تم تحديد: <span id="rejections-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
@@ -636,7 +636,7 @@
               <select id="rejections-bulk-action-select" class="filter-select btn-sm" style="width: 160px;">
                 <option value="">تطبيق حالة المراجعة...</option>
                 <option value="تم التعديل">✅ تم التعديل</option>
-                <option value="تم الرفض للشركة">🚫 رفض نهائي (تم الرفض للشركة)</option>
+                <option value="تم الرفض للشركة">🚫 رفض نهائي</option>
               </select>
               <button class="btn btn-secondary btn-sm" onclick="executeRejectionsBulkAction()">تطبيق</button>
             </div>
@@ -825,7 +825,7 @@
           <div id="mawaqef-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
         </div>
 
-        <!-- شريط الإجراءات الجماعية لتاب المواقف منظم بمجموعات -->
+        <!-- شريط الإجراءات الجماعية لتاب المواقف -->
         <div class="admin-bulk-actions">
           <div class="bulk-group">
             <span class="bulk-label">تم تحديد: <span id="mawaqef-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
@@ -833,7 +833,7 @@
             <button id="show-selected-only-mawaqef-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedMawaqef()">📌 عرض المحدد فقط</button>
           </div>
           <div class="bulk-group">
-            <select id="mawaqef-bulk-status-select" class="filter-select btn-sm" style="width: 160px;">
+            <select id="mawaqef-bulk-status-select" class="filter-select btn-sm" style="width: 170px;">
               <option value="">تغيير جهة الولاية إلى...</option>
             </select>
             <button class="btn btn-secondary btn-sm" onclick="executeMawaqefBulkStatusUpdate()">تطبيق</button>
@@ -861,6 +861,7 @@
                 <th>التاريخ</th>
                 <th>تعليق</th>
                 <th>🕐 آخر إجراء</th>
+                <!-- تثبيت عرض عمود الإجراءات هنا -->
                 <th style="width: 140px; min-width: 140px; text-align: center;">إجراء</th>
               </tr>
             </thead>

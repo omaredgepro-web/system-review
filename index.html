@@ -178,13 +178,23 @@
       <div style="position: relative;">
         <button class="tab-btn" id="admin-menu-toggle-btn" style="display: none;" onclick="toggleAdminTabsMenu()">⚙️ لوحة الأدمن ⌄</button>
         <div id="admin-tabs-dropdown" style="display: none; position: absolute; top: 110%; right: 0; z-index: 60; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; min-width: 260px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); padding: 8px; flex-direction: column; gap: 4px;">
-          <button class="tab-btn" id="admin-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('admin'); closeAdminTabsMenu();">لوحة الأدمن وتوزيع الطلبات (CSV)</button>
-          <button class="tab-btn" id="reviewer-stats-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('reviewer-stats'); closeAdminTabsMenu();">📈 أداء المراجعين</button>
-          <button class="tab-btn" id="gehat-wlaya-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('gehat-wlaya'); closeAdminTabsMenu();">🏛️ جهة الولاية</button>
-          <button class="tab-btn" id="mawaqef-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('mawaqef'); closeAdminTabsMenu();">🅿️ المواقف</button>
-          <button class="tab-btn" id="print-distribute-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('print-distribute'); closeAdminTabsMenu();">📦 توزيع طلبات الطباعة</button>
-          <button class="tab-btn" id="certificates-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('certificates'); closeAdminTabsMenu();">🖨️ طباعة الشهادات</button>
-          <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none; text-align: right; width: 100%;" onclick="switchTab('certificates-renovation'); closeAdminTabsMenu();">📠 طباعة شهادات التعمير</button>
+          
+          <!-- قسم رفع وتوزيع الطلبات -->
+          <div style="font-size: 11px; color: var(--text-muted); padding: 4px 8px; font-weight: 800;">إدارة الطلبات والمراجعة</div>
+          <button class="tab-btn" id="admin-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('admin'); closeAdminTabsMenu();">📥 رفع وتوزيع الطلبات (CSV)</button>
+          <button class="tab-btn" id="reviewer-stats-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('reviewer-stats'); closeAdminTabsMenu();">📈 أداء المراجعين</button>
+
+          <!-- قسم الطباعة -->
+          <div style="font-size: 11px; color: var(--text-muted); padding: 4px 8px; margin-top: 4px; border-top: 1px solid var(--card-border); font-weight: 800;">الطباعة والشهادات</div>
+          <button class="tab-btn" id="print-distribute-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('print-distribute'); closeAdminTabsMenu();">📦 توزيع طلبات الطباعة</button>
+          <button class="tab-btn" id="certificates-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('certificates'); closeAdminTabsMenu();">🖨️ قائمة الشهادات (عادي)</button>
+          <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('certificates-renovation'); closeAdminTabsMenu();">📠 طباعة شهادات التعمير</button>
+
+          <!-- إدارات أخرى -->
+          <div style="font-size: 11px; color: var(--text-muted); padding: 4px 8px; margin-top: 4px; border-top: 1px solid var(--card-border); font-weight: 800;">إدارات أخرى</div>
+          <button class="tab-btn" id="gehat-wlaya-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('gehat-wlaya'); closeAdminTabsMenu();">🏛️ جهة الولاية</button>
+          <button class="tab-btn" id="mawaqef-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('mawaqef'); closeAdminTabsMenu();">🅿️ المواقف</button>
+          
         </div>
       </div>
     </div>

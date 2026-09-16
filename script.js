@@ -5837,7 +5837,7 @@ let rejectionsStatsChartInstance = null;
 
 // إحصائية مرفوضات الطباعة (من أول تاريخ لحد الآن): إجمالي الطلبات اللي لسه فعليًا "مرفوض"
 // لكل مراجع، من غير ما نحسب اللي اتعمله "تم التعديل" (يعني اتحل)، مرتبة من الأعلى للأقل.
-function renderRejectionsReviewerStats() {
+async function renderRejectionsReviewerStats() {
   const emptyEl = document.getElementById('rejections-reviewer-stats-empty');
   const wrapper = document.getElementById('rejections-reviewer-stats-chart-wrapper');
   const canvas = document.getElementById('rejections-reviewer-stats-chart');
@@ -5865,6 +5865,23 @@ function renderRejectionsReviewerStats() {
     totalEl.innerText = '';
     return;
   }
+
+  // مكتبة الرسوم البيانية (Chart.js) بتتحمّل أول مرة بس وقت الحاجة - لازم نستناها تخلص
+  // قبل ما ننشئ أي Chart جديد، وإلا هيديلنا خطأ "Chart is not defined"
+  if (typeof Chart === 'undefined') {
+    emptyEl.innerText = '⏳ جاري تحميل مكتبة الرسوم البيانية...';
+    wrapper.style.display = 'none';
+    try {
+      await loadChartJsLibrary();
+    } catch (err) {
+      emptyEl.innerText = 'تعذر تحميل مكتبة الرسوم البيانية. تأكد من الإنترنت أو أوقف أي Ad-blocker وحاول تاني.';
+      return;
+    }
+    // لو التاب اتقفل أو اتغيّر وإحنا لسه بنستنى تحميل المكتبة، نتجاهل عشان منرسمش على عنصر مخفي
+    const rejTabEl = document.getElementById('tab-rejections');
+    if (!rejTabEl || rejTabEl.style.display === 'none') return;
+  }
+
   emptyEl.innerText = '';
   wrapper.style.display = 'block';
 

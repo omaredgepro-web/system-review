@@ -1041,13 +1041,36 @@
       <div class="admin-container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 10px;">
           <h2 style="font-size: 20px;">📈 أداء المراجعين (من أول تاريخ لحد الآن)</h2>
-          <button class="btn btn-secondary" onclick="renderReviewerStatsTab(true)">🔄 تحديث</button>
+          <button class="btn btn-secondary" onclick="refreshReviewerStatsActiveSubtab()">🔄 تحديث</button>
         </div>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
-          إجمالي ما تمت مراجعته (مقبول + مرفوض) لكل مراجع منذ أول طلب مسجّل - بيتحدّث لحظيًا تلقائيًا مع أي تغيير جديد.
-        </p>
-        <div id="reviewer-stats-cards-container" class="stats-card-grid">
-          <div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+          <button class="btn btn-primary reviewer-stats-subtab-btn" id="reviewer-stats-subtab-btn-full" onclick="switchReviewerStatsSubtab('full')" style="width: auto; padding: 8px 16px;">📊 إحصائية المراجعة الكاملة</button>
+          <button class="btn btn-secondary reviewer-stats-subtab-btn" id="reviewer-stats-subtab-btn-printrej" onclick="switchReviewerStatsSubtab('printrej')" style="width: auto; padding: 8px 16px;">🚫 مرفوضات طباعة</button>
+        </div>
+
+        <!-- تاب فرعي: إحصائية المراجعة الكاملة (مقبول + مرفوض لكل مراجع) -->
+        <div id="reviewer-stats-subtab-full-content">
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+            إجمالي ما تمت مراجعته (مقبول + مرفوض) لكل مراجع منذ أول طلب مسجّل - بيتحدّث لحظيًا تلقائيًا مع أي تغيير جديد.
+          </p>
+          <div id="reviewer-stats-empty" style="font-size:12px; color:var(--text-muted);"></div>
+          <div id="reviewer-stats-chart-wrapper" style="position: relative; width: 100%; min-height: 300px;">
+            <canvas id="reviewer-stats-chart"></canvas>
+          </div>
+          <div id="reviewer-stats-total" style="margin-top: 12px; font-size: 13px; font-weight: 700; text-align: center; color: var(--text-main);"></div>
+        </div>
+
+        <!-- تاب فرعي: مرفوضات طباعة (كل الطلبات اللي اترفضت أي وقت، بلا استثناء - سواء اتعدلت أو اتطبعت) -->
+        <div id="reviewer-stats-subtab-printrej-content" style="display: none;">
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+            إجمالي كل الطلبات اللي اترفضت لكل مراجع من أول تاريخ لحد الآن - بلا أي استثناء (لسه مرفوضة، أو اتعدلت، أو اتطبعت) - بيتحدّث لحظيًا تلقائيًا مع أي تغيير جديد.
+          </p>
+          <div id="print-rejections-stats-empty" style="font-size:12px; color:var(--text-muted);"></div>
+          <div id="print-rejections-stats-chart-wrapper" style="position: relative; width: 100%; min-height: 300px;">
+            <canvas id="print-rejections-stats-chart"></canvas>
+          </div>
+          <div id="print-rejections-stats-total" style="margin-top: 12px; font-size: 13px; font-weight: 700; text-align: center; color: var(--text-main);"></div>
         </div>
       </div>
     </div>

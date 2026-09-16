@@ -189,39 +189,48 @@
             </select>
           </div>
 
-          <!-- شريط الإجراءات الجماعية للوحة المراجعة -->
-          <div id="admin-bulk-bar" class="admin-bulk-actions" style="display: none; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
-              <button class="btn btn-secondary" onclick="clearOrderSelection()">مسح التحديد</button>
-              <button id="show-selected-only-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedDashboard()">📌 عرض المحدد فقط</button>
-              <input type="number" id="order-select-first-count-input" class="filter-select" min="1" placeholder="تحديد عدد..." style="width: 100px;">
-              <button class="btn btn-secondary" onclick="selectNextOrderFromFiltered()">تطبيق التحديد</button>
-              <button id="bulk-delete-btn" class="btn btn-danger" onclick="executeBulkDelete()">🗑️ حذف المحدد</button>
+          <!-- شريط الإجراءات الجماعية المنظم بـ Groups -->
+          <div id="admin-bulk-bar" class="admin-bulk-actions">
+            <!-- Group 1: التحديد -->
+            <div class="bulk-group">
+              <span class="bulk-label">تم تحديد: <span id="selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
+              <button class="btn btn-secondary btn-sm" onclick="clearOrderSelection()">مسح التحديد</button>
+              <button id="show-selected-only-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedDashboard()">📌 عرض المحدد فقط</button>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-right: 1px solid var(--card-border); padding-right: 12px;">
-              <select id="bulk-reassign-select" class="filter-select"><option value="">تغيير المراجع...</option></select>
-              <button class="btn btn-secondary" onclick="executeBulkReassign()">تطبيق</button>
-              <select id="bulk-qc-assign-select" class="filter-select"><option value="">توزيع على QC...</option></select>
-              <button class="btn btn-secondary" onclick="executeBulkQcAssign()">تطبيق</button>
-              <input type="date" id="bulk-date-input" class="date-input">
-              <button class="btn btn-secondary" onclick="executeBulkDateUpdate()">تطبيق التاريخ</button>
+            <!-- Group 2: التحديد المتقدم -->
+            <div class="bulk-group">
+              <input type="number" id="order-select-first-count-input" class="filter-select btn-sm" min="1" placeholder="تحديد عدد..." style="width: 100px;">
+              <button class="btn btn-secondary btn-sm" onclick="selectNextOrderFromFiltered()">تطبيق التحديد</button>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <select id="bulk-status-select" class="filter-select">
+            <!-- Group 3: التوزيع والتغيير -->
+            <div class="bulk-group">
+              <select id="bulk-reassign-select" class="filter-select btn-sm" style="width: 140px;"><option value="">تغيير المراجع...</option></select>
+              <button class="btn btn-secondary btn-sm" onclick="executeBulkReassign()">تطبيق التغيير</button>
+              <select id="bulk-qc-assign-select" class="filter-select btn-sm" style="width: 120px;"><option value="">توزيع على QC...</option></select>
+              <button class="btn btn-secondary btn-sm" onclick="executeBulkQcAssign()">تطبيق التوزيع</button>
+            </div>
+            <!-- Group 4: تحديث الحالة والتاريخ والقرار -->
+            <div class="bulk-group">
+              <input type="date" id="bulk-date-input" class="date-input btn-sm" style="width: 120px;">
+              <button class="btn btn-secondary btn-sm" onclick="executeBulkDateUpdate()">تطبيق التاريخ</button>
+              <select id="bulk-status-select" class="filter-select btn-sm" style="width: 130px;">
                 <option value="">حالة المراجعة...</option>
                 <option value="جاري مراجعة">جاري مراجعة</option>
                 <option value="تم اعادة المراجعة">تم اعادة المراجعة</option>
               </select>
-              <button class="btn btn-secondary" onclick="executeBulkStatusUpdate()">تطبيق الحالة</button>
-              <select id="bulk-review-decision-select" class="filter-select">
+              <button class="btn btn-secondary btn-sm" onclick="executeBulkStatusUpdate()">تطبيق الحالة</button>
+              <select id="bulk-review-decision-select" class="filter-select btn-sm" style="width: 130px;">
                 <option value="">القرار (المراجعة)...</option>
                 <option value="مقبول">✅ مقبول</option>
                 <option value="مرفوض">❌ مرفوض</option>
                 <option value="معلق">⏸️ معلق</option>
                 <option value="لم يتم المراجعة">⏳ لم يتم المراجعة</option>
               </select>
-              <button class="btn btn-secondary" onclick="executeBulkReviewDecisionUpdate()">تطبيق القرار</button>
+              <button class="btn btn-secondary btn-sm" onclick="executeBulkReviewDecisionUpdate()">تطبيق القرار</button>
+            </div>
+            <!-- Group 5: الحذف -->
+            <div class="bulk-group" style="margin-right: auto; border-left: none;">
+              <button id="bulk-delete-btn" class="btn btn-danger btn-sm" onclick="executeBulkDelete()">🗑️ حذف المحدد</button>
             </div>
           </div>
 
@@ -229,12 +238,11 @@
             <table>
               <thead>
                 <tr id="table-header-row">
-                  <!-- تم تحديد Width ثابت لعواميد المربعات والأزرار لمنع التداخل تماماً -->
-                  <th id="select-all-header" style="display: none; width: 40px; text-align: center;">
+                  <th id="select-all-header" style="display: none; width: 40px; min-width: 40px; text-align: center;">
                     <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)">
                   </th>
-                  <th class="sticky-action-col" style="width: 80px; text-align: center;">إجراء</th>
-                  <th id="admin-action-header" class="sticky-action-col" style="display: none; width: 80px; text-align: center;">حذف</th>
+                  <th class="sticky-action-col" style="width: 80px; min-width: 80px; text-align: center;">إجراء</th>
+                  <th id="admin-action-header" class="sticky-action-col" style="display: none; width: 80px; min-width: 80px; text-align: center;">حذف</th>
                   <th>رقم الطلب</th>
                   <th>الشركة</th>
                   <th>المراجع</th>
@@ -476,24 +484,27 @@
           <div id="cert-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
         </div>
 
-        <!-- شريط الإجراءات الجماعية لتاب الشهادات -->
-        <div id="cert-bulk-bar" class="admin-bulk-actions" style="display: flex; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="cert-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
-            <button class="btn btn-secondary" onclick="clearCertSelection()">مسح التحديد</button>
-            <button id="show-selected-only-cert-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedCert()">📌 عرض المحدد فقط</button>
-            <input type="number" id="cert-bulk-count-input" class="filter-select" min="1" placeholder="تحديد عدد..." style="width: 100px;">
-            <button class="btn btn-secondary" onclick="selectNextCertBatch()">تحديد التالي</button>
-            <button id="cert-bulk-delete-btn" class="btn btn-danger" onclick="executeCertBulkDelete()">🗑️ حذف المحدد</button>
+        <!-- شريط الإجراءات الجماعية لتاب الشهادات منظم بمجموعات -->
+        <div id="cert-bulk-bar" class="admin-bulk-actions">
+          <div class="bulk-group">
+            <span class="bulk-label">تم تحديد: <span id="cert-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
+            <button class="btn btn-secondary btn-sm" onclick="clearCertSelection()">مسح التحديد</button>
+            <button id="show-selected-only-cert-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedCert()">📌 عرض المحدد فقط</button>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-right: 1px solid var(--card-border); padding-right: 12px;">
-            <select id="cert-bulk-reassign-select" class="filter-select" style="min-width: 130px;"><option value="">المسؤول...</option></select>
-            <button class="btn btn-secondary" onclick="executeCertBulkReassign()">توزيع</button>
-            <input type="date" id="cert-bulk-date-input" class="date-input" style="width: 130px;">
-            <button class="btn btn-secondary" onclick="executeCertBulkDateUpdate()">تطبيق التاريخ</button>
+          <div class="bulk-group">
+            <input type="number" id="cert-bulk-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
+            <button class="btn btn-secondary btn-sm" onclick="selectNextCertBatch()">تحديد التالي (غير موزع)</button>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <select id="cert-bulk-status-select" class="filter-select">
+          <div class="bulk-group">
+            <select id="cert-bulk-reassign-select" class="filter-select btn-sm" style="width: 130px;"><option value="">توزيع على المسؤول...</option></select>
+            <button class="btn btn-secondary btn-sm" onclick="executeCertBulkReassign()">تطبيق التوزيع</button>
+          </div>
+          <div class="bulk-group">
+            <input type="date" id="cert-bulk-date-input" class="date-input btn-sm" style="width: 120px;">
+            <button class="btn btn-secondary btn-sm" onclick="executeCertBulkDateUpdate()">تطبيق التاريخ</button>
+          </div>
+          <div class="bulk-group">
+            <select id="cert-bulk-status-select" class="filter-select btn-sm" style="width: 130px;">
               <option value="">تغيير الحالة إلى...</option>
               <option value="تم الطباعة">تم الطباعة</option>
               <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
@@ -504,20 +515,24 @@
               <option value="معلق">معلق</option>
               <option value="لم يتم الطباعة">⛔ لم يتم الطباعة</option>
             </select>
-            <button class="btn btn-secondary" onclick="executeCertBulkStatusUpdate()">تطبيق الحالة</button>
-            <select id="cert-bulk-type-select" class="filter-select" style="min-width: 110px;">
+            <button class="btn btn-secondary btn-sm" onclick="executeCertBulkStatusUpdate()">تطبيق الحالة</button>
+          </div>
+          <div class="bulk-group">
+            <select id="cert-bulk-type-select" class="filter-select btn-sm" style="width: 100px;">
               <option value="">نقل النوع...</option>
               <option value="عادي">🖨️ عادي</option>
               <option value="تعمير">📠 تعمير</option>
             </select>
-            <button class="btn btn-secondary" onclick="executeCertBulkTypeUpdate()">تطبيق النقل</button>
+            <button class="btn btn-secondary btn-sm" onclick="executeCertBulkTypeUpdate()">تطبيق النقل</button>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; border-top: 1px dashed var(--card-border); padding-top: 10px;">
-            <span style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">تصدير أرقام الطلبات فقط:</span>
-            <input type="number" id="cert-export-count-input" class="filter-select" min="1" placeholder="عدد..." style="width: 80px;">
-            <button class="btn btn-secondary" onclick="selectNextCertFromFiltered()">تحديد الأول من النتائج</button>
-            <button class="btn btn-secondary" onclick="exportSelectedCertOrderNumbers()">📥 تصدير (Excel)</button>
-            <button class="btn btn-secondary" onclick="exportSelectedCertOrderNumbersTxt()">📄 تصدير (TXT)</button>
+          <div class="bulk-group">
+            <input type="number" id="cert-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 70px;">
+            <button class="btn btn-secondary btn-sm" onclick="selectNextCertFromFiltered()">تحديد الأول من النتائج</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportSelectedCertOrderNumbers()">📥 تصدير (Excel)</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportSelectedCertOrderNumbersTxt()">📄 تصدير (TXT)</button>
+          </div>
+          <div class="bulk-group" style="margin-right: auto; border-left: none;">
+            <button id="cert-bulk-delete-btn" class="btn btn-danger btn-sm" onclick="executeCertBulkDelete()">🗑️ حذف المحدد</button>
           </div>
         </div>
 
@@ -525,11 +540,12 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 40px; text-align: center;">
+                <!-- تحديد عرض ثابت لعواميد التحديد والأزرار لمنع التداخل -->
+                <th style="width: 40px; min-width: 40px; text-align: center;">
                   <input type="checkbox" id="cert-select-all-checkbox" onchange="toggleCertSelectAll(this)">
                 </th>
-                <th class="sticky-action-col" style="width: 80px; text-align: center;">إجراء</th>
-                <th class="sticky-action-col" style="width: 80px; text-align: center;">حذف</th>
+                <th class="sticky-action-col" style="width: 80px; min-width: 80px; text-align: center;">إجراء</th>
+                <th class="sticky-action-col" style="width: 80px; min-width: 80px; text-align: center;">حذف</th>
                 <th>رقم الطلب</th>
                 <th>المسؤول</th>
                 <th>الحالة</th>
@@ -609,24 +625,26 @@
             <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
 
-          <!-- شريط الإجراءات الجماعية لتاب المرفوضات -->
-          <div id="rejections-bulk-bar" class="admin-bulk-actions" style="display: flex; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <span style="font-weight: 700; font-size: 13px; white-space: nowrap;">تم تحديد: <span id="rejections-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
-              <button class="btn btn-secondary" onclick="clearRejectionsSelection()">مسح التحديد</button>
-              <button id="show-selected-only-rejections-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedRejections()">📌 عرض المحدد فقط</button>
+          <!-- شريط الإجراءات الجماعية لتاب المرفوضات منظم بمجموعات -->
+          <div id="rejections-bulk-bar" class="admin-bulk-actions">
+            <div class="bulk-group">
+              <span class="bulk-label">تم تحديد: <span id="rejections-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
+              <button class="btn btn-secondary btn-sm" onclick="clearRejectionsSelection()">مسح التحديد</button>
+              <button id="show-selected-only-rejections-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedRejections()">📌 عرض المحدد فقط</button>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-right: 1px solid var(--card-border); padding-right: 12px;">
-              <select id="rejections-bulk-action-select" class="filter-select" style="min-width: 160px;">
+            <div class="bulk-group">
+              <select id="rejections-bulk-action-select" class="filter-select btn-sm" style="width: 160px;">
                 <option value="">تطبيق حالة المراجعة...</option>
                 <option value="تم التعديل">✅ تم التعديل</option>
-                <option value="تم الرفض للشركة">🚫 رفض نهائي</option>
+                <option value="تم الرفض للشركة">🚫 رفض نهائي (تم الرفض للشركة)</option>
               </select>
-              <button class="btn btn-secondary" onclick="executeRejectionsBulkAction()">تطبيق</button>
-              <button class="btn btn-open" onclick="executeRejectionsBulkPrinted()">🖨️ تطبيق: تم الطباعة</button>
+              <button class="btn btn-secondary btn-sm" onclick="executeRejectionsBulkAction()">تطبيق</button>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-secondary" onclick="exportSelectedRejectionsOrderNumbers()">📥 تصدير Excel للمحدد</button>
+            <div class="bulk-group">
+              <button class="btn btn-open btn-sm" onclick="executeRejectionsBulkPrinted()">🖨️ تطبيق: تم الطباعة</button>
+            </div>
+            <div class="bulk-group" style="margin-right: auto; border-left: none;">
+              <button class="btn btn-secondary btn-sm" onclick="exportSelectedRejectionsOrderNumbers()">📥 تصدير أرقام الطلبات المحددة (Excel)</button>
             </div>
           </div>
 
@@ -634,7 +652,7 @@
             <table>
               <thead>
                 <tr>
-                  <th style="width: 40px; text-align: center;">
+                  <th style="width: 40px; min-width: 40px; text-align: center;">
                     <input type="checkbox" id="rejections-select-all-checkbox" onchange="toggleRejectionsSelectAll(this)">
                   </th>
                   <th>رقم الطلب</th>
@@ -644,7 +662,8 @@
                   <th>السبب</th>
                   <th>التاريخ</th>
                   <th>حالة المراجعة</th>
-                  <th style="width: 140px; text-align: center;">إجراء</th>
+                  <!-- تثبيت عرض عمود الإجراءات هنا كمان -->
+                  <th style="width: 160px; min-width: 160px; text-align: center;">إجراء</th>
                   <th id="rejections-action-time-header" style="display: none;">🕐 آخر إجراء</th>
                 </tr>
               </thead>
@@ -806,25 +825,25 @@
           <div id="mawaqef-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
         </div>
 
-        <!-- شريط الإجراءات الجماعية لتاب المواقف -->
-        <div class="admin-bulk-actions" style="display: flex; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="font-weight: 700; font-size: 13px; color: var(--text-main); white-space: nowrap;">تم تحديد: <span id="mawaqef-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
-            <button class="btn btn-secondary" onclick="clearMawaqefSelection()">مسح التحديد</button>
-            <button id="show-selected-only-mawaqef-btn" class="btn btn-secondary" onclick="toggleShowOnlySelectedMawaqef()">📌 عرض المحدد فقط</button>
+        <!-- شريط الإجراءات الجماعية لتاب المواقف منظم بمجموعات -->
+        <div class="admin-bulk-actions">
+          <div class="bulk-group">
+            <span class="bulk-label">تم تحديد: <span id="mawaqef-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
+            <button class="btn btn-secondary btn-sm" onclick="clearMawaqefSelection()">مسح التحديد</button>
+            <button id="show-selected-only-mawaqef-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedMawaqef()">📌 عرض المحدد فقط</button>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-right: 1px solid var(--card-border); padding-right: 12px;">
-            <select id="mawaqef-bulk-status-select" class="filter-select" style="min-width: 160px;">
+          <div class="bulk-group">
+            <select id="mawaqef-bulk-status-select" class="filter-select btn-sm" style="width: 160px;">
               <option value="">تغيير جهة الولاية إلى...</option>
             </select>
-            <button class="btn btn-secondary" onclick="executeMawaqefBulkStatusUpdate()">تطبيق</button>
+            <button class="btn btn-secondary btn-sm" onclick="executeMawaqefBulkStatusUpdate()">تطبيق</button>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-right: 1px solid var(--card-border); padding-right: 12px;">
-            <input type="text" id="mawaqef-bulk-comment-input" class="filter-select" placeholder="اكتب تعليق..." style="min-width: 200px;">
-            <button class="btn btn-secondary" onclick="executeMawaqefBulkComment()">💬 تطبيق التعليق</button>
+          <div class="bulk-group">
+            <input type="text" id="mawaqef-bulk-comment-input" class="filter-select btn-sm" placeholder="اكتب تعليق..." style="width: 200px;">
+            <button class="btn btn-secondary btn-sm" onclick="executeMawaqefBulkComment()">💬 تطبيق التعليق</button>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <button class="btn btn-danger" onclick="executeMawaqefBulkDelete()">🗑️ حذف المحدد</button>
+          <div class="bulk-group" style="margin-right: auto; border-left: none;">
+            <button class="btn btn-danger btn-sm" onclick="executeMawaqefBulkDelete()">🗑️ حذف المحدد</button>
           </div>
         </div>
 
@@ -832,7 +851,7 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 40px; text-align: center;"><input type="checkbox" id="mawaqef-select-all-header-checkbox" onchange="selectAllFilteredMawaqef(this.checked)"></th>
+                <th style="width: 40px; min-width: 40px; text-align: center;"><input type="checkbox" id="mawaqef-select-all-header-checkbox" onchange="selectAllFilteredMawaqef(this.checked)"></th>
                 <th>رقم الطلب</th>
                 <th>رقم طلب التقنين</th>
                 <th>جهة الولاية</th>
@@ -842,7 +861,7 @@
                 <th>التاريخ</th>
                 <th>تعليق</th>
                 <th>🕐 آخر إجراء</th>
-                <th style="width: 140px; text-align: center;">إجراء</th>
+                <th style="width: 140px; min-width: 140px; text-align: center;">إجراء</th>
               </tr>
             </thead>
             <tbody id="mawaqef-tbody">

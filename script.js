@@ -2327,7 +2327,7 @@ function renderTable(orders) {
 
     let reviewBadge = getReviewStatusBadgeClass(reviewStatus);
 
-    const isChecked = selectedOrderNumbers.has(String(orderNum)) ? 'checked' : '';
+    const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
     const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
     const adminCellHtml = isAdmin ? `<td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button>` : ''}</td>` : '';
 
@@ -2484,16 +2484,15 @@ async function saveOrderQcComment() {
 }
 
 function toggleRowSelect(cb, orderNum) {
-  if (cb.checked) { selectedOrderNumbers.add(String(orderNum)); } 
-  else { selectedOrderNumbers.delete(String(orderNum)); }
+  if (cb.checked) { selectedOrderNumbers.add(orderNum); } 
+  else { selectedOrderNumbers.delete(orderNum); }
   updateSelectedCount();
-}
 }
 
 function toggleSelectAll(masterCb) {
   if (!window.currentFilteredData) return;
   window.currentFilteredData.forEach(o => {
-    const orderNum = String(o.order_number || o.order_no || o['رقم الطلب']);
+    const orderNum = o.order_number || o.order_no || o['رقم الطلب'];
     if (masterCb.checked) { selectedOrderNumbers.add(orderNum); } 
     else { selectedOrderNumbers.delete(orderNum); }
   });
@@ -2805,7 +2804,7 @@ async function executeBulkReassign() {
   const confirmChange = confirm(`هل أنت تأكد من نقل (${selectedOrderNumbers.size}) طلب إلى المراجع "${newReviewer}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(String(o.order_number || o.order_no || o['رقم الطلب'])));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
@@ -6384,7 +6383,8 @@ function renderCertPage() {
   // بغض النظر عن فلاتر البحث/الحالة/المسؤول/التاريخ الشغالة فوق.
   if (showOnlySelectedCert) {
     const scoped = getCertMasterDataForActiveType();
-   const filtered = scoped.filter(item => selectedOrderNumbers.has(String(getNum(item))));
+    const filtered = scoped.filter(item => selectedCertOrderNumbers.has(String(item.order_number)));
+
     certTotalRecordsCount = filtered.length;
     const from = (certCurrentPage - 1) * certPageSize;
     const to = from + certPageSize;

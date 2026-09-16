@@ -737,6 +737,8 @@ async function setupUserSession(profile) {
   document.getElementById('action-time-header').style.display = isAdmin ? 'table-cell' : 'none';
   document.getElementById('admin-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
   document.getElementById('rejections-bulk-bar').style.display = isAdmin ? 'flex' : 'none';
+  const dashboardMultiSelectBtn = document.getElementById('dashboard-multiselect-btn');
+  if (dashboardMultiSelectBtn) dashboardMultiSelectBtn.style.display = isAdmin ? 'inline-flex' : 'none';
   const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
   if (bulkDeleteBtn) bulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   const certBulkDeleteBtn = document.getElementById('cert-bulk-delete-btn');
@@ -2088,6 +2090,136 @@ async function toggleShowOnlySelectedDashboard() {
 
   if (btn) { btn.disabled = false; btn.innerText = showOnlySelectedDashboard ? '↩️ عرض الكل' : '📌 عرض المحدد فقط'; }
   renderCurrentPage();
+}
+
+// ============ تحديد متعدد (نسخ/لصق أو ملف) لتاب المراجعة الرئيسي - نفس فكرة تاب الشهادات بالظبط ============
+let dashboardMultiSelectFileRows = [];
+
+function toggleDashboardMultiSelectPanel() {
+  const panel = document.getElementById('dashboard-multiselect-panel');
+  panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+}
+
+function clearDashboardMultiSelectInput() {
+  document.getElementById('dashboard-multiselect-textarea').value = '';
+  document.getElementById('dashboard-multiselect-file-name').innerText = '';
+  document.getElementById('dashboard-multiselect-results').innerHTML = '';
+  dashboardMultiSelectFileRows = [];
+}
+
+function handleDashboardMultiSelectDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('dashboard-multiselect-dropzone').classList.add('drag-over');
+}
+
+function handleDashboardMultiSelectDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('dashboard-multiselect-dropzone').classList.remove('drag-over');
+}
+
+function handleDashboardMultiSelectDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('dashboard-multiselect-dropzone').classList.remove('drag-over');
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (files && files.length > 0) processDashboardMultiSelectFile(files[0]);
+}
+
+function handleDashboardMultiSelectFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (file) processDashboardMultiSelectFile(file);
+  event.target.value = '';
+}
+
+async function processDashboardMultiSelectFile(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+    alert('برجاء رفع ملف CSV أو Excel بس');
+    return;
+  }
+
+  document.getElementById('dashboard-multiselect-file-name').innerText = `جاري قراءة: ${file.name} ...`;
+
+  try {
+    const rawRows = await parseFileToRows(file);
+    const extracted = extractOrderNumbersFromRows(rawRows);
+    if (extracted.length === 0) {
+      alert('معرفتش ألاقي عمود رقم الطلب في الملف ده. تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.');
+      document.getElementById('dashboard-multiselect-file-name').innerText = '';
+      return;
+    }
+    dashboardMultiSelectFileRows = extracted;
+    document.getElementById('dashboard-multiselect-file-name').innerText = `تم رفع: ${file.name} (${extracted.length} رقم)`;
+  } catch (err) {
+    alert('تعذّر قراءة الملف: ' + err.message);
+  }
+}
+
+// بيدور على أرقام الطلبات (من المربع + الملف) في كل تواريخ الجدول الرئيسي، ويحددهم تلقائيًا
+// (checkboxes). المراجع (غير الأدمن) بيتحدد بس من ضمن طلباته هو، والأدمن بيتحدد من كل الطلبات.
+// بيستخدم وضع "عرض المحدد فقط" الجاهز بالفعل عشان يعرض المتحدد من كل التواريخ مع بعض على طول.
+async function verifyAndSelectDashboardOrders() {
+  const textValue = document.getElementById('dashboard-multiselect-textarea').value;
+  const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
+  const combined = [...new Set([...fromText, ...dashboardMultiSelectFileRows])];
+
+  if (combined.length === 0) {
+    alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
+    return;
+  }
+
+  const resultsEl = document.getElementById('dashboard-multiselect-results');
+  resultsEl.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث في كل التواريخ...</p>`;
+
+  try {
+    await ensureFullMasterData();
+  } catch (err) {
+    resultsEl.innerHTML = `<p style="color: var(--badge-reject-text); font-weight:700;">تعذّر تحميل بيانات الطلبات: ${err.message}</p>`;
+    return;
+  }
+
+  const isAdmin = currentUser && currentUser.role === 'admin';
+  const scope = isAdmin ? (window.masterData || []) : (window.masterData || []).filter(item => {
+    const reviewerName = item.reviewer || item['المراجع'] || '';
+    return reviewerName === currentUser.username || reviewerName === currentUser.name;
+  });
+
+  const getNum = o => o.order_number || o.order_no || o['رقم الطلب'];
+  const availableNumbers = new Set(scope.map(o => String(getNum(o))));
+  const found = [];
+  const notFound = [];
+
+  combined.forEach(num => {
+    if (availableNumbers.has(num)) {
+      found.push(num);
+      selectedOrderNumbers.add(num);
+    } else {
+      notFound.push(num);
+    }
+  });
+
+  updateSelectedCount();
+
+  if (found.length > 0) {
+    // بنفعّل وضع "عرض المحدد فقط" الجاهز بالفعل عشان يعرض كل المتحدد من كل التواريخ مع بعض على طول
+    showOnlySelectedDashboard = true;
+    currentPage = 1;
+    const toggleBtn = document.getElementById('show-selected-only-btn');
+    if (toggleBtn) toggleBtn.innerText = '↩️ عرض الكل';
+    renderCurrentPage();
+
+    const table = document.querySelector('#tab-dashboard .main-content');
+    if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل)${found.length > 0 ? ' - وتفعّل "عرض المحدد فقط" عشان تشوفهم كلهم على طول.' : ''}</p>`;
+  if (notFound.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود ${isAdmin ? '' : 'ضمن طلباتك '}أصلاً:</p>`;
+    html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
+  }
+  resultsEl.innerHTML = html;
 }
 
 function renderCurrentPage() {

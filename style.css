@@ -193,17 +193,38 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 .count-rejected { color: var(--badge-reject-text); }
 
 .main-content { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; width: 100%; }
-.table-container { overflow-x: auto; overflow-y: auto; max-height: 75vh; position: relative; width: 100%; max-width: 100%; }
-.table-container thead th { position: sticky; top: 0; z-index: 15; background-color: var(--card-bg); }
-.table-container .sticky-action-col { z-index: 16; }
-.table-container thead th.sticky-action-col { z-index: 17; }
 
-/* جدول طباعة الشهادات (100 طلب في الصفحة) - سكرول رأسي مع تثبيت رأس الجدول
-   عشان يفضل ظاهر وانت بتحدد وبتنزل تحت */
+/* ============ إعدادات الجدول المضغوط ============ */
+table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+/* تقليل حجم الخط والمسافات لضغط الجدول وتقليل السكرول الأفقي */
+th { text-align: right; color: var(--text-muted); font-size: 12px; padding: 8px; border-bottom: 1px solid var(--card-border); background-color: var(--card-bg); }
+td { padding: 6px 8px; font-size: 12px; border-bottom: 1px solid var(--card-border); vertical-align: middle; }
+
+/* ============ حاوية الجدول ============ */
+.table-container { overflow-x: auto; overflow-y: auto; max-height: 75vh; position: relative; width: 100%; max-width: 100%; }
+
+/* إلغاء تثبيت الهيدر (Top) مع الاحتفاظ بخلفيته */
+.table-container thead th { background-color: var(--card-bg); }
+
+/* تثبيت أعمدة الإجراءات Sticky Column أفقيًا فقط */
+.sticky-action-col {
+  position: sticky;
+  left: 0;
+  background-color: var(--card-bg);
+  z-index: 10;
+  border-right: 1px solid var(--card-border);
+}
+
+.table-container thead th.sticky-action-col {
+  z-index: 11;
+}
+
+/* حاوية جدول الطباعة (في حالة استخدام الكلاس ده) */
 .cert-table-scroll { max-height: 75vh; overflow-y: auto; }
-.cert-table-scroll thead th { position: sticky; top: 0; z-index: 15; }
-.cert-table-scroll .sticky-action-col { z-index: 16; }
-.cert-table-scroll thead th.sticky-action-col { z-index: 17; }
+.cert-table-scroll thead th { background-color: var(--card-bg); }
+.cert-table-scroll .sticky-action-col { z-index: 10; }
+.cert-table-scroll thead th.sticky-action-col { z-index: 11; }
+
 
 .table-filters { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
 .search-input, .filter-select, .date-input { background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; font-size: 14px; outline: none; }
@@ -212,18 +233,6 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 /* شريط تحكم الأدمن للعمليات الجماعية */
 .admin-bulk-actions { display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent-purple); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; align-items: center; justify-content: space-between; gap: 10px; }
 
-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
-th { text-align: right; color: var(--text-muted); font-size: 13px; padding: 10px 12px; border-bottom: 1px solid var(--card-border); background-color: var(--card-bg); }
-td { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid var(--card-border); vertical-align: middle; }
-
-/* تثبيت أعمدة الإجراءات Sticky Column */
-.sticky-action-col {
-  position: sticky;
-  left: 0;
-  background-color: var(--card-bg);
-  z-index: 10;
-  border-right: 1px solid var(--card-border);
-}
 
 .order-no-cell { direction: ltr; text-align: right; font-family: monospace, 'Cairo', sans-serif; font-weight: 600; letter-spacing: 0.5px; }
 

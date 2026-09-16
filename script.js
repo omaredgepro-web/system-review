@@ -113,7 +113,31 @@ let parsedCsvData = [];
 let parsedPrintOrderNumbers = [];
 let printOrderAssignments = {}; // order_number -> اسم الأدمن المخصص ليه (من التوزيع التلقائي)
 let printDistUserSelection = null;
-let selectedOrderNumbers = new Set();
+// مهم: رقم الطلب ممكن يتكرر (نفس الرقم على أكتر من صف/تاريخ)، فالتحديد والحذف
+// لازم يشتغلوا على مفتاح فريد للصف نفسه - مش على رقم الطلب - عشان:
+//  1) العدّاد ميدمجش الصفوف المكررة ويحسبها صف واحد
+//  2) حذف صف واحد ميشيلش باقي الصفوف اللي بنفس رقم الطلب
+let selectedOrderNumbers = new Set(); // بيخزن مفاتيح صفوف (getRowKey) مش أرقام طلبات
+
+function getOrderNumOf(o) {
+  if (!o) return '';
+  return o.order_number || o.order_no || o['رقم الطلب'] || '';
+}
+
+function getRowKey(o) {
+  if (!o) return '';
+  if (o.id !== undefined && o.id !== null && o.id !== '') return 'id:' + o.id;
+  return 'num:' + getOrderNumOf(o) + '|' + (o.date || extractDateString(o) || '');
+}
+
+// بيرجّع أرقام الطلبات الحقيقية للصفوف المحددة حاليًا (لما نحتاج نبحث بيها في الداتابيز)
+function getSelectedOrderNumbersList() {
+  const nums = new Set();
+  (window.masterData || []).forEach(o => {
+    if (selectedOrderNumbers.has(getRowKey(o))) nums.add(String(getOrderNumOf(o)));
+  });
+  return [...nums];
+}
 
 // بتتفعّل مؤقتًا أثناء أي عملية دفعية (زي الإضافة السريعة) عشان توقف إعادة الرسم التلقائي
 // الجاي من التحديث اللحظي (Realtime) لحد ما العملية تخلص وتعمل تحديث/رسم واحد نضيف في الآخر،
@@ -311,7 +335,7 @@ async function selectQuickAddOrders() {
   (window.masterData || []).forEach(o => {
     const num = o.order_number || o.order_no || o['رقم الطلب'];
     if (numsSet.has(String(num))) {
-      selectedOrderNumbers.add(num);
+      selectedOrderNumbers.add(getRowKey(o));
       matchedOrders.push(o);
     }
   });
@@ -2077,7 +2101,7 @@ async function toggleShowOnlySelectedDashboard() {
   if (showOnlySelectedDashboard && selectedOrderNumbers.size > 0) {
     if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحميل...'; }
     try {
-      const matchedFromDb = await fetchMasterRowsByOrderNumbers([...selectedOrderNumbers]);
+      const matchedFromDb = await fetchMasterRowsByOrderNumbers(getSelectedOrderNumbersList());
       mergeRowsIntoMasterData(matchedFromDb);
     } catch (err) {
       alert('حصل خطأ أثناء تحميل الطلبات المحددة: ' + err.message);
@@ -2179,15 +2203,23 @@ async function verifyAndSelectDashboardOrders() {
     return reviewerName === currentUser.username || reviewerName === currentUser.name;
   });
 
-  const getNum = o => o.order_number || o.order_no || o['رقم الطلب'];
-  const availableNumbers = new Set(scope.map(o => String(getNum(o))));
+  const getNum = o => getOrderNumOf(o);
+  // رقم الطلب ممكن يكون متكرر على أكتر من صف - بنحدد كل الصفوف اللي بنفس الرقم
+  const rowsByNumber = new Map();
+  scope.forEach(o => {
+    const key = String(getNum(o));
+    if (!rowsByNumber.has(key)) rowsByNumber.set(key, []);
+    rowsByNumber.get(key).push(o);
+  });
+
   const found = [];
   const notFound = [];
 
   combined.forEach(num => {
-    if (availableNumbers.has(num)) {
+    const rows = rowsByNumber.get(String(num));
+    if (rows && rows.length > 0) {
       found.push(num);
-      selectedOrderNumbers.add(num);
+      rows.forEach(o => selectedOrderNumbers.add(getRowKey(o)));
     } else {
       notFound.push(num);
     }
@@ -2226,8 +2258,7 @@ function renderCurrentPage() {
       const reviewerName = item.reviewer || item['المراجع'] || '';
       return reviewerName === currentUser.username || reviewerName === currentUser.name;
     });
-    const getNum = o => o.order_number || o.order_no || o['رقم الطلب'];
-    const filtered = scoped.filter(item => selectedOrderNumbers.has(getNum(item)));
+    const filtered = scoped.filter(item => selectedOrderNumbers.has(getRowKey(item)));
 
     totalRecordsCount = filtered.length;
     const from = (currentPage - 1) * pageSize;
@@ -2327,9 +2358,11 @@ function renderTable(orders) {
 
     let reviewBadge = getReviewStatusBadgeClass(reviewStatus);
 
-    const isChecked = selectedOrderNumbers.has(orderNum) ? 'checked' : '';
-    const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${orderNum}')"></td>` : '';
-    const adminCellHtml = isAdmin ? `<td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleOrder('${orderNum}')">🗑️ مسح</button>` : ''}</td>` : '';
+    const rowKey = getRowKey(order);
+    const safeRowKey = String(rowKey).replace(/'/g, "\\'");
+    const isChecked = selectedOrderNumbers.has(rowKey) ? 'checked' : '';
+    const checkboxHtml = isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="row-checkbox" data-rowkey="${rowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRowSelect(this, '${safeRowKey}')"></td>` : '';
+    const adminCellHtml = isAdmin ? `<td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleOrder('${safeRowKey}')">🗑️ مسح</button>` : ''}</td>` : '';
 
     // خانة QC: أدمن بس يقدر يعيّن/يغيّر المسؤول عن مراجعة الجودة لهذا الطلب
     const qcCellHtml = isAdmin
@@ -2382,7 +2415,7 @@ function renderTable(orders) {
 
   const selectAllCb = document.getElementById('select-all-checkbox');
   if (selectAllCb) {
-    const allCurrentChecked = orders.length > 0 && orders.every(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+    const allCurrentChecked = orders.length > 0 && orders.every(o => selectedOrderNumbers.has(getRowKey(o)));
     selectAllCb.checked = allCurrentChecked;
   }
 }
@@ -2483,18 +2516,18 @@ async function saveOrderQcComment() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
-function toggleRowSelect(cb, orderNum) {
-  if (cb.checked) { selectedOrderNumbers.add(orderNum); } 
-  else { selectedOrderNumbers.delete(orderNum); }
+function toggleRowSelect(cb, rowKey) {
+  if (cb.checked) { selectedOrderNumbers.add(rowKey); } 
+  else { selectedOrderNumbers.delete(rowKey); }
   updateSelectedCount();
 }
 
 function toggleSelectAll(masterCb) {
   if (!window.currentFilteredData) return;
   window.currentFilteredData.forEach(o => {
-    const orderNum = o.order_number || o.order_no || o['رقم الطلب'];
-    if (masterCb.checked) { selectedOrderNumbers.add(orderNum); } 
-    else { selectedOrderNumbers.delete(orderNum); }
+    const rowKey = getRowKey(o);
+    if (masterCb.checked) { selectedOrderNumbers.add(rowKey); } 
+    else { selectedOrderNumbers.delete(rowKey); }
   });
   document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = masterCb.checked);
   updateSelectedCount();
@@ -2569,13 +2602,12 @@ function selectNextOrderFromFiltered() {
   if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
   if (!window.currentFilteredData || window.currentFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
 
-  const getOrderNum = o => o.order_number || o.order_no || o['رقم الطلب'];
-  const unselected = window.currentFilteredData.filter(o => !selectedOrderNumbers.has(getOrderNum(o)));
+  const unselected = window.currentFilteredData.filter(o => !selectedOrderNumbers.has(getRowKey(o)));
 
   if (unselected.length === 0) { alert('كل الطلبات المطابقة للفلتر الحالي متحددة بالفعل'); return; }
 
   const batch = unselected.slice(0, count);
-  batch.forEach(o => selectedOrderNumbers.add(getOrderNum(o)));
+  batch.forEach(o => selectedOrderNumbers.add(getRowKey(o)));
 
   updateSelectedCount();
   renderCurrentPage();
@@ -2630,7 +2662,7 @@ async function executeBulkDateUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedOrderNumbers.size}) طلب إلى "${newDate}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -2659,7 +2691,7 @@ async function executeBulkStatusUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تغيير حالة المراجعة لـ (${selectedOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -2699,7 +2731,7 @@ async function executeBulkReviewDecisionUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تغيير القرار لـ (${selectedOrderNumbers.size}) طلب إلى "${newDecision}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -2740,7 +2772,7 @@ async function executeBulkQcAssign() {
   if (!newQc) { alert('برجاء اختيار مسؤول QC من القائمة'); return; }
   if (selectedOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const qcName = getDisplayName(newQc);
 
@@ -2772,7 +2804,7 @@ async function executeBulkDelete() {
 
   // مهم: بنقصر البحث على window.allData (بيانات التاريخ المعروض حاليًا بس)، مش window.masterData
   // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
@@ -2786,7 +2818,7 @@ async function executeBulkDelete() {
       const deletedIds = matchColumn === 'id' ? new Set(matchValues) : null;
       window.masterData = window.masterData.filter(o => {
         if (deletedIds) return !deletedIds.has(o.id);
-        return !selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']);
+        return !selectedOrderNumbers.has(getRowKey(o));
       });
       selectedOrderNumbers.clear();
       if (showOnlySelectedDashboard) { showOnlySelectedDashboard = false; const __b = document.getElementById('show-selected-only-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
@@ -2804,7 +2836,7 @@ async function executeBulkReassign() {
   const confirmChange = confirm(`هل أنت تأكد من نقل (${selectedOrderNumbers.size}) طلب إلى المراجع "${newReviewer}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(o.order_number || o.order_no || o['رقم الطلب']));
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
@@ -2827,16 +2859,27 @@ async function executeBulkReassign() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
-async function deleteSingleOrder(orderNum) {
+async function deleteSingleOrder(rowKey) {
   if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+
+  // بندوّر على الصف بالمفتاح الفريد بتاعه - مش برقم الطلب - عشان لو الرقم مكرر
+  // منمسحش الصف الغلط (أو الصفوف كلها)
+  const targetOrder = (window.allData || []).find(o => getRowKey(o) === rowKey)
+    || (window.masterData || []).find(o => getRowKey(o) === rowKey);
+  if (!targetOrder) { alert('لم يتم العثور على الطلب المطلوب حذفه.'); return; }
+
+  const orderNum = getOrderNumOf(targetOrder);
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrder = window.allData.find(o => String(o.order_number || o.order_no || o['رقم الطلب']) === String(orderNum));
-  if (!targetOrder) return;
+  // لو الصف معندوش id، الحذف برقم الطلب هيمسح كل الصفوف اللي بنفس الرقم - بنوقف بدل ما ده يحصل
+  if (targetOrder.id === undefined || targetOrder.id === null || targetOrder.id === '') {
+    alert('لا يمكن حذف هذا الصف بأمان لأنه لا يحمل معرّف (id) مميز. برجاء تحديث الصفحة والمحاولة مرة أخرى.');
+    return;
+  }
 
-  let matchColumn = targetOrder.id !== undefined ? 'id' : (targetOrder['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
-  let matchValue = targetOrder[matchColumn];
+  const matchColumn = 'id';
+  const matchValue = targetOrder.id;
 
   try {
     const { error } = await supabaseClient.from(TABLE_NAME).delete().eq(matchColumn, matchValue);
@@ -2846,7 +2889,7 @@ async function deleteSingleOrder(orderNum) {
       // مهم: نشيل بس الصف اللي فعليًا اتحذف (نفس الـ id)، مش أي صف تاني بنفس رقم الطلب على تاريخ مختلف -
       // لو رقم الطلب مكرر على أكتر من تاريخ، النسخة التانية لازم تفضل زي ما هي تمامًا.
       window.masterData = window.masterData.filter(o => o.id !== targetOrder.id);
-      selectedOrderNumbers.delete(orderNum);
+      selectedOrderNumbers.delete(rowKey);
       updateSelectedCount();
       applyDateFiltering();
     }
@@ -5741,7 +5784,7 @@ function renderRejectionsTab() {
 
   // "عرض المحدد فقط" - بيضيّق العرض على الطلبات المتحددة بس، بغض النظر عن باقي الفلاتر
   if (showOnlySelectedRejections) {
-    rows = rows.filter(o => selectedRejectionOrderNumbers.has(o.order_number));
+    rows = rows.filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
   }
 
   if (rows.length === 0) {
@@ -5779,12 +5822,14 @@ function renderRejectionsTab() {
       }
       if (!actionsHtml) actionsHtml = '-';
 
-      const isChecked = selectedRejectionOrderNumbers.has(orderNum) ? 'checked' : '';
+      const rejRowKey = getRowKey(o);
+      const safeRejRowKey = String(rejRowKey).replace(/'/g, "\\'");
+      const isChecked = selectedRejectionOrderNumbers.has(rejRowKey) ? 'checked' : '';
       const actionTimeCellHtml = isAdmin ? `<td class="action-time-cell">${formatActionTimestamp(o)}</td>` : '';
 
       return `
         <tr>
-          <td style="text-align:center;"><input type="checkbox" class="rejections-row-checkbox" value="${orderNum}" ${isChecked} onchange="toggleRejectionSelection('${orderNum}', this.checked)"></td>
+          <td style="text-align:center;"><input type="checkbox" class="rejections-row-checkbox" value="${rejRowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRejectionSelection('${safeRejRowKey}', this.checked)"></td>
           <td class="order-no-cell">${orderNum}</td>
           <td>${o.cert_type === 'تعمير' ? '📠 تعمير' : '🖨️ عادي'}</td>
           <td>${layout}</td>
@@ -5801,7 +5846,7 @@ function renderRejectionsTab() {
   updateRejectionsSelectedCount();
   const headerCb = document.getElementById('rejections-select-all-checkbox');
   if (headerCb) {
-    const selectedInFilter = rows.filter(o => selectedRejectionOrderNumbers.has(o.order_number)).length;
+    const selectedInFilter = rows.filter(o => selectedRejectionOrderNumbers.has(getRowKey(o))).length;
     if (selectedInFilter === 0) { headerCb.checked = false; headerCb.indeterminate = false; }
     else if (selectedInFilter === rows.length) { headerCb.checked = true; headerCb.indeterminate = false; }
     else { headerCb.checked = false; headerCb.indeterminate = true; }
@@ -5817,9 +5862,9 @@ function renderRejectionsTab() {
 let selectedRejectionOrderNumbers = new Set();
 let showOnlySelectedRejections = false;
 
-function toggleRejectionSelection(orderNumber, checked) {
-  if (checked) selectedRejectionOrderNumbers.add(orderNumber);
-  else selectedRejectionOrderNumbers.delete(orderNumber);
+function toggleRejectionSelection(rowKey, checked) {
+  if (checked) selectedRejectionOrderNumbers.add(rowKey);
+  else selectedRejectionOrderNumbers.delete(rowKey);
   updateRejectionsSelectedCount();
 }
 
@@ -5827,7 +5872,7 @@ function toggleRejectionSelection(orderNumber, checked) {
 function toggleRejectionsSelectAll(checkbox) {
   const rows = getFilteredRejectionsRows();
   if (checkbox.checked) {
-    rows.forEach(o => selectedRejectionOrderNumbers.add(o.order_number));
+    rows.forEach(o => selectedRejectionOrderNumbers.add(getRowKey(o)));
   } else {
     selectedRejectionOrderNumbers.clear();
   }
@@ -5858,7 +5903,7 @@ async function executeRejectionsBulkAction() {
   if (!action) { alert('برجاء اختيار الحالة من القائمة'); return; }
   if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
 
-  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(o.order_number));
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
   if (targetRows.length === 0) return;
 
   if (!confirm(`هل أنت متأكد من تطبيق حالة "${action}" على (${targetRows.length}) طلب؟`)) return;
@@ -5880,7 +5925,7 @@ async function executeRejectionsBulkAction() {
 async function executeRejectionsBulkPrinted() {
   if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
 
-  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(o.order_number));
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
   if (targetRows.length === 0) return;
 
   if (!confirm(`تأكيد تحويل حالة (${targetRows.length}) طلب إلى "تم الطباعة"؟`)) return;
@@ -5901,7 +5946,11 @@ async function executeRejectionsBulkPrinted() {
 
 function exportSelectedRejectionsOrderNumbers() {
   if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
-  const exportRows = [...selectedRejectionOrderNumbers].map(num => ({ 'رقم الطلب': num }));
+  const exportedNums = new Set();
+  (certMasterData || []).forEach(o => {
+    if (selectedRejectionOrderNumbers.has(getRowKey(o))) exportedNums.add(String(o.order_number));
+  });
+  const exportRows = [...exportedNums].map(num => ({ 'رقم الطلب': num }));
 
   const worksheet = XLSX.utils.json_to_sheet(exportRows);
   worksheet['!cols'] = [{ wch: 26 }];
@@ -6218,14 +6267,21 @@ function verifyAndSelectCertOrders() {
   // بندور في كل التواريخ (مش بس التاريخ المعروض حاليًا)، بس بنفس نوع الشهادة الحالي (عادي/تعمير)
   // عشان الرقم يتحدد حتى لو مسجل في يوم تاني غير اليوم المعروض فوق.
   const scopedData = certMasterData.filter(o => (o.cert_type || 'عادي') === activeCertType);
-  const availableNumbers = new Set(scopedData.map(o => String(o.order_number)));
+  // رقم الطلب ممكن يتكرر على أكتر من صف - بنحدد كل الصفوف اللي بنفس الرقم
+  const certRowsByNumber = new Map();
+  scopedData.forEach(o => {
+    const k = String(o.order_number);
+    if (!certRowsByNumber.has(k)) certRowsByNumber.set(k, []);
+    certRowsByNumber.get(k).push(o);
+  });
   const found = [];
   const notFound = [];
 
   combined.forEach(num => {
-    if (availableNumbers.has(num)) {
+    const rows = certRowsByNumber.get(String(num));
+    if (rows && rows.length > 0) {
       found.push(num);
-      selectedCertOrderNumbers.add(num);
+      rows.forEach(o => selectedCertOrderNumbers.add(getRowKey(o)));
     } else {
       notFound.push(num);
     }
@@ -6383,7 +6439,7 @@ function renderCertPage() {
   // بغض النظر عن فلاتر البحث/الحالة/المسؤول/التاريخ الشغالة فوق.
   if (showOnlySelectedCert) {
     const scoped = getCertMasterDataForActiveType();
-    const filtered = scoped.filter(item => selectedCertOrderNumbers.has(String(item.order_number)));
+    const filtered = scoped.filter(item => selectedCertOrderNumbers.has(getRowKey(item)));
 
     certTotalRecordsCount = filtered.length;
     const from = (certCurrentPage - 1) * certPageSize;
@@ -6463,13 +6519,15 @@ function renderCertTable(orders) {
     const layoutClass = rawLayout ? '' : 'style="color: var(--text-muted);"';
     const dateClass = rawDate ? '' : 'style="color: var(--text-muted);"';
 
-    const isChecked = selectedCertOrderNumbers.has(orderNum) ? 'checked' : '';
+    const certRowKey = getRowKey(order);
+    const safeCertRowKey = String(certRowKey).replace(/'/g, "\\'");
+    const isChecked = selectedCertOrderNumbers.has(certRowKey) ? 'checked' : '';
 
     tbody.innerHTML += `
       <tr>
-        <td style="text-align:center;"><input type="checkbox" class="cert-row-checkbox" data-ordernum="${orderNum}" ${isChecked} onchange="toggleCertRowSelect(this, '${orderNum}')"></td>
+        <td style="text-align:center;"><input type="checkbox" class="cert-row-checkbox" data-rowkey="${certRowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleCertRowSelect(this, '${safeCertRowKey}')"></td>
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openCertEditModal('${orderNum}')">تحديث</button></td>
-        <td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleCertOrder('${orderNum}')">🗑️ مسح</button>` : ''}</td>
+        <td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleCertOrder('${safeCertRowKey}')">🗑️ مسح</button>` : ''}</td>
         <td class="order-no-cell">${orderNum}</td>
         <td ${layoutClass}>${layout}</td>
         <td><span class="badge ${badgeClass}">${status}</span></td>
@@ -6481,7 +6539,7 @@ function renderCertTable(orders) {
 
   const selectAllCb = document.getElementById('cert-select-all-checkbox');
   if (selectAllCb) {
-    const allCurrentChecked = orders.length > 0 && orders.every(o => selectedCertOrderNumbers.has(o.order_number));
+    const allCurrentChecked = orders.length > 0 && orders.every(o => selectedCertOrderNumbers.has(getRowKey(o)));
     selectAllCb.checked = allCurrentChecked;
   }
 }
@@ -6502,18 +6560,18 @@ function updateCertPaginationControls(from, to) {
 function changeCertPage(direction) { certCurrentPage += direction; renderCertPage(); }
 
 // ============ التحديد الجماعي وتوزيع/حذف طلبات الشهادات ============
-function toggleCertRowSelect(cb, orderNum) {
-  if (cb.checked) { selectedCertOrderNumbers.add(orderNum); }
-  else { selectedCertOrderNumbers.delete(orderNum); }
+function toggleCertRowSelect(cb, rowKey) {
+  if (cb.checked) { selectedCertOrderNumbers.add(rowKey); }
+  else { selectedCertOrderNumbers.delete(rowKey); }
   updateCertSelectedCount();
 }
 
 function toggleCertSelectAll(masterCb) {
   if (!window.certFilteredData) return;
   window.certFilteredData.forEach(o => {
-    const orderNum = o.order_number;
-    if (masterCb.checked) { selectedCertOrderNumbers.add(orderNum); }
-    else { selectedCertOrderNumbers.delete(orderNum); }
+    const rowKey = getRowKey(o);
+    if (masterCb.checked) { selectedCertOrderNumbers.add(rowKey); }
+    else { selectedCertOrderNumbers.delete(rowKey); }
   });
   document.querySelectorAll('.cert-row-checkbox').forEach(cb => cb.checked = masterCb.checked);
   updateCertSelectedCount();
@@ -6539,13 +6597,13 @@ function selectNextCertBatch() {
 
   const unassigned = poolFromCurrentPage.filter(o => {
     const layout = o.Layout || o.layout || '';
-    return !layout && !selectedCertOrderNumbers.has(o.order_number);
+    return !layout && !selectedCertOrderNumbers.has(getRowKey(o));
   });
 
   if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد من الصفحة الحالية لآخر النتائج'); return; }
 
   const batch = unassigned.slice(0, count);
-  batch.forEach(o => selectedCertOrderNumbers.add(o.order_number));
+  batch.forEach(o => selectedCertOrderNumbers.add(getRowKey(o)));
 
   // ينقل تلقائيًا لآخر صفحة فيها طلب اتحدد، عشان تشوف نتيجة التحديد على طول، وعشان لو دست
   // الزرار تاني يكمل من هنا (من غير ما ترجع بنفسك لأول صفحة).
@@ -6581,12 +6639,12 @@ function selectNextCertFromFiltered() {
   const startIndex = (certCurrentPage - 1) * certPageSize;
   const poolFromCurrentPage = window.certFilteredData.slice(startIndex);
 
-  const unselected = poolFromCurrentPage.filter(o => !selectedCertOrderNumbers.has(o.order_number));
+  const unselected = poolFromCurrentPage.filter(o => !selectedCertOrderNumbers.has(getRowKey(o)));
 
   if (unselected.length === 0) { alert('كل الطلبات من الصفحة الحالية لآخر النتائج متحددة بالفعل'); return; }
 
   const batch = unselected.slice(0, count);
-  batch.forEach(o => selectedCertOrderNumbers.add(o.order_number));
+  batch.forEach(o => selectedCertOrderNumbers.add(getRowKey(o)));
 
   const lastSelected = batch[batch.length - 1];
   const lastIndexInFiltered = window.certFilteredData.findIndex(o => o.order_number === lastSelected.order_number);
@@ -6609,10 +6667,23 @@ function getSelectedCertExportFileLabel() {
   return `ارقام_الطلبات${nameLabel}_${dateLabel}`;
 }
 
+// بيرجّع أرقام الطلبات الحقيقية للصفوف المحددة في تاب الشهادات (للتصدير)
+function getSelectedCertOrderNumbersList() {
+  const nums = [];
+  const seen = new Set();
+  (certMasterData || []).forEach(o => {
+    if (selectedCertOrderNumbers.has(getRowKey(o))) {
+      const n = String(o.order_number);
+      if (!seen.has(n)) { seen.add(n); nums.push(n); }
+    }
+  });
+  return nums;
+}
+
 function exportSelectedCertOrderNumbers() {
   if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
 
-  const orderNumbers = Array.from(selectedCertOrderNumbers);
+  const orderNumbers = getSelectedCertOrderNumbersList();
   const rows = orderNumbers.map(num => ({ 'رقم الطلب': num }));
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -6628,7 +6699,7 @@ function exportSelectedCertOrderNumbers() {
 function exportSelectedCertOrderNumbersTxt() {
   if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
 
-  const orderNumbers = Array.from(selectedCertOrderNumbers);
+  const orderNumbers = getSelectedCertOrderNumbersList();
   const content = orderNumbers.join('\r\n');
 
   // \uFEFF: BOM عشان الأحرف العربية والأرقام تظهر صح لو الملف اتفتح في Notepad على ويندوز
@@ -6654,7 +6725,7 @@ async function executeCertBulkReassign() {
   const confirmChange = confirm(`هل أنت تأكد من توزيع (${selectedCertOrderNumbers.size}) طلب على المسؤول "${newLayout}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -6680,7 +6751,7 @@ async function executeCertBulkDateUpdate() {
   const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedCertOrderNumbers.size}) طلب إلى "${newDate}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -6707,7 +6778,7 @@ async function executeCertBulkTypeUpdate() {
   const confirmChange = confirm(`هل أنت متأكد من نقل (${selectedCertOrderNumbers.size}) طلب إلى "${targetLabel}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -6745,7 +6816,7 @@ async function executeCertBulkStatusUpdate() {
   const confirmChange = confirm(`هل أنت متأكد من تغيير حالة (${selectedCertOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -6779,7 +6850,7 @@ async function executeCertBulkDelete() {
 
   // مهم: بنقصر البحث على certAllData (بيانات التاريخ المعروض حاليًا بس)، مش certMasterData
   // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(o.order_number));
+  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
   const matchValues = targetOrders.map(o => o.id);
 
@@ -6799,13 +6870,22 @@ async function executeCertBulkDelete() {
   } catch (err) { alert('خطأ: ' + err.message); }
 }
 
-async function deleteSingleCertOrder(orderNum) {
+async function deleteSingleCertOrder(rowKey) {
   if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+
+  // بندوّر بالمفتاح الفريد للصف - مش برقم الطلب - عشان لو الرقم مكرر منمسحش الصف الغلط
+  const targetOrder = (certAllData || []).find(o => getRowKey(o) === rowKey)
+    || (certMasterData || []).find(o => getRowKey(o) === rowKey);
+  if (!targetOrder) { alert('لم يتم العثور على الطلب المطلوب حذفه.'); return; }
+
+  const orderNum = targetOrder.order_number;
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف الطلب رقم (${orderNum}) نهائياً؟`);
   if (!confirmDelete) return;
 
-  const targetOrder = certAllData.find(o => String(o.order_number) === String(orderNum));
-  if (!targetOrder) return;
+  if (targetOrder.id === undefined || targetOrder.id === null || targetOrder.id === '') {
+    alert('لا يمكن حذف هذا الصف بأمان لأنه لا يحمل معرّف (id) مميز. برجاء تحديث الصفحة والمحاولة مرة أخرى.');
+    return;
+  }
 
   try {
     const { error } = await supabaseClient.from(CERT_TABLE_NAME).delete().eq('id', targetOrder.id);
@@ -6814,7 +6894,7 @@ async function deleteSingleCertOrder(orderNum) {
       alert('تم حذف الطلب بنجاح!');
       // بنشيل بس نفس الصف اللي فعليًا اتحذف (بالـ id)، مش أي صف تاني بنفس رقم الطلب على تاريخ مختلف
       certMasterData = certMasterData.filter(o => o.id !== targetOrder.id);
-      selectedCertOrderNumbers.delete(orderNum);
+      selectedCertOrderNumbers.delete(rowKey);
       updateCertSelectedCount();
       applyCertDateFiltering();
     }
@@ -7215,14 +7295,21 @@ function verifyAndSelectMawaqefOrders() {
     return;
   }
 
-  const availableNumbers = new Set(mawaqefMasterData.map(o => String(o.order_number)));
+  // رقم الطلب ممكن يتكرر على أكتر من صف - بنحدد كل الصفوف اللي بنفس الرقم
+  const mawaqefRowsByNumber = new Map();
+  mawaqefMasterData.forEach(o => {
+    const k = String(o.order_number);
+    if (!mawaqefRowsByNumber.has(k)) mawaqefRowsByNumber.set(k, []);
+    mawaqefRowsByNumber.get(k).push(o);
+  });
   const found = [];
   const notFound = [];
 
   combined.forEach(num => {
-    if (availableNumbers.has(num)) {
+    const rows = mawaqefRowsByNumber.get(String(num));
+    if (rows && rows.length > 0) {
       found.push(num);
-      selectedMawaqefOrderNumbers.add(num);
+      rows.forEach(o => selectedMawaqefOrderNumbers.add(getRowKey(o)));
     } else {
       notFound.push(num);
     }
@@ -7388,7 +7475,7 @@ function getFilteredMawaqefRows() {
   // وضع "عرض المحدد فقط": بيعرض بس المواقف المتحددة حاليًا (✔️) من كل التواريخ مع بعض،
   // بغض النظر عن فلاتر البحث/الحالة/التاريخ الشغالة فوق.
   if (showOnlySelectedMawaqef) {
-    return (mawaqefMasterData || []).filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+    return (mawaqefMasterData || []).filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o)));
   }
 
   const searchValue = (document.getElementById('mawaqef-search-input').value || '').trim().toLowerCase();
@@ -7423,14 +7510,16 @@ function renderMawaqefPage() {
   const pageRows = rows.slice(startIdx, startIdx + mawaqefPageSize);
 
   tbody.innerHTML = pageRows.map(o => {
-    const isChecked = selectedMawaqefOrderNumbers.has(o.order_number) ? 'checked' : '';
+    const mawaqefRowKey = getRowKey(o);
+    const safeMawaqefRowKey = String(mawaqefRowKey).replace(/'/g, "\\'");
+    const isChecked = selectedMawaqefOrderNumbers.has(mawaqefRowKey) ? 'checked' : '';
     const hasComment = o.comment && o.comment.trim();
     const commentBtn = hasComment
       ? `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" title="${String(o.comment).replace(/"/g, '&quot;')}" onclick="openMawaqefCommentModal('${o.id}')">💬 ${String(o.comment).length > 15 ? String(o.comment).slice(0, 15) + '…' : o.comment}</button>`
       : `<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; opacity:0.7;" onclick="openMawaqefCommentModal('${o.id}')">➕ إضافة</button>`;
     return `
       <tr>
-        <td><input type="checkbox" class="mawaqef-row-checkbox" value="${o.order_number}" ${isChecked} onchange="toggleMawaqefSelection('${o.order_number}', this.checked)"></td>
+        <td><input type="checkbox" class="mawaqef-row-checkbox" value="${mawaqefRowKey}" data-ordernum="${o.order_number}" ${isChecked} onchange="toggleMawaqefSelection('${safeMawaqefRowKey}', this.checked)"></td>
         <td class="order-no-cell">${o.order_number || '-'}</td>
         <td>${o.tanzeen_number || '-'}</td>
         <td>${o.status || '-'}</td>
@@ -7454,7 +7543,7 @@ function renderMawaqefPage() {
 
   const headerCb = document.getElementById('mawaqef-select-all-header-checkbox');
   if (headerCb) {
-    const selectedInFilter = rows.filter(o => selectedMawaqefOrderNumbers.has(o.order_number)).length;
+    const selectedInFilter = rows.filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o))).length;
     if (selectedInFilter === 0) { headerCb.checked = false; headerCb.indeterminate = false; }
     else if (selectedInFilter === rows.length) { headerCb.checked = true; headerCb.indeterminate = false; }
     else { headerCb.checked = false; headerCb.indeterminate = true; }
@@ -7468,9 +7557,9 @@ function changeMawaqefPage(delta) {
   renderMawaqefPage();
 }
 
-function toggleMawaqefSelection(orderNumber, checked) {
-  if (checked) selectedMawaqefOrderNumbers.add(orderNumber);
-  else selectedMawaqefOrderNumbers.delete(orderNumber);
+function toggleMawaqefSelection(rowKey, checked) {
+  if (checked) selectedMawaqefOrderNumbers.add(rowKey);
+  else selectedMawaqefOrderNumbers.delete(rowKey);
   updateMawaqefSelectedCount();
 }
 
@@ -7479,7 +7568,7 @@ function toggleMawaqefSelection(orderNumber, checked) {
 function selectAllFilteredMawaqef(checked) {
   const rows = getFilteredMawaqefRows();
   if (checked) {
-    rows.forEach(o => selectedMawaqefOrderNumbers.add(o.order_number));
+    rows.forEach(o => selectedMawaqefOrderNumbers.add(getRowKey(o)));
   } else {
     selectedMawaqefOrderNumbers.clear();
   }
@@ -7516,7 +7605,7 @@ async function executeMawaqefBulkStatusUpdate() {
   const confirmChange = confirm(`هل أنت متأكد من تغيير حالة (${selectedMawaqefOrderNumbers.size}) طلب إلى "${newStatus}"؟`);
   if (!confirmChange) return;
 
-  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -7543,7 +7632,7 @@ async function executeMawaqefBulkComment() {
   const confirmChange = confirm(`هل أنت متأكد من تطبيق هذا التعليق على (${selectedMawaqefOrderNumbers.size}) طلب؟\n\n"${newComment}"\n\n⚠️ ده هيستبدل أي تعليق قديم موجود على كل طلب من الطلبات المحددة.`);
   if (!confirmChange) return;
 
-  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
@@ -7569,7 +7658,7 @@ async function executeMawaqefBulkDelete() {
 
   // مهم: بنقصر البحث على mawaqefAllData (بيانات التاريخ المعروض حاليًا بس)، مش mawaqefMasterData
   // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
-  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(o.order_number));
+  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o)));
   if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
   const matchValues = targetOrders.map(o => o.id);
 

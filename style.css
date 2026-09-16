@@ -121,6 +121,9 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 #admin-bulk-bar {
   display: none; /* خاص بلوحة المراجعة بس، بيتم إظهاره عبر الجافاسكريبت للأدمن */
 }
+#rejections-bulk-bar {
+  display: none; /* خاص بتاب المرفوضات، بيتم إظهاره عبر الجافاسكريبت للأدمن بس */
+}
 .bulk-group { 
   display: flex; 
   align-items: center; 

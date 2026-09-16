@@ -1097,7 +1097,7 @@ function refreshReviewerStatsActiveSubtab() {
 // اللي بتستبعد اللي "اتعدل". بتاخد بياناتها من getRejectedCertRows() زي بالظبط، وبتتحدّث لحظيًا
 // مع أي تغيير في جدول الشهادات (نفس مصدر بيانات تاب المرفوضات).
 let printRejectionsStatsChartInstance = null;
-function renderPrintRejectionsStats() {
+async function renderPrintRejectionsStats() {
   const emptyEl = document.getElementById('print-rejections-stats-empty');
   const wrapper = document.getElementById('print-rejections-stats-chart-wrapper');
   const canvas = document.getElementById('print-rejections-stats-chart');
@@ -1123,6 +1123,22 @@ function renderPrintRejectionsStats() {
     if (totalEl) totalEl.innerText = '';
     return;
   }
+
+  // مكتبة الرسوم البيانية (Chart.js) بتتحمّل أول مرة بس وقت الحاجة - لازم نستناها تخلص
+  // قبل ما ننشئ أي Chart جديد، وإلا الرسم مش هيظهر أبدًا من غير أي رسالة خطأ واضحة
+  if (typeof Chart === 'undefined') {
+    if (emptyEl) emptyEl.innerText = '⏳ جاري تحميل مكتبة الرسوم البيانية...';
+    wrapper.style.display = 'none';
+    try {
+      await loadChartJsLibrary();
+    } catch (err) {
+      if (emptyEl) emptyEl.innerText = 'تعذر تحميل مكتبة الرسوم البيانية. تأكد من الإنترنت أو أوقف أي Ad-blocker وحاول تاني.';
+      return;
+    }
+    // لو التاب الفرعي اتقفل أو اتغيّر وإحنا لسه بنستنى تحميل المكتبة، نتجاهل ونسيب أحدث نداء يرسم
+    if (activeReviewerStatsSubtab !== 'printrej') return;
+  }
+
   if (emptyEl) emptyEl.innerText = '';
   wrapper.style.display = 'block';
 
@@ -1192,7 +1208,7 @@ async function renderReviewerStatsTab(forceRefresh) {
 // الرسم الفعلي للرسم البياني (أعمدة) من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان
 // التحديث اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير ما يعيد تحميل حاجة من الداتابيز
 let reviewerStatsChartInstance = null;
-function renderReviewerStatsCards() {
+async function renderReviewerStatsCards() {
   const emptyEl = document.getElementById('reviewer-stats-empty');
   const wrapper = document.getElementById('reviewer-stats-chart-wrapper');
   const canvas = document.getElementById('reviewer-stats-chart');
@@ -1212,6 +1228,22 @@ function renderReviewerStatsCards() {
     if (totalEl) totalEl.innerText = '';
     return;
   }
+
+  // مكتبة الرسوم البيانية (Chart.js) بتتحمّل أول مرة بس وقت الحاجة (مش من أول ما الصفحة تفتح) -
+  // لازم نستناها تخلص قبل ما ننشئ أي Chart جديد، وإلا الرسم مش هيظهر أبدًا من غير أي رسالة خطأ واضحة
+  if (typeof Chart === 'undefined') {
+    if (emptyEl) emptyEl.innerText = '⏳ جاري تحميل مكتبة الرسوم البيانية...';
+    wrapper.style.display = 'none';
+    try {
+      await loadChartJsLibrary();
+    } catch (err) {
+      if (emptyEl) emptyEl.innerText = 'تعذر تحميل مكتبة الرسوم البيانية. تأكد من الإنترنت أو أوقف أي Ad-blocker وحاول تاني.';
+      return;
+    }
+    // لو التاب الفرعي اتقفل أو اتغيّر وإحنا لسه بنستنى تحميل المكتبة، نتجاهل ونسيب أحدث نداء يرسم
+    if (activeReviewerStatsSubtab !== 'full') return;
+  }
+
   if (emptyEl) emptyEl.innerText = '';
   wrapper.style.display = 'block';
 

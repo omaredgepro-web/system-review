@@ -1059,28 +1059,145 @@ function patchReviewerStatsAlltime(eventType, newRow, oldRow) {
 }
 
 // ============================================================
+// تاب "أداء المراجعين" بقى فيه تابين فرعيين: "إحصائية المراجعة الكاملة"
+// (مقبول + مرفوض) و"مرفوضات طباعة" (كل رفض حصل أي وقت، بلا استثناء).
+// ============================================================
+let activeReviewerStatsSubtab = 'full';
+
+function switchReviewerStatsSubtab(name) {
+  activeReviewerStatsSubtab = name;
+
+  const fullBtn = document.getElementById('reviewer-stats-subtab-btn-full');
+  const printrejBtn = document.getElementById('reviewer-stats-subtab-btn-printrej');
+  const fullContent = document.getElementById('reviewer-stats-subtab-full-content');
+  const printrejContent = document.getElementById('reviewer-stats-subtab-printrej-content');
+  if (!fullBtn || !printrejBtn || !fullContent || !printrejContent) return;
+
+  fullBtn.classList.remove('btn-primary', 'btn-secondary');
+  printrejBtn.classList.remove('btn-primary', 'btn-secondary');
+  fullBtn.classList.add(name === 'full' ? 'btn-primary' : 'btn-secondary');
+  printrejBtn.classList.add(name === 'printrej' ? 'btn-primary' : 'btn-secondary');
+
+  fullContent.style.display = name === 'full' ? 'block' : 'none';
+  printrejContent.style.display = name === 'printrej' ? 'block' : 'none';
+
+  // نعيد الرسم عند الفتح عشان الرسم البياني يتحسب بمقاس صحيح (كان مخفي "display:none" قبل كده)
+  if (name === 'full') renderReviewerStatsCards();
+  else renderPrintRejectionsStats();
+}
+
+// زرار "🔄 تحديث" في تاب أداء المراجعين - بيحدّث بس التاب الفرعي المفتوح حاليًا
+function refreshReviewerStatsActiveSubtab() {
+  if (activeReviewerStatsSubtab === 'full') renderReviewerStatsTab(true);
+  else renderPrintRejectionsStats();
+}
+
+// إحصائية "مرفوضات طباعة": بتحسب كل طلب اترفض أي وقت من أول تاريخ لحد الآن لكل مراجع،
+// بلا أي استثناء (لسه مرفوضة / اتعدلت / اتطبعت) - على عكس إحصائية السايدبار في تاب المرفوضات
+// اللي بتستبعد اللي "اتعدل". بتاخد بياناتها من getRejectedCertRows() زي بالظبط، وبتتحدّث لحظيًا
+// مع أي تغيير في جدول الشهادات (نفس مصدر بيانات تاب المرفوضات).
+let printRejectionsStatsChartInstance = null;
+function renderPrintRejectionsStats() {
+  const emptyEl = document.getElementById('print-rejections-stats-empty');
+  const wrapper = document.getElementById('print-rejections-stats-chart-wrapper');
+  const canvas = document.getElementById('print-rejections-stats-chart');
+  const totalEl = document.getElementById('print-rejections-stats-total');
+  if (!canvas || !wrapper) return;
+
+  const allTimeRejectedNoException = getRejectedCertRows();
+
+  const counts = {};
+  allTimeRejectedNoException.forEach(o => {
+    const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
+    const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || 'غير محدد');
+    counts[reviewerName] = (counts[reviewerName] || 0) + 1;
+  });
+
+  const rows = Object.keys(counts)
+    .map(name => ({ name, total: counts[name] }))
+    .sort((a, b) => b.total - a.total);
+
+  if (rows.length === 0) {
+    if (emptyEl) emptyEl.innerText = 'لا يوجد أي طلب مرفوض مسجل حتى الآن.';
+    wrapper.style.display = 'none';
+    if (totalEl) totalEl.innerText = '';
+    return;
+  }
+  if (emptyEl) emptyEl.innerText = '';
+  wrapper.style.display = 'block';
+
+  const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
+  if (totalEl) totalEl.innerText = `الإجمالي: ${grandTotal.toLocaleString('ar-EG')} طلب مرفوض (بلا استثناء)`;
+
+  const chartHeight = Math.max(260, rows.length * 36 + 40);
+  wrapper.style.height = chartHeight + 'px';
+
+  if (printRejectionsStatsChartInstance) printRejectionsStatsChartInstance.destroy();
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const rejectColor = rootStyles.getPropertyValue('--badge-reject-text').trim() || '#f87171';
+  const textColor = rootStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
+  const mainTextColor = rootStyles.getPropertyValue('--text-main').trim() || '#e2e8f0';
+  const gridColor = rootStyles.getPropertyValue('--card-border').trim() || 'rgba(255,255,255,0.08)';
+
+  if (window.ChartDataLabels) Chart.register(ChartDataLabels);
+
+  printRejectionsStatsChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: rows.map(r => r.name),
+      datasets: [{
+        label: 'مرفوضات طباعة',
+        data: rows.map(r => r.total),
+        backgroundColor: rejectColor,
+        datalabels: {
+          display: true, anchor: 'end', align: 'end', offset: 4,
+          color: mainTextColor, font: { weight: '700', size: 12 },
+          formatter: (value) => value.toLocaleString('ar-EG')
+        }
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      layout: { padding: { right: 40 } },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { color: textColor }, grid: { color: gridColor } },
+        y: { ticks: { color: mainTextColor, font: { size: 12, weight: '600' } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+// ============================================================
 // تاب "أداء المراجعين": بيعرض لكل مراجع (من أول تاريخ لحد الآن) عدد المقبول،
 // المرفوض، وإجمالي "تم المراجعة" (مقبول + مرفوض) - بدون "لم يتم المراجعة" أو
 // "معلق" أو "Qc" خالص، لأن المطلوب هنا أداء المراجعة الفعلي بس.
 // ============================================================
 async function renderReviewerStatsTab(forceRefresh) {
-  const container = document.getElementById('reviewer-stats-cards-container');
-  if (!container) return;
-  container.innerHTML = `<div class="stat-empty-msg">⏳ جاري تحميل الإحصائية...</div>`;
+  const emptyEl = document.getElementById('reviewer-stats-empty');
+  if (emptyEl) emptyEl.innerText = '⏳ جاري تحميل الإحصائية...';
 
   const stats = await loadReviewerStatsAlltime(forceRefresh);
   if (!stats) {
-    container.innerHTML = `<div class="stat-empty-msg">تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".</div>`;
+    if (emptyEl) emptyEl.innerText = 'تعذر تحميل الإحصائية، جرب تدوس "🔄 تحديث".';
     return;
   }
   renderReviewerStatsCards();
 }
 
-// الرسم الفعلي للكروت من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان التحديث
-// اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير ما يعيد تحميل حاجة من الداتابيز
+// الرسم الفعلي للرسم البياني (أعمدة) من البيانات المحمّلة بالفعل - منفصل عن التحميل عشان
+// التحديث اللحظي (من الـ Realtime) يقدر يعيد الرسم فورًا من غير ما يعيد تحميل حاجة من الداتابيز
+let reviewerStatsChartInstance = null;
 function renderReviewerStatsCards() {
-  const container = document.getElementById('reviewer-stats-cards-container');
-  if (!container || !reviewerStatsAlltime) return;
+  const emptyEl = document.getElementById('reviewer-stats-empty');
+  const wrapper = document.getElementById('reviewer-stats-chart-wrapper');
+  const canvas = document.getElementById('reviewer-stats-chart');
+  const totalEl = document.getElementById('reviewer-stats-total');
+  if (!canvas || !wrapper || !reviewerStatsAlltime) return;
 
   const rows = Object.keys(reviewerStatsAlltime).map(name => {
     const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
@@ -1090,27 +1207,73 @@ function renderReviewerStatsCards() {
     .sort((a, b) => b.reviewed - a.reviewed);
 
   if (rows.length === 0) {
-    container.innerHTML = `<div class="stat-empty-msg">لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.</div>`;
+    if (emptyEl) emptyEl.innerText = 'لا توجد طلبات تمت مراجعتها (مقبول/مرفوض) حتى الآن.';
+    wrapper.style.display = 'none';
+    if (totalEl) totalEl.innerText = '';
     return;
   }
+  if (emptyEl) emptyEl.innerText = '';
+  wrapper.style.display = 'block';
 
-  container.innerHTML = rows.map(r => {
-    const acceptedPct = r.reviewed > 0 ? Math.round((r.accepted / r.reviewed) * 100) : 0;
-    const rejectedPct = 100 - acceptedPct;
-    return `
-      <div class="stat-card">
-        <div class="stat-name">${r.name}</div>
-        <div class="stat-total">تم المراجعة: ${r.reviewed.toLocaleString('ar-EG')} طلب</div>
-        <div class="stat-bar">
-          <div class="stat-bar-accepted" style="width:${acceptedPct}%;"></div>
-          <div class="stat-bar-rejected" style="width:${rejectedPct}%;"></div>
-        </div>
-        <div class="stat-legend">
-          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-accept-text);"></span> مقبول</span><span>${r.accepted.toLocaleString('ar-EG')} (${acceptedPct}%)</span></div>
-          <div class="row"><span class="label"><span class="stat-dot" style="background:var(--badge-reject-text);"></span> مرفوض</span><span>${r.rejected.toLocaleString('ar-EG')} (${rejectedPct}%)</span></div>
-        </div>
-      </div>`;
-  }).join('');
+  const grandTotal = rows.reduce((sum, r) => sum + r.reviewed, 0);
+  if (totalEl) totalEl.innerText = `الإجمالي: ${grandTotal.toLocaleString('ar-EG')} طلب تمت مراجعته`;
+
+  const chartHeight = Math.max(260, rows.length * 36 + 40);
+  wrapper.style.height = chartHeight + 'px';
+
+  if (reviewerStatsChartInstance) reviewerStatsChartInstance.destroy();
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const acceptColor = rootStyles.getPropertyValue('--badge-accept-text').trim() || '#34d399';
+  const rejectColor = rootStyles.getPropertyValue('--badge-reject-text').trim() || '#f87171';
+  const textColor = rootStyles.getPropertyValue('--text-muted').trim() || '#94a3b8';
+  const mainTextColor = rootStyles.getPropertyValue('--text-main').trim() || '#e2e8f0';
+  const gridColor = rootStyles.getPropertyValue('--card-border').trim() || 'rgba(255,255,255,0.08)';
+
+  if (window.ChartDataLabels) Chart.register(ChartDataLabels);
+
+  reviewerStatsChartInstance = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: rows.map(r => r.name),
+      datasets: [
+        {
+          label: 'مقبول',
+          data: rows.map(r => r.accepted),
+          backgroundColor: acceptColor,
+          stack: 'reviewed',
+          datalabels: {
+            display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0,
+            color: '#0b1220', font: { weight: '700', size: 11 },
+            formatter: (value) => value.toLocaleString('ar-EG')
+          }
+        },
+        {
+          label: 'مرفوض',
+          data: rows.map(r => r.rejected),
+          backgroundColor: rejectColor,
+          stack: 'reviewed',
+          datalabels: {
+            display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0,
+            color: '#1a0b0b', font: { weight: '700', size: 11 },
+            formatter: (value) => value.toLocaleString('ar-EG')
+          }
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      layout: { padding: { right: 40 } },
+      plugins: { legend: { display: true, labels: { color: mainTextColor } } },
+      scales: {
+        x: { beginAtZero: true, stacked: true, ticks: { color: textColor }, grid: { color: gridColor } },
+        y: { stacked: true, ticks: { color: mainTextColor, font: { size: 12, weight: '600' } }, grid: { display: false } }
+      }
+    }
+  });
 }
 
 let liveUpdatesChannel = null;
@@ -1511,7 +1674,12 @@ function switchTab(tabName) {
   } else if (tabName === 'reviewer-stats') {
     document.getElementById('reviewer-stats-tab-btn').classList.add('active');
     document.getElementById('tab-reviewer-stats').style.display = 'block';
+    // كل مرة يفتح فيها التاب يرجع افتراضيًا لتاب "إحصائية المراجعة الكاملة" الفرعي
+    switchReviewerStatsSubtab('full');
     renderReviewerStatsTab();
+    // "مرفوضات طباعة" بياخد بياناته من جدول الشهادات (نفس مصدر تاب المرفوضات)
+    if (!certDataLoaded) { loadCertificatesData().then(renderPrintRejectionsStats).catch(() => {}); }
+    else { renderPrintRejectionsStats(); }
   }
 }
 
@@ -5433,6 +5601,9 @@ function renderRejectionsTab() {
   }
 
   renderRejectionsReviewerStats();
+  // "مرفوضات طباعة" في تاب أداء المراجعين بتاخد نفس مصدر بيانات تاب المرفوضات،
+  // فلازم تتحدّث في نفس اللحظة كمان عشان تفضل لايف بالظبط زي إحصائية السايدبار
+  renderPrintRejectionsStats();
 }
 
 // ============ التحديد والإجراءات الجماعية لتاب المرفوضات ============

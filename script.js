@@ -2169,16 +2169,11 @@ async function verifyAndSelectDashboardOrders() {
   }
 
   const resultsEl = document.getElementById('dashboard-multiselect-results');
-  resultsEl.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث في كل التواريخ...</p>`;
-
-  try {
-    await ensureFullMasterData();
-  } catch (err) {
-    resultsEl.innerHTML = `<p style="color: var(--badge-reject-text); font-weight:700;">تعذّر تحميل بيانات الطلبات: ${err.message}</p>`;
-    return;
-  }
+  resultsEl.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث...</p>`;
 
   const isAdmin = currentUser && currentUser.role === 'admin';
+  // بيدور بس في التاريخ المعروض حاليًا (اللي محدد في فلتر التاريخ، أو واقف عليه دلوقتي) -
+  // مش في كل التواريخ، عشان يبقى سريع (البحث في كل التواريخ كان بياخد وقت طويل جدًا)
   const scope = isAdmin ? (window.masterData || []) : (window.masterData || []).filter(item => {
     const reviewerName = item.reviewer || item['المراجع'] || '';
     return reviewerName === currentUser.username || reviewerName === currentUser.name;
@@ -2212,9 +2207,9 @@ async function verifyAndSelectDashboardOrders() {
     if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل)${found.length > 0 ? ' - وتفعّل "عرض المحدد فقط" عشان تشوفهم كلهم على طول.' : ''}</p>`;
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل، ضمن التاريخ المعروض حاليًا)${found.length > 0 ? ' - وتفعّل "عرض المحدد فقط" عشان تشوفهم كلهم على طول.' : ''}</p>`;
   if (notFound.length > 0) {
-    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود ${isAdmin ? '' : 'ضمن طلباتك '}أصلاً:</p>`;
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود ${isAdmin ? '' : 'ضمن طلباتك '}في التاريخ المعروض حاليًا (جرب تاريخ تاني لو الرقم مسجل في يوم مختلف):</p>`;
     html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
   }
   resultsEl.innerHTML = html;

@@ -38,90 +38,26 @@
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
 body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px; direction: rtl; transition: background-color 0.2s ease, color 0.2s ease; }
 
-/* ============ Login Screen (تصميم شاشة الدخول المقسّمة) ============ */
-#login-screen {
-  display: flex;
-  min-height: 100vh;
-  margin: -25px;
-  width: calc(100% + 50px);
-  background-color: var(--bg-dark);
-  overflow: hidden;
-}
-
+/* ============ Login Screen ============ */
+#login-screen { display: flex; min-height: 100vh; margin: -25px; width: calc(100% + 50px); background-color: var(--bg-dark); overflow: hidden; }
 .login-wrapper { display: flex; direction: ltr; width: 100%; min-height: 100vh; position: relative; }
-
-/* زرار تبديل الوضع الداكن/الفاتح أعلى يمين الشاشة */
-.theme-toggle-btn {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  z-index: 20;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  color: var(--text-main);
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  direction: rtl;
-  transition: all 0.2s;
-}
+.theme-toggle-btn { position: absolute; top: 24px; right: 24px; z-index: 20; display: inline-flex; align-items: center; gap: 8px; background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; direction: rtl; transition: all 0.2s; }
 .theme-toggle-btn:hover { border-color: var(--accent-purple); }
 
-/* اللوحة اليسرى: العلامة التجارية */
-.login-brand-panel {
-  flex: 1;
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 60px 40px;
-  background: linear-gradient(160deg, #171f38 0%, #0a0e1a 100%);
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
-  direction: rtl;
-}
-
+.login-brand-panel { flex: 1; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 60px 40px; background: linear-gradient(160deg, #171f38 0%, #0a0e1a 100%); border-left: 1px solid rgba(255, 255, 255, 0.06); direction: rtl; }
 .brand-logo-mark { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 22px; }
 .logo-bar { width: 2px; height: 28px; background: rgba(148, 163, 184, 0.5); border-radius: 2px; }
 .logo-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-purple); box-shadow: 0 0 10px var(--accent-purple); }
-
 .brand-logo-img { width: 232px; height: 80px; object-fit: contain; margin-bottom: 20px; }
-
 .brand-name { font-size: 26px; font-weight: 800; letter-spacing: 1px; color: #f8fafc; margin-bottom: 6px; direction: ltr; }
 .brand-title { font-size: 22px; font-weight: 800; color: #f8fafc; margin-bottom: 12px; }
 .brand-desc { font-size: 14px; color: #94a3b8; max-width: 320px; line-height: 1.8; margin: 0 auto; }
 .brand-sub { font-size: 11px; letter-spacing: 3px; color: #64748b; text-transform: uppercase; margin-bottom: 45px; direction: ltr; }
 
-.brand-version-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 40px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 7px 16px;
-  border-radius: 20px;
-  font-size: 12px;
-  color: #94a3b8;
-}
+.brand-version-badge { display: inline-flex; align-items: center; gap: 8px; margin-top: 40px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); padding: 7px 16px; border-radius: 20px; font-size: 12px; color: #94a3b8; }
 .version-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; }
 
-/* اللوحة اليمنى: نموذج تسجيل الدخول */
-.login-form-panel {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-  background-color: var(--bg-dark);
-  direction: rtl;
-}
-
+.login-form-panel { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; background-color: var(--bg-dark); direction: rtl; }
 .login-box { width: 100%; max-width: 380px; text-align: right; }
 .login-eyebrow { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
 .login-box h2 { margin-bottom: 24px; font-weight: 800; font-size: 24px; }
@@ -129,18 +65,12 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
 .form-control { width: 100%; background-color: var(--card-bg); border: 1px solid var(--card-border); color: var(--text-main); padding: 11px 14px; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
 .form-control:focus { border-color: var(--accent-purple); }
-
 .remember-row { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
 .remember-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
-
 .login-footer { margin-top: 30px; text-align: center; font-size: 11px; color: var(--text-muted); direction: ltr; opacity: 0.7; }
-
-@media (min-width: 860px) {
-  .login-brand-panel { display: flex; }
-}
+@media (min-width: 860px) { .login-brand-panel { display: flex; } }
 
 #app-content { display: none; }
-
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 .header-title h1 { font-size: 24px; font-weight: 800; }
@@ -162,26 +92,8 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 .kpi-title { font-size: 14px; color: var(--text-muted); margin-bottom: 10px; }
 .kpi-value { font-size: 32px; font-weight: 800; }
 
-/* الدرج الجانبي لإحصائيات المراجعين */
 .dashboard-layout { position: relative; width: 100%; }
-
-.sidebar-drawer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 320px;
-  height: 100%;
-  z-index: 99;
-  background-color: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: -5px 0 25px rgba(0, 0, 0, 0.5);
-  display: none;
-  max-height: 80vh;
-  overflow-y: auto;
-}
-
+.sidebar-drawer { position: absolute; top: 0; left: 0; width: 320px; height: 100%; z-index: 99; background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; box-shadow: -5px 0 25px rgba(0, 0, 0, 0.5); display: none; max-height: 80vh; overflow-y: auto; }
 .sidebar-drawer.active { display: block; }
 
 .reviewer-stat { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--card-border); }
@@ -197,46 +109,31 @@ body { background-color: var(--bg-dark); color: var(--text-main); padding: 25px;
 /* ============ إعدادات الجدول المضغوط ============ */
 table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 /* تقليل حجم الخط والمسافات لضغط الجدول وتقليل السكرول الأفقي */
-th { text-align: right; color: var(--text-muted); font-size: 12px; padding: 8px; border-bottom: 1px solid var(--card-border); background-color: var(--card-bg); }
-td { padding: 6px 8px; font-size: 12px; border-bottom: 1px solid var(--card-border); vertical-align: middle; }
+th { text-align: right; color: var(--text-muted); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--card-border); background-color: var(--bg-dark); }
+td { padding: 4px 10px; font-size: 12px; border-bottom: 1px solid var(--card-border); vertical-align: middle; }
 
 /* ============ حاوية الجدول ============ */
 .table-container { overflow-x: auto; overflow-y: auto; max-height: 75vh; position: relative; width: 100%; max-width: 100%; }
 
-/* إلغاء تثبيت الهيدر (Top) مع الاحتفاظ بخلفيته */
-.table-container thead th { background-color: var(--card-bg); }
+/* إزالة التثبيت (Sticky) تماماً من الهيدر ومن أعمدة الإجراءات لتسهيل السكرول العادي تماماً */
+.table-container thead th { position: static; background-color: var(--bg-dark); }
+.sticky-action-col { position: static; background-color: transparent; border-right: none; z-index: auto; }
+.table-container thead th.sticky-action-col { z-index: auto; }
 
-/* تثبيت أعمدة الإجراءات Sticky Column أفقيًا فقط */
-.sticky-action-col {
-  position: sticky;
-  left: 0;
-  background-color: var(--card-bg);
-  z-index: 10;
-  border-right: 1px solid var(--card-border);
-}
-
-.table-container thead th.sticky-action-col {
-  z-index: 11;
-}
-
-/* حاوية جدول الطباعة (في حالة استخدام الكلاس ده) */
+/* حاوية جدول الطباعة */
 .cert-table-scroll { max-height: 75vh; overflow-y: auto; }
-.cert-table-scroll thead th { background-color: var(--card-bg); }
-.cert-table-scroll .sticky-action-col { z-index: 10; }
-.cert-table-scroll thead th.sticky-action-col { z-index: 11; }
-
+.cert-table-scroll thead th { position: static; background-color: var(--bg-dark); }
+.cert-table-scroll .sticky-action-col { z-index: auto; }
+.cert-table-scroll thead th.sticky-action-col { z-index: auto; }
 
 .table-filters { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
 .search-input, .filter-select, .date-input { background-color: var(--bg-dark); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 14px; border-radius: 8px; font-size: 14px; outline: none; }
 .search-input { width: 200px; }
 
-/* شريط تحكم الأدمن للعمليات الجماعية */
-.admin-bulk-actions { display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent-purple); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; align-items: center; justify-content: space-between; gap: 10px; }
-
+/* شريط تحكم الأدمن للعمليات الجماعية - تم التأكد من خاصية flex-wrap لمنع السكرول الأفقي */
+.admin-bulk-actions { display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid var(--accent-purple); padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
 
 .order-no-cell { direction: ltr; text-align: right; font-family: monospace, 'Cairo', sans-serif; font-weight: 600; letter-spacing: 0.5px; }
-
-/* عمود "تاريخ ووقت آخر إجراء" - يظهر للأدمن بس في جداول المراجعة/الشهادات/المواقف/المرفوضات */
 .action-time-cell { font-size: 12px; color: var(--text-muted); white-space: nowrap; direction: ltr; text-align: right; }
 
 .badge { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -275,7 +172,6 @@ textarea.form-control { resize: vertical; min-height: 90px; }
 
 input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-purple); }
 
-/* كروت إحصائيات المراجعين/الشركات - Modal كبير وواضح بدل الدرج الجانبي الصغير القديم */
 .stats-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; max-height: 60vh; overflow-y: auto; padding: 4px; }
 .stat-card { background: var(--bg-dark); border: 1px solid var(--card-border); border-radius: 14px; padding: 18px; transition: transform 0.15s ease, border-color 0.15s ease; }
 .stat-card:hover { border-color: var(--accent-purple); transform: translateY(-3px); }

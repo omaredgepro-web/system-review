@@ -1109,7 +1109,10 @@ async function renderPrintRejectionsStats() {
   const counts = {};
   allTimeRejectedNoException.forEach(o => {
     const reviewerProfile = ALL_PROFILES.find(p => p.username === o.reviewer);
-    const reviewerName = reviewerProfile ? reviewerProfile.name : (o.reviewer || 'غير محدد');
+    // بس المراجعين (role = 'reviewer') يدخلوا الإحصائية دي - أي أدمن، أو طلب من غير مراجع
+    // معروف (يعني هيطلع "غير محدد")، يتستبعد خالص من الرسم
+    if (!reviewerProfile || reviewerProfile.role !== 'reviewer') return;
+    const reviewerName = reviewerProfile.name;
     counts[reviewerName] = (counts[reviewerName] || 0) + 1;
   });
 
@@ -1215,11 +1218,16 @@ async function renderReviewerStatsCards() {
   const totalEl = document.getElementById('reviewer-stats-total');
   if (!canvas || !wrapper || !reviewerStatsAlltime) return;
 
-  const rows = Object.keys(reviewerStatsAlltime).map(name => {
-    const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
-    const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
-    return { name, accepted, rejected, reviewed: accepted + rejected };
-  }).filter(r => r.reviewed > 0)
+  // بس المراجعين (role = 'reviewer') يدخلوا الإحصائية دي - أي أدمن أو اسم "غير محدد"/غير معروف يتستبعد خالص
+  const reviewerNamesOnly = new Set(ALL_PROFILES.filter(p => p.role === 'reviewer').map(p => p.name));
+
+  const rows = Object.keys(reviewerStatsAlltime)
+    .filter(name => reviewerNamesOnly.has(name))
+    .map(name => {
+      const accepted = reviewerStatsAlltime[name]['مقبول'] || 0;
+      const rejected = reviewerStatsAlltime[name]['مرفوض'] || 0;
+      return { name, accepted, rejected, reviewed: accepted + rejected };
+    }).filter(r => r.reviewed > 0)
     .sort((a, b) => b.reviewed - a.reviewed);
 
   if (rows.length === 0) {

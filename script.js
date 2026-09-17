@@ -765,6 +765,8 @@ async function setupUserSession(profile) {
   if (bulkDeleteBtn) bulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   const certBulkDeleteBtn = document.getElementById('cert-bulk-delete-btn');
   if (certBulkDeleteBtn) certBulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
+  const rejectionsBulkDeleteBtn = document.getElementById('rejections-bulk-delete-btn');
+  if (rejectionsBulkDeleteBtn) rejectionsBulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   const certReassignControls = document.getElementById('cert-reassign-controls');
   if (certReassignControls) certReassignControls.style.display = canDelete() ? 'flex' : 'none';
   document.getElementById('admin-export-actions').style.display = isAdmin ? 'flex' : 'none';
@@ -2802,10 +2804,10 @@ async function executeBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  // مهم: بنقصر البحث على window.allData (بيانات التاريخ المعروض حاليًا بس)، مش window.masterData
-  // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
-  const targetOrders = window.allData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
-  if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
+  // التحديد بقى بمفتاح فريد للصف (id) مش برقم الطلب، فبقى آمن نبحث في كل التواريخ
+  // (window.masterData) بدل ما نقصر البحث على تاريخ اليوم المعروض بس - مفيش لبس ممكن يحصل.
+  const targetOrders = window.masterData.filter(o => selectedOrderNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) { alert('لم يتم العثور على الطلبات المحددة.'); return; }
   const matchColumn = targetOrders[0].id !== undefined ? 'id' : (targetOrders[0]['رقم الطلب'] !== undefined ? 'رقم الطلب' : 'order_number');
   const matchValues = targetOrders.map(o => o[matchColumn]);
 
@@ -5543,6 +5545,14 @@ function populateCertLayoutFilter() {
   }));
   setMultiSelectOptions('rejections-reviewer-filter', rejectionsReviewerOptions);
 
+  // قايمة "توزيع المراجع" الجماعية في تاب المرفوضات - عشان الطلبات اللي مفيهاش
+  // اسم مراجع (أو محتاجة تتغيّر) يتوزعوا مرة واحدة بدل واحد واحد
+  const rejectionsBulkReviewerSelect = document.getElementById('rejections-bulk-reviewer-select');
+  if (rejectionsBulkReviewerSelect) {
+    rejectionsBulkReviewerSelect.innerHTML = `<option value="">توزيع المراجع...</option>` +
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+  }
+
   // فلتر "المسؤول" الجديد في تاب المرفوضات (Multi-select) - بيسمح للأدمن يفلتر على المسؤول
   // (أو أكتر من مسؤول) المخصص على الطلب، عشان مثلاً كل أدمن يقدر يشوف بس اللي هو رفضه
   setMultiSelectOptions('rejections-layout-filter', [{ value: 'UNASSIGNED', label: '⛔ غير موزّع' }, ...adminOptions]);
@@ -5571,7 +5581,7 @@ function filterRejectionsByMeAsLayout() {
 function getRejectedCertRows() {
   // بيشمل أي طلب حالته حاليًا "مرفوض"، أو اتعمله رفض قبل كده أي وقت (was_rejected) حتى لو
   // اتغيرت حالته بعدين لـ"تم الطباعة" أو أي حالة تانية - عشان يفضل ظاهر في سجل المرفوضات
-  const rejected = (certMasterData || []).filter(o => o.status === 'مرفوض' || o.was_rejected === true);
+  const rejected = (certMasterData || []).filter(o => (o.status === 'مرفوض' || o.was_rejected === true) && !o.dismissed_from_rejections);
   const isAdmin = currentUser && currentUser.role === 'admin';
   if (isAdmin) return rejected;
   // المراجع ميشوفش الطلبات اللي خلصت وطُبعت خالص - بتختفي من عنده أول ما الأدمن يحوّلها
@@ -5824,6 +5834,12 @@ function renderRejectionsTab() {
 
       const rejRowKey = getRowKey(o);
       const safeRejRowKey = String(rejRowKey).replace(/'/g, "\\'");
+
+      if (canDelete()) {
+        actionsHtml += `
+          <button class="btn-delete-row" style="padding: 4px 8px; font-size: 11px;" onclick="dismissRejectionRow('${safeRejRowKey}')" title="بيشيل الطلب من قائمة مرفوضات بس - مش هيتأثر في تاب طباعة الشهادات">🗑️ مسح من القائمة</button>`;
+      }
+
       const isChecked = selectedRejectionOrderNumbers.has(rejRowKey) ? 'checked' : '';
       const actionTimeCellHtml = isAdmin ? `<td class="action-time-cell">${formatActionTimestamp(o)}</td>` : '';
 
@@ -5921,6 +5937,159 @@ async function executeRejectionsBulkAction() {
   }
 }
 
+// توزيع/تغيير المراجع على كل الطلبات المرفوضة المحددة دفعة واحدة - مفيد خصوصًا للطلبات
+// اللي مفيهاش اسم مراجع أصلاً (رفضت من غير ما حد يتحدد كمراجع وقتها)
+async function executeRejectionsBulkReviewerAssign() {
+  const newReviewer = document.getElementById('rejections-bulk-reviewer-select').value;
+  if (!newReviewer) { alert('برجاء اختيار المراجع من القائمة أولاً'); return; }
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
+  if (targetRows.length === 0) return;
+
+  const reviewerProfile = ALL_PROFILES.find(p => p.username === newReviewer);
+  const reviewerLabel = reviewerProfile ? reviewerProfile.name : newReviewer;
+
+  if (!confirm(`هل أنت متأكد من توزيع (${targetRows.length}) طلب على المراجع "${reviewerLabel}"؟`)) return;
+
+  try {
+    const ids = targetRows.map(o => o.id);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', ids, 'update', { reviewer: newReviewer });
+    if (error) { alert('فشل التوزيع: ' + error.message); return; }
+    targetRows.forEach(o => { o.reviewer = newReviewer; });
+    alert(`تم توزيع ${targetRows.length} طلب على "${reviewerLabel}" بنجاح.`);
+    selectedRejectionOrderNumbers.clear();
+    document.getElementById('rejections-bulk-reviewer-select').value = '';
+    renderRejectionsTab();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+// ============ تحديد متعدد (نسخ/لصق أو ملف) لتاب المرفوضات - نفس فكرة التاب الرئيسي بالظبط ============
+let rejectionsMultiSelectFileRows = [];
+
+function toggleRejectionsMultiSelectPanel() {
+  const panel = document.getElementById('rejections-multiselect-panel');
+  panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+}
+
+function clearRejectionsMultiSelectInput() {
+  document.getElementById('rejections-multiselect-textarea').value = '';
+  document.getElementById('rejections-multiselect-file-name').innerText = '';
+  document.getElementById('rejections-multiselect-results').innerHTML = '';
+  rejectionsMultiSelectFileRows = [];
+}
+
+function handleRejectionsMultiSelectDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('rejections-multiselect-dropzone').classList.add('drag-over');
+}
+
+function handleRejectionsMultiSelectDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('rejections-multiselect-dropzone').classList.remove('drag-over');
+}
+
+function handleRejectionsMultiSelectDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('rejections-multiselect-dropzone').classList.remove('drag-over');
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (files && files.length > 0) processRejectionsMultiSelectFile(files[0]);
+}
+
+function handleRejectionsMultiSelectFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (file) processRejectionsMultiSelectFile(file);
+  event.target.value = '';
+}
+
+async function processRejectionsMultiSelectFile(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+    alert('برجاء رفع ملف CSV أو Excel بس');
+    return;
+  }
+
+  document.getElementById('rejections-multiselect-file-name').innerText = `جاري قراءة: ${file.name} ...`;
+
+  try {
+    const rawRows = await parseFileToRows(file);
+    const extracted = extractOrderNumbersFromRows(rawRows);
+    if (extracted.length === 0) {
+      alert('معرفتش ألاقي عمود رقم الطلب في الملف ده. تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.');
+      document.getElementById('rejections-multiselect-file-name').innerText = '';
+      return;
+    }
+    rejectionsMultiSelectFileRows = extracted;
+    document.getElementById('rejections-multiselect-file-name').innerText = `تم رفع: ${file.name} (${extracted.length} رقم)`;
+  } catch (err) {
+    alert('تعذّر قراءة الملف: ' + err.message);
+  }
+}
+
+// بيدور على أرقام الطلبات (من المربع + الملف) في كل الطلبات المرفوضة (كل التواريخ)، ويحددهم
+// تلقائيًا، وبيفعّل "عرض المحدد فقط" عشان يوريهم كلهم مع بعض على طول
+function verifyAndSelectRejectionsOrders() {
+  const textValue = document.getElementById('rejections-multiselect-textarea').value;
+  const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
+  const combined = [...new Set([...fromText, ...rejectionsMultiSelectFileRows])];
+
+  if (combined.length === 0) {
+    alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
+    return;
+  }
+
+  const resultsEl = document.getElementById('rejections-multiselect-results');
+  resultsEl.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث...</p>`;
+
+  const scope = getRejectedCertRows();
+  const rowsByNumber = new Map();
+  scope.forEach(o => {
+    const key = String(o.order_number);
+    if (!rowsByNumber.has(key)) rowsByNumber.set(key, []);
+    rowsByNumber.get(key).push(o);
+  });
+
+  const found = [];
+  const notFound = [];
+
+  combined.forEach(num => {
+    const rows = rowsByNumber.get(String(num));
+    if (rows && rows.length > 0) {
+      found.push(num);
+      rows.forEach(o => selectedRejectionOrderNumbers.add(getRowKey(o)));
+    } else {
+      notFound.push(num);
+    }
+  });
+
+  updateRejectionsSelectedCount();
+
+  if (found.length > 0) {
+    showOnlySelectedRejections = true;
+    const toggleBtn = document.getElementById('show-selected-only-rejections-btn');
+    if (toggleBtn) toggleBtn.innerText = '📋 عرض الكل';
+    // المحدد ممكن يكون موزّع على أكتر من تاريخ - بنفعّل وضع "كل التواريخ" عشان
+    // "عرض المحدد فقط" يوريهم كلهم مع بعض، مش بس اللي في تاريخ العرض الحالي
+    rejectionsShowAllDates = true;
+    applyRejectionsDateFiltering();
+
+    const table = document.querySelector('#tab-rejections .main-content');
+    if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل)${found.length > 0 ? ' - وتفعّل "عرض المحدد فقط" عشان تشوفهم كلهم على طول.' : ''}</p>`;
+  if (notFound.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود ضمن الطلبات المرفوضة حاليًا:</p>`;
+    html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
+  }
+  resultsEl.innerHTML = html;
+}
+
 // تطبيق "تم الطباعة" على كل الطلبات المحددة دفعة واحدة
 async function executeRejectionsBulkPrinted() {
   if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
@@ -5942,6 +6111,56 @@ async function executeRejectionsBulkPrinted() {
   } catch (err) {
     alert('خطأ: ' + err.message);
   }
+}
+
+// إزالة طلب من قائمة مرفوضات بس - مش حذف حقيقي، عشان الصف يفضل موجود بكل حالته
+// وسجله في تاب "طباعة الشهادات" زي ما هو تمامًا (نفس الحالة، نفس السبب، كل حاجة).
+async function dismissRejectionRow(rowKey) {
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+
+  const targetOrder = (certMasterData || []).find(o => getRowKey(o) === rowKey);
+  if (!targetOrder) { alert('لم يتم العثور على الطلب المطلوب.'); return; }
+
+  const orderNum = targetOrder.order_number;
+  if (!confirm(`هل تريد إزالة الطلب رقم (${orderNum}) من قائمة "مرفوضات" بس؟\nملحوظة: الطلب هيفضل موجود بكل حالته في تاب "طباعة الشهادات" - إزالته من هنا مش حذف فعلي.`)) return;
+
+  try {
+    const { error } = await supabaseClient.from(CERT_TABLE_NAME).update({ dismissed_from_rejections: true }).eq('id', targetOrder.id);
+    if (error) { alert('فشل الإخفاء: ' + error.message); return; }
+    targetOrder.dismissed_from_rejections = true;
+    selectedRejectionOrderNumbers.delete(rowKey);
+    updateRejectionsSelectedCount();
+    applyRejectionsDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// إزالة كل الطلبات المرفوضة المحددة من قائمة مرفوضات دفعة واحدة (مش حذف حقيقي) -
+// الصفوف نفسها بتفضل موجودة بكل حالتها وسجلها في تاب "طباعة الشهادات".
+async function executeRejectionsBulkDelete() {
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  // التحديد بمفتاح فريد للصف (id)، فبقى آمن نبحث في كل التواريخ (certMasterData)
+  const targetOrders = certMasterData.filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) { alert('لم يتم العثور على الطلبات المحددة.'); return; }
+
+  const confirmDelete = confirm(`هل تريد إزالة (${targetOrders.length}) طلب من قائمة "مرفوضات" بس؟\nملحوظة: الطلبات هتفضل موجودة بكل حالتها في تاب "طباعة الشهادات" - الإزالة من هنا مش حذف فعلي.`);
+  if (!confirmDelete) return;
+
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', matchValues, 'update', { dismissed_from_rejections: true });
+    if (error) { alert('حدث خطأ أثناء الإزالة الجماعية: ' + error.message); }
+    else {
+      alert(`تم إزالة ${targetOrders.length} طلب من قائمة مرفوضات بنجاح!`);
+      targetOrders.forEach(o => { o.dismissed_from_rejections = true; });
+      selectedRejectionOrderNumbers.clear();
+      if (showOnlySelectedRejections) { showOnlySelectedRejections = false; const b = document.getElementById('show-selected-only-rejections-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+      updateRejectionsSelectedCount();
+      applyRejectionsDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
 }
 
 function exportSelectedRejectionsOrderNumbers() {
@@ -6057,11 +6276,19 @@ async function renderRejectionsReviewerStats() {
   const wrapper = document.getElementById('rejections-reviewer-stats-chart-wrapper');
   const canvas = document.getElementById('rejections-reviewer-stats-chart');
   const totalEl = document.getElementById('rejections-reviewer-stats-total');
+  const titleEl = document.getElementById('rejections-reviewer-stats-title');
   if (!canvas || !wrapper) return;
 
-  // ملحوظة: بنحسب من getRejectedCertRows() مباشرة (كل التواريخ) مش rejectionsAllData
-  // (اللي ممكن تكون متفلترة على تاريخ معيّن دلوقتي) - عشان الإحصائية دي دايمًا "من أول تاريخ لحد الآن"
-  const allTimeRejected = getRejectedCertRows().filter(o => getRejectionSubstatus(o) !== 'EDITED');
+  // بنحسب على أحدث تاريخ فيه رفض بس - مش كل التواريخ من الأول، ومش التاريخ المفلتر بيه
+  // الجدول دلوقتي (لو المستخدم غيّره يدويًا) - الإحصائية دي دايمًا "أحدث يوم" بس.
+  const rejectedForStats = getRejectedCertRows().filter(o => getRejectionSubstatus(o) !== 'EDITED');
+  const statsDates = rejectedForStats.map(extractDateString).filter(Boolean).sort().reverse();
+  const latestStatsDate = statsDates[0] || '';
+  const allTimeRejected = latestStatsDate
+    ? rejectedForStats.filter(o => extractDateString(o) === latestStatsDate)
+    : rejectedForStats;
+
+  if (titleEl) titleEl.innerText = `📊 إحصائية مرفوضات الطباعة (أحدث يوم${latestStatsDate ? ': ' + latestStatsDate : ''})`;
 
   const counts = {};
   allTimeRejected.forEach(o => {
@@ -6848,10 +7075,9 @@ async function executeCertBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedCertOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  // مهم: بنقصر البحث على certAllData (بيانات التاريخ المعروض حاليًا بس)، مش certMasterData
-  // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
-  const targetOrders = certAllData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
-  if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
+  // التحديد بقى بمفتاح فريد للصف (id)، فبقى آمن نبحث في كل التواريخ (certMasterData)
+  const targetOrders = certMasterData.filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) { alert('لم يتم العثور على الطلبات المحددة.'); return; }
   const matchValues = targetOrders.map(o => o.id);
 
   try {
@@ -6895,8 +7121,10 @@ async function deleteSingleCertOrder(rowKey) {
       // بنشيل بس نفس الصف اللي فعليًا اتحذف (بالـ id)، مش أي صف تاني بنفس رقم الطلب على تاريخ مختلف
       certMasterData = certMasterData.filter(o => o.id !== targetOrder.id);
       selectedCertOrderNumbers.delete(rowKey);
+      selectedRejectionOrderNumbers.delete(rowKey);
       updateCertSelectedCount();
       applyCertDateFiltering();
+      applyRejectionsDateFiltering();
     }
   } catch (err) { alert('خطأ: ' + err.message); }
 }
@@ -6962,7 +7190,7 @@ async function saveCertUpdate() {
   };
   // علامة دائمة: أول ما الطلب يترفض مرة، يفضل معلّم كده للأبد - حتى لو اتغيرت حالته بعدين
   // (زي "تم الطباعة")، عشان يفضل ظاهر في تاب المرفوضات كسجل تاريخي
-  if (newStatus === 'مرفوض') updateData.was_rejected = true;
+  if (newStatus === 'مرفوض') { updateData.was_rejected = true; updateData.dismissed_from_rejections = false; }
 
   try {
     const { error } = await supabaseClient.from(CERT_TABLE_NAME).update(updateData).eq('id', selectedCertOrder.id);
@@ -7656,10 +7884,9 @@ async function executeMawaqefBulkDelete() {
   const confirmDelete = confirm(`هل أنت تأكد من رغبتك في حذف (${selectedMawaqefOrderNumbers.size}) طلب محدد نهائياً؟`);
   if (!confirmDelete) return;
 
-  // مهم: بنقصر البحث على mawaqefAllData (بيانات التاريخ المعروض حاليًا بس)، مش mawaqefMasterData
-  // (كل التواريخ) - عشان لو رقم الطلب مكرر على تاريخ تاني، منمسحوش بالغلط لما نحذف نسخة النهاردة بس.
-  const targetOrders = mawaqefAllData.filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o)));
-  if (targetOrders.length === 0) { alert('الطلبات المحددة مش ظاهرة في التاريخ المعروض حاليًا.'); return; }
+  // التحديد بقى بمفتاح فريد للصف (id)، فبقى آمن نبحث في كل التواريخ (mawaqefMasterData)
+  const targetOrders = mawaqefMasterData.filter(o => selectedMawaqefOrderNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) { alert('لم يتم العثور على الطلبات المحددة.'); return; }
   const matchValues = targetOrders.map(o => o.id);
 
   try {

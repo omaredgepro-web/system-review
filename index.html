@@ -241,7 +241,7 @@
                 <option value="">القرار (المراجعة)...</option>
                 <option value="مقبول">✅ مقبول</option>
                 <option value="مرفوض">❌ مرفوض</option>
-               <option value="Qc">🔍 Qc </option>
+                <option value="Qc">🔍 Qc</option>
                 <option value="معلق">⏸️ معلق</option>
                 <option value="لم يتم المراجعة">⏳ لم يتم</option>
               </select>
@@ -601,6 +601,7 @@
             <h3 style="font-size: 16px;">قائمة الطلبات المرفوضة</h3>
             <div style="display: flex; gap: 10px;">
               <button class="btn btn-secondary" id="refresh-rejections-btn" onclick="refreshRejectionsData()">🔄 تحديث يدوي</button>
+              <button class="btn btn-secondary" id="rejections-multiselect-btn" onclick="toggleRejectionsMultiSelectPanel()">📋 تحديد متعدد (نسخ/لصق أو ملف)</button>
               <button class="btn btn-secondary" onclick="exportRejectionsOrderNumbers()">📥 تصدير الطلبات (Excel)</button>
               <button class="btn btn-secondary" onclick="toggleRejectionsStatsSidebar()">📊 إحصائيات المراجعين</button>
             </div>
@@ -644,12 +645,33 @@
             <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
 
+          <div id="rejections-multiselect-panel" class="admin-container" style="display:none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+              <h3 style="font-size: 15px;">📋 إدخال متعدد / ملف</h3>
+              <button type="button" onclick="clearRejectionsMultiSelectInput()" style="background:none; border:none; color: var(--badge-reject-text); font-size: 12px; cursor:pointer; font-weight:600;">مسح</button>
+            </div>
+            <p style="font-size:12px; color: var(--text-muted); margin-bottom: 12px;">الصق أو اكتب أرقام الطلبات (رقم في كل سطر، أو مفصولة بفاصلة)، أو ارفع ملف فيه عمود رقم الطلب. النظام هيدور عليهم في كل الطلبات المرفوضة (كل التواريخ) ويحددهم تلقائيًا.</p>
+            <textarea id="rejections-multiselect-textarea" class="form-control" style="min-height: 110px; margin-bottom: 12px; resize: vertical;" placeholder="أدخل أرقام الطلبات هنا..."></textarea>
+            <div class="upload-box" id="rejections-multiselect-dropzone" ondragover="handleRejectionsMultiSelectDragOver(event)" ondragleave="handleRejectionsMultiSelectDragLeave(event)" ondrop="handleRejectionsMultiSelectDrop(event)" style="padding: 16px; margin-bottom: 14px;">
+              <p style="font-size: 13px; margin-bottom: 8px;">اضغط لرفع ملف أو اسحبه هنا</p>
+              <input type="file" id="rejections-multiselect-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleRejectionsMultiSelectFileSelect(event)">
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('rejections-multiselect-file-input').click()" style="padding: 6px 14px; font-size: 12px;">اختيار ملف</button>
+              <p id="rejections-multiselect-file-name" style="margin-top: 8px; font-size: 11px; color: var(--badge-accept-text);"></p>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="verifyAndSelectRejectionsOrders()" style="width:auto; padding: 10px 24px;">✚ تحقق وإضافة للتحديد</button>
+            <div id="rejections-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
+          </div>
+
           <!-- شريط الإجراءات الجماعية لتاب المرفوضات -->
           <div id="rejections-bulk-bar" class="admin-bulk-actions">
             <div class="bulk-group">
               <span class="bulk-label">تم تحديد: <span id="rejections-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
               <button class="btn btn-secondary btn-sm" onclick="clearRejectionsSelection()">مسح التحديد</button>
               <button id="show-selected-only-rejections-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedRejections()">📌 عرض المحدد فقط</button>
+            </div>
+            <div class="bulk-group">
+              <select id="rejections-bulk-reviewer-select" class="filter-select btn-sm" style="width: 160px;"><option value="">توزيع المراجع...</option></select>
+              <button class="btn btn-secondary btn-sm" onclick="executeRejectionsBulkReviewerAssign()">تطبيق التوزيع</button>
             </div>
             <div class="bulk-group">
               <select id="rejections-bulk-action-select" class="filter-select btn-sm" style="width: 160px;">
@@ -664,6 +686,7 @@
             </div>
             <div class="bulk-group" style="margin-right: auto; border-left: none;">
               <button class="btn btn-secondary btn-sm" onclick="exportSelectedRejectionsOrderNumbers()">📥 تصدير أرقام الطلبات المحددة (Excel)</button>
+              <button id="rejections-bulk-delete-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="executeRejectionsBulkDelete()" title="بيشيل الطلبات من قائمة مرفوضات بس - مش هيتأثر في تاب طباعة الشهادات">🗑️ إزالة المحدد من القائمة</button>
             </div>
           </div>
 
@@ -695,10 +718,10 @@
 
         <div class="sidebar-drawer" id="rejections-stats-sidebar" style="width: 520px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <h3 style="font-size: 16px;">📊 إحصائية مرفوضات الطباعة (من أول تاريخ لحد الآن)</h3>
+            <h3 id="rejections-reviewer-stats-title" style="font-size: 16px;">📊 إحصائية مرفوضات الطباعة (أحدث يوم)</h3>
             <button class="close-btn" onclick="toggleRejectionsStatsSidebar()">&times;</button>
           </div>
-          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px;">إجمالي الطلبات اللي لسه فعليًا "مرفوض" لكل مراجع (مش شامل اللي اتعمله "تم التعديل")، من أول يوم لحد دلوقتي، من الأعلى للأقل.</p>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px;">إجمالي الطلبات اللي لسه فعليًا "مرفوض" لكل مراجع (مش شامل اللي اتعمله "تم التعديل")، لأحدث يوم فيه رفض بس، من الأعلى للأقل.</p>
           <div id="rejections-reviewer-stats-empty" style="font-size:12px; color:var(--text-muted);"></div>
           <div id="rejections-reviewer-stats-chart-wrapper" style="position: relative; width: 100%; min-height: 300px;">
             <canvas id="rejections-reviewer-stats-chart"></canvas>

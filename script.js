@@ -6281,7 +6281,9 @@ async function renderRejectionsReviewerStats() {
 
   // بنحسب على أحدث تاريخ فيه رفض بس - مش كل التواريخ من الأول، ومش التاريخ المفلتر بيه
   // الجدول دلوقتي (لو المستخدم غيّره يدويًا) - الإحصائية دي دايمًا "أحدث يوم" بس.
-  const rejectedForStats = getRejectedCertRows().filter(o => getRejectionSubstatus(o) !== 'EDITED');
+  // بنحسب كل طلب اترفض فعليًا في اليوم ده - بغض النظر عن اللي حصل بعد كده (تم التعديل،
+  // تم الطباعة، رفض نهائي) - المراجع اللي سبب الرفض يتحسبله برضو حتى لو اتصلح بعدين
+  const rejectedForStats = getRejectedCertRows();
   const statsDates = rejectedForStats.map(extractDateString).filter(Boolean).sort().reverse();
   const latestStatsDate = statsDates[0] || '';
   const allTimeRejected = latestStatsDate

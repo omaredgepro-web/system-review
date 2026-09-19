@@ -56,11 +56,13 @@
 
       <div class="login-brand-panel">
         <img src="edge-logo.png" alt="Edge Pro Logo" class="brand-logo-img">
-        <h2 class="brand-title">نظام مراجعة الطلبات</h2>
-        <p class="brand-desc">قم بإدارة ومراجعة طلبات التقنين بأعلى معايير الدقة والسرعة</p>
-        <div class="brand-version-badge">
-          <span class="version-dot"></span>
-          النظام يعمل بشكل طبيعي | v2.0.0
+        <div class="brand-card">
+          <h2 class="brand-title">نظام مراجعة الطلبات</h2>
+          <p class="brand-desc">قم بإدارة ومراجعة طلبات التقنين بأعلى معايير الدقة والسرعة</p>
+          <div class="brand-version-badge">
+            <span class="badge-chip"><span class="version-dot"></span> النظام يعمل</span>
+            <span class="badge-chip"><span class="version-dot-blue"></span> v2.0.0</span>
+          </div>
         </div>
       </div>
 
@@ -207,11 +209,17 @@
             <div id="dashboard-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
           </div>
 
-          <!-- شريط الإجراءات الجماعية للأدمن -->
+          <!-- شريط الإجراءات الجماعية للأدمن (قابل للطي/الفتح بدون JS) -->
           <div id="admin-bulk-bar" class="admin-bulk-actions">
+            <details class="bulk-details">
+              <summary class="bulk-summary">
+                <span class="bulk-summary-title">🛠️ إجراءات جماعية</span>
+                <span class="bulk-count-pill">تم تحديد: <span id="selected-count">0</span> طلب</span>
+                <span class="bulk-hint-close">اضغط للطي ⌃</span>
+                <span class="bulk-hint-open">اضغط للفتح ⌄</span>
+              </summary>
             <!-- Group 1: التحديد -->
             <div class="bulk-group">
-              <span class="bulk-label">تم تحديد: <span id="selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
               <button class="btn btn-secondary btn-sm" onclick="clearOrderSelection()">مسح التحديد</button>
               <button id="show-selected-only-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedDashboard()">📌 عرض المحدد فقط</button>
             </div>
@@ -251,6 +259,7 @@
             <div class="bulk-group" style="margin-right: auto; border-left: none;">
               <button id="bulk-delete-btn" class="btn btn-danger btn-sm" onclick="executeBulkDelete()">🗑️ حذف المحدد</button>
             </div>
+            </details>
           </div>
 
           <div class="table-container">
@@ -503,10 +512,16 @@
           <div id="cert-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
         </div>
 
-        <!-- شريط الإجراءات الجماعية لتاب الشهادات منظم بمجموعات -->
+        <!-- شريط الإجراءات الجماعية لتاب الشهادات (قابل للطي/الفتح بدون JS) -->
         <div id="cert-bulk-bar" class="admin-bulk-actions">
+          <details class="bulk-details">
+            <summary class="bulk-summary">
+              <span class="bulk-summary-title">🛠️ إجراءات جماعية</span>
+              <span class="bulk-count-pill">تم تحديد: <span id="cert-selected-count">0</span> طلب</span>
+              <span class="bulk-hint-close">اضغط للطي ⌃</span>
+              <span class="bulk-hint-open">اضغط للفتح ⌄</span>
+            </summary>
           <div class="bulk-group">
-            <span class="bulk-label">تم تحديد: <span id="cert-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
             <button class="btn btn-secondary btn-sm" onclick="clearCertSelection()">مسح التحديد</button>
             <button id="show-selected-only-cert-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedCert()">📌 عرض المحدد فقط</button>
           </div>
@@ -553,6 +568,7 @@
           <div class="bulk-group" style="margin-right: auto; border-left: none;">
             <button id="cert-bulk-delete-btn" class="btn btn-danger btn-sm" onclick="executeCertBulkDelete()">🗑️ حذف المحدد</button>
           </div>
+          </details>
         </div>
 
         <div class="table-container">
@@ -607,6 +623,12 @@
             </div>
           </div>
 
+          <details class="bulk-details">
+            <summary class="bulk-summary">
+              <span class="bulk-summary-title">🔍 فلاتر البحث</span>
+              <span class="bulk-hint-close">اضغط للطي ⌃</span>
+              <span class="bulk-hint-open">اضغط للفتح ⌄</span>
+            </summary>
           <div class="table-filters">
             <input type="text" id="rejections-search-input" class="search-input" placeholder="ابحث برقم الطلب..." oninput="renderRejectionsTab()">
 
@@ -644,6 +666,7 @@
             <button class="btn btn-secondary" onclick="showAllRejectionsDates()" style="padding: 6px 12px; font-size: 12px;">عرض كل التواريخ</button>
             <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
+          </details>
 
           <div id="rejections-multiselect-panel" class="admin-container" style="display:none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
@@ -662,10 +685,16 @@
             <div id="rejections-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
           </div>
 
-          <!-- شريط الإجراءات الجماعية لتاب المرفوضات -->
+          <!-- شريط الإجراءات الجماعية لتاب المرفوضات (قابل للطي/الفتح بدون JS) -->
           <div id="rejections-bulk-bar" class="admin-bulk-actions">
+            <details class="bulk-details">
+              <summary class="bulk-summary">
+                <span class="bulk-summary-title">🛠️ إجراءات جماعية</span>
+                <span class="bulk-count-pill">تم تحديد: <span id="rejections-selected-count">0</span> طلب</span>
+                <span class="bulk-hint-close">اضغط للطي ⌃</span>
+                <span class="bulk-hint-open">اضغط للفتح ⌄</span>
+              </summary>
             <div class="bulk-group">
-              <span class="bulk-label">تم تحديد: <span id="rejections-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
               <button class="btn btn-secondary btn-sm" onclick="clearRejectionsSelection()">مسح التحديد</button>
               <button id="show-selected-only-rejections-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedRejections()">📌 عرض المحدد فقط</button>
             </div>
@@ -688,6 +717,7 @@
               <button class="btn btn-secondary btn-sm" onclick="exportSelectedRejectionsOrderNumbers()">📥 تصدير أرقام الطلبات المحددة (Excel)</button>
               <button id="rejections-bulk-delete-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="executeRejectionsBulkDelete()" title="بيشيل الطلبات من قائمة مرفوضات بس - مش هيتأثر في تاب طباعة الشهادات">🗑️ إزالة المحدد من القائمة</button>
             </div>
+            </details>
           </div>
 
           <div class="table-container">
@@ -867,10 +897,16 @@
           <div id="mawaqef-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
         </div>
 
-        <!-- شريط الإجراءات الجماعية لتاب المواقف -->
+        <!-- شريط الإجراءات الجماعية لتاب المواقف (قابل للطي/الفتح بدون JS) -->
         <div class="admin-bulk-actions">
+          <details class="bulk-details">
+            <summary class="bulk-summary">
+              <span class="bulk-summary-title">🛠️ إجراءات جماعية</span>
+              <span class="bulk-count-pill">تم تحديد: <span id="mawaqef-selected-count">0</span> طلب</span>
+              <span class="bulk-hint-close">اضغط للطي ⌃</span>
+              <span class="bulk-hint-open">اضغط للفتح ⌄</span>
+            </summary>
           <div class="bulk-group">
-            <span class="bulk-label">تم تحديد: <span id="mawaqef-selected-count" style="color: var(--accent-purple);">0</span> طلب</span>
             <button class="btn btn-secondary btn-sm" onclick="clearMawaqefSelection()">مسح التحديد</button>
             <button id="show-selected-only-mawaqef-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedMawaqef()">📌 عرض المحدد فقط</button>
           </div>
@@ -887,6 +923,7 @@
           <div class="bulk-group" style="margin-right: auto; border-left: none;">
             <button class="btn btn-danger btn-sm" onclick="executeMawaqefBulkDelete()">🗑️ حذف المحدد</button>
           </div>
+          </details>
         </div>
 
         <div class="table-container">

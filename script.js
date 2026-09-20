@@ -1,6 +1,25 @@
 const SUPABASE_URL = 'https://gnpejzuxwqftxgfcsics.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RZz9pDGfJXNtZYc7wADlHg_uMffms_6';
 const TABLE_NAME = 'system_review1';
+
+// ============ قفل التشغيل من أي مكان تاني (مطلوب فقط) ============
+(function lockToOfficialDomain() {
+  const ALLOWED_HOSTNAMES = ['omaredgepro-web.github.io', 'localhost', '127.0.0.1'];
+  const blockedHtml = '<h2 style="text-align:center;padding:50px">غير مسموح بفتح النظام من خارج الموقع الرسمي</h2>';
+  try {
+    if (window.top !== window.self) {
+      document.body.innerHTML = blockedHtml;
+      throw new Error('blocked iframe');
+    }
+  } catch (e) {
+    try { document.body.innerHTML = blockedHtml; } catch (_e) {}
+    throw e;
+  }
+  if (!ALLOWED_HOSTNAMES.includes(location.hostname)) {
+    document.body.innerHTML = blockedHtml;
+    throw new Error('blocked domain');
+  }
+})();
   
 // ⚠️ عدّل اسم الجدول ده لو مختلف عندك في Supabase (استنتجته من اسم ملف الـ CSV اللي بعتهولي)
 const CERT_TABLE_NAME = 'layout';
@@ -170,9 +189,45 @@ let selectedCertOrder = null;
 let certDataLoaded = false;
 let selectedCertOrderNumbers = new Set();
 
+// ============ انتهاء الجلسة ومسح الكاش بعد 24 ساعة (مطلوب فقط) ============
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+function isLoginExpired() {
+  const loginTime = parseInt(localStorage.getItem('login_time') || '0', 10);
+  if (!loginTime) return false;
+  return (Date.now() - loginTime > SESSION_TTL_MS);
+}
+async function clearAppCacheAndReload() {
+  const theme = localStorage.getItem('app_theme');
+  try {
+    localStorage.clear();
+    sessionStorage.clear();
+    if (theme) localStorage.setItem('app_theme', theme);
+    if ('caches' in window) {
+      const names = await caches.keys();
+      await Promise.all(names.map(n => caches.delete(n)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (e) {}
+  localStorage.setItem('app_cached_at', String(Date.now()));
+  try { await supabaseClient.auth.signOut(); } catch (e) {}
+  location.href = location.pathname + '?fresh=' + Date.now();
+}
+async function enforce24hCacheReset() {
+  const KEY = 'app_cached_at';
+  const now = Date.now();
+  const first = parseInt(localStorage.getItem(KEY) || '0', 10);
+  if (!first) { localStorage.setItem(KEY, String(now)); return; }
+  if (now - first < SESSION_TTL_MS) return;
+  await clearAppCacheAndReload();
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   applyThemeIcon();
+  await enforce24hCacheReset();
 
   // دوس Enter في خانة اليوزرنيم أو الباسورد في شاشة تسجيل الدخول = تسجيل دخول مباشرة
   const loginUsernameEl = document.getElementById('login-username');
@@ -191,6 +246,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Supabase بيحتفظ بالجلسة (session) لوحده - مش محتاجين نخزن يوزر/باسورد في localStorage تاني
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session && session.user) {
+    if (isLoginExpired()) {
+      await clearAppCacheAndReload();
+      return;
+    }
     const profile = await fetchOwnProfile(session.user.id);
     if (profile) {
       await setupUserSession(profile);
@@ -747,6 +806,8 @@ async function handleLogin() {
 
 async function setupUserSession(profile) {
   currentUser = profile; // { id, username, name, role }
+  localStorage.setItem('login_time', String(Date.now()));
+  localStorage.setItem('app_cached_at', String(Date.now()));
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-content').style.display = 'block';

@@ -2604,19 +2604,29 @@ function selectNextOrderFromFiltered() {
   if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
   if (!window.currentFilteredData || window.currentFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
 
-  const unselected = window.currentFilteredData.filter(o => !selectedOrderNumbers.has(getRowKey(o)));
+  // بيبدأ من الصفحة اللي واقف فيها المستخدم دلوقتي (مش من أول النتائج) - نفس سلوك تاب الشهادات بالظبط
+  const startIndex = (currentPage - 1) * pageSize;
+  const poolFromCurrentPage = window.currentFilteredData.slice(startIndex);
 
-  if (unselected.length === 0) { alert('كل الطلبات المطابقة للفلتر الحالي متحددة بالفعل'); return; }
+  const unselected = poolFromCurrentPage.filter(o => !selectedOrderNumbers.has(getRowKey(o)));
+
+  if (unselected.length === 0) { alert('لا توجد طلبات غير محددة من الصفحة الحالية لآخر النتائج'); return; }
 
   const batch = unselected.slice(0, count);
   batch.forEach(o => selectedOrderNumbers.add(getRowKey(o)));
+
+  // ينقل تلقائيًا لآخر صفحة فيها طلب اتحدد، عشان لو دست الزرار تاني يكمل من بعدها
+  const lastSelected = batch[batch.length - 1];
+  const lastSelectedKey = getRowKey(lastSelected);
+  const lastIndexInFiltered = window.currentFilteredData.findIndex(o => getRowKey(o) === lastSelectedKey);
+  if (lastIndexInFiltered >= 0) currentPage = Math.floor(lastIndexInFiltered / pageSize) + 1;
 
   updateSelectedCount();
   renderCurrentPage();
   input.value = '';
 
   if (batch.length < count) {
-    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح ضمن الفلتر الحالي)`);
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح من الصفحة الحالية لآخر النتائج)`);
   }
 }
 
@@ -5901,6 +5911,31 @@ function clearRejectionsSelection() {
   renderRejectionsTab();
 }
 
+// تحديد أول N طلب غير محدد من نتائج الفلتر الحالي - نفس فكرة باقي التابات
+function selectNextRejectionsFromFiltered() {
+  const input = document.getElementById('rejections-bulk-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  const rows = getFilteredRejectionsRows();
+  if (!rows || rows.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const unselected = rows.filter(o => !selectedRejectionOrderNumbers.has(getRowKey(o)));
+
+  if (unselected.length === 0) { alert('كل الطلبات المطابقة للفلتر الحالي متحددة بالفعل'); return; }
+
+  const batch = unselected.slice(0, count);
+  batch.forEach(o => selectedRejectionOrderNumbers.add(getRowKey(o)));
+
+  updateRejectionsSelectedCount();
+  renderRejectionsTab();
+  input.value = '';
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح ضمن الفلتر الحالي)`);
+  }
+}
+
 function toggleShowOnlySelectedRejections() {
   showOnlySelectedRejections = !showOnlySelectedRejections;
   const btn = document.getElementById('show-selected-only-rejections-btn');
@@ -5914,6 +5949,57 @@ function updateRejectionsSelectedCount() {
 }
 
 // تطبيق حالة مراجعة (تم التعديل / رفض نهائي) على كل الطلبات المحددة دفعة واحدة
+// أزرار سريعة بضغطة واحدة: نفس التلات حالات بتاعة كل صف (تم التعديل / رفض نهائي / تم الطباعة)
+// بتتطبق على كل الطلبات المحددة مرة واحدة - بدل قايمة + زرار تطبيق
+async function executeRejectionsBulkQuickAction(action) {
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
+  if (targetRows.length === 0) return;
+
+  if (!confirm(`هل أنت متأكد من تطبيق "${action}" على (${targetRows.length}) طلب؟`)) return;
+
+  try {
+    const ids = targetRows.map(o => o.id);
+    const updateData = action === 'تم الطباعة'
+      ? { status: 'تم الطباعة', reason: '-', reviewer_action: null }
+      : { reviewer_action: action };
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', ids, 'update', updateData);
+    if (error) { alert('فشل التحديث: ' + error.message); return; }
+    targetRows.forEach(o => Object.assign(o, updateData));
+    alert(`تم تطبيق "${action}" على ${targetRows.length} طلب بنجاح.`);
+    selectedRejectionOrderNumbers.clear();
+    applyRejectionsDateFiltering();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
+// تطبيق تاريخ واحد على كل الطلبات المرفوضة المحددة دفعة واحدة
+async function executeRejectionsBulkDateUpdate() {
+  const dateInput = document.getElementById('rejections-bulk-date-input');
+  const newDate = dateInput ? dateInput.value : '';
+  if (!newDate) { alert('برجاء اختيار التاريخ أولاً'); return; }
+  if (selectedRejectionOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetRows = (certMasterData || []).filter(o => selectedRejectionOrderNumbers.has(getRowKey(o)));
+  if (targetRows.length === 0) return;
+
+  if (!confirm(`هل أنت متأكد من تحديث تاريخ (${targetRows.length}) طلب إلى "${newDate}"؟`)) return;
+
+  try {
+    const ids = targetRows.map(o => o.id);
+    const error = await runBatchedSupabaseAction(CERT_TABLE_NAME, 'id', ids, 'update', { date: newDate });
+    if (error) { alert('حدث خطأ أثناء تحديث التاريخ: ' + error.message); return; }
+    targetRows.forEach(o => { o.date = newDate; });
+    alert(`تم تحديث تاريخ ${targetRows.length} طلب بنجاح إلى "${newDate}"!`);
+    selectedRejectionOrderNumbers.clear();
+    applyRejectionsDateFiltering();
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  }
+}
+
 async function executeRejectionsBulkAction() {
   const action = document.getElementById('rejections-bulk-action-select').value;
   if (!action) { alert('برجاء اختيار الحالة من القائمة'); return; }

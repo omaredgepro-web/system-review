@@ -623,12 +623,6 @@
             </div>
           </div>
 
-          <details class="bulk-details">
-            <summary class="bulk-summary">
-              <span class="bulk-summary-title">🔍 فلاتر البحث</span>
-              <span class="bulk-hint-close">اضغط للطي ⌃</span>
-              <span class="bulk-hint-open">اضغط للفتح ⌄</span>
-            </summary>
           <div class="table-filters">
             <input type="text" id="rejections-search-input" class="search-input" placeholder="ابحث برقم الطلب..." oninput="renderRejectionsTab()">
 
@@ -666,7 +660,6 @@
             <button class="btn btn-secondary" onclick="showAllRejectionsDates()" style="padding: 6px 12px; font-size: 12px;">عرض كل التواريخ</button>
             <button class="btn btn-secondary" onclick="resetRejectionsDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ فقط</button>
           </div>
-          </details>
 
           <div id="rejections-multiselect-panel" class="admin-container" style="display:none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
@@ -697,6 +690,8 @@
             <div class="bulk-group">
               <button class="btn btn-secondary btn-sm" onclick="clearRejectionsSelection()">مسح التحديد</button>
               <button id="show-selected-only-rejections-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedRejections()">📌 عرض المحدد فقط</button>
+              <input type="number" id="rejections-bulk-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
+              <button class="btn btn-secondary btn-sm" onclick="selectNextRejectionsFromFiltered()">تحديد الأول من النتائج</button>
             </div>
             <div class="bulk-group">
               <select id="rejections-bulk-reviewer-select" class="filter-select btn-sm" style="width: 160px;"><option value="">توزيع المراجع...</option></select>
@@ -711,7 +706,11 @@
               <button class="btn btn-secondary btn-sm" onclick="executeRejectionsBulkAction()">تطبيق</button>
             </div>
             <div class="bulk-group">
-              <button class="btn btn-open btn-sm" onclick="executeRejectionsBulkPrinted()">🖨️ تطبيق: تم الطباعة</button>
+              <button class="btn btn-open btn-sm" onclick="executeRejectionsBulkPrinted()">🖨️ تم الطباعة</button>
+            </div>
+            <div class="bulk-group">
+              <input type="date" id="rejections-bulk-date-input" class="date-input btn-sm" style="width: 130px;">
+              <button class="btn btn-secondary btn-sm" onclick="executeRejectionsBulkDateUpdate()">تطبيق التاريخ</button>
             </div>
             <div class="bulk-group" style="margin-right: auto; border-left: none;">
               <button class="btn btn-secondary btn-sm" onclick="exportSelectedRejectionsOrderNumbers()">📥 تصدير أرقام الطلبات المحددة (Excel)</button>

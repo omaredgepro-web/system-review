@@ -411,11 +411,11 @@ body {
 #rejections-bulk-bar {
   display: none; /* خاص بتاب المرفوضات، بيتم إظهاره عبر الجافاسكريبت للأدمن بس */
 }
-/* شبكة كروت موحدة في كل التابات - نفس الشكل في كل حتة بدل العشوائية */
-.bulk-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
-.bulk-summary { grid-column: 1 / -1; }
+/* شريط بالعرض: المجموعات جنب بعضها في صف مدمج - نفس الشكل في كل التابات */
+.bulk-details { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+.bulk-summary { flex: 1 1 100%; }
 .bulk-group {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
@@ -423,7 +423,7 @@ body {
   background: rgba(9,14,32,.5);
   border: 1px solid var(--card-border);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 .bulk-group:last-child { border-left: 1px solid var(--card-border); padding-left: 12px; }
 /* كارت الحذف مميز بالأحمر في كل التابات */
@@ -468,8 +468,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: .65; cursor: po
 .bulk-hint-open { display: none; }
 .bulk-details:not([open]) .bulk-hint-open { display: inline; }
 .bulk-details:not([open]) .bulk-hint-close { display: none; }
-.bulk-details > .bulk-group { margin-top: 10px; }
-.bulk-details > .table-filters { grid-column: 1 / -1; margin-top: 10px; margin-bottom: 0; }
+.bulk-details > .bulk-group { margin-top: 0; }
+.bulk-details > .table-filters { flex: 1 1 100%; margin-top: 10px; margin-bottom: 0; }
 
 /* ============ إعدادات الجدول (بدون Sticky عشان الحركة الانسيابية + تظليل صفوف) ============ */
 table { width: 100%; border-collapse: collapse; white-space: nowrap; }
@@ -603,5 +603,5 @@ input[type="checkbox"] { width: 17px; height: 17px; cursor: pointer; accent-colo
   .search-input { width: 100%; }
   td, th { padding: 10px 12px; font-size: 12.5px; }
   .sidebar-drawer { position: fixed; top: 10px; bottom: 10px; left: 10px; right: 10px; width: auto; height: auto; max-height: none; }
-  .bulk-details { grid-template-columns: 1fr; }
+  .bulk-details > .bulk-group { flex: 1 1 100%; }
 }

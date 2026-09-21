@@ -2629,10 +2629,7 @@ async function applyCsvUploadDateToAllRows() {
   }
 
   if (parsedCsvData && parsedCsvData.length > 0) {
-    // بنحط التاريخ المختار فوق بس للصفوف اللي مفيهاش تاريخ خالص جوه الملف نفسه (زي رفع أرقام طلبات
-    // مجردة من غير عمود تاريخ). أما أي صف جايلنا بتاريخه الخاص من الملف (زي ملف كامل فيه عمود "التاريخ")
-    // فبيفضل زي ما هو من غير أي تغيير، عشان الاستيراد يحافظ على تاريخ كل طلب صح.
-    parsedCsvData.forEach(row => { if (!extractDateString(row)) row.date = dateInput.value; });
+    parsedCsvData.forEach(row => { row.date = dateInput.value; });
 
     statusEl.innerText = '⏳ جاري فحص التكرار...';
     statusEl.style.color = 'var(--text-muted)';
@@ -2651,16 +2648,12 @@ async function applyCsvUploadDateToAllRows() {
 // بيتأكد إن التاريخ اتحدد قبل السماح بأي توزيع أو رفع لـ Supabase — لو لأ، بيوقف العملية وينبّه المستخدم
 function ensureCsvUploadDateSelected() {
   const dateInput = document.getElementById('csv-upload-date-input');
-  if (dateInput.value) return true;
-
-  // لو كل صف في الملف أصلاً معاه تاريخه الخاص (ملف كامل مستورد بتاريخه)، مفيش داعي نجبر
-  // المستخدم يختار تاريخ يدوي إضافي - هو مش هيتحط ولا هيغيّر حاجة أصلاً بعد إصلاح applyCsvUploadDateToAllRows.
-  const allRowsHaveOwnDate = parsedCsvData.length > 0 && parsedCsvData.every(row => !!extractDateString(row));
-  if (allRowsHaveOwnDate) return true;
-
-  alert('برجاء اختيار التاريخ اللي هتتسجل بيه الطلبات دي الأول (أو اضغط "استخدام تاريخ النهاردة") قبل التوزيع أو الرفع.');
-  dateInput.focus();
-  return false;
+  if (!dateInput.value) {
+    alert('برجاء اختيار التاريخ اللي هتتسجل بيه الطلبات دي الأول (أو اضغط "استخدام تاريخ النهاردة") قبل التوزيع أو الرفع.');
+    dateInput.focus();
+    return false;
+  }
+  return true;
 }
 
 // تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع على مراجع أو لأ) — مفيد لو
@@ -3244,19 +3237,14 @@ function applyDuplicateRuleToRows(rows) {
       }
     }
 
-    // فحص "نفس اليوم" بيتم بتاريخ الصف نفسه لو الملف فيه عمود تاريخ لكل صف (زي ملفات فيها طلبات
-    // بتواريخ مختلفة)، ولو الصف مفيهوش تاريخ خالص بيرجع للتاريخ العام المكتوب فوق كـ احتياطي.
-    const rowOwnDate = extractDateString(row);
-    const dateForCheck = rowOwnDate || targetDate;
-
-    const master = getMasterOrderByNumberAndDate(num, dateForCheck);
+    const master = getMasterOrderByNumberAndDate(num, targetDate);
     if (!master) return true; // مش موجود بنفس اليوم ده، مش تكرار أصلاً
 
     const existingStatus = master.review_status || master['حالة المراجعة'];
 
     if (existingStatus === 'مقبول') {
       log.accepted++;
-      log.removed.push({ order_number: num, reason: 'مقبول من قبل (نفس تاريخه)' });
+      log.removed.push({ order_number: num, reason: 'مقبول من قبل (نفس تاريخ الدفعة)' });
       return false;
     }
 
@@ -3368,9 +3356,9 @@ function buildDuplicateCleanupReport(result) {
   let msg = `🚫 تم منع تكرار الطلب تلقائيًا:\n\n`;
   if (result.withinBatchRemoved > 0) msg += `• ${result.withinBatchRemoved} نسخة مكررة داخل الملف/الملفات نفسها.\n`;
   if (log.acceptedAnyDate > 0) msg += `• ${log.acceptedAnyDate} طلب كان "مقبول" من قبل (بأي تاريخ سابق) — اتشال نهائيًا ومايتوزّعش تاني.\n`;
-  if (log.accepted > 0) msg += `• ${log.accepted} طلب كان "مقبول" من قبل بنفس تاريخه — اتشال، والمقبول القديم فاضل زي ما هو.\n`;
-  if (log.rejectedNotFlagged > 0) msg += `• ${log.rejectedNotFlagged} طلب كان "مرفوض" من قبل بنفس تاريخه، بدون علامة "تم إعادة المراجعة" — اتشال كتكرار غير مبرر.\n`;
-  if (log.stillPending > 0) msg += `• ${log.stillPending} طلب موجود بالفعل بنفس تاريخه ولسه معلّق/تحت المراجعة — اتشال.\n`;
+  if (log.accepted > 0) msg += `• ${log.accepted} طلب كان "مقبول" من قبل بنفس اليوم (${result.targetDate}) — اتشال، والمقبول القديم فاضل زي ما هو.\n`;
+  if (log.rejectedNotFlagged > 0) msg += `• ${log.rejectedNotFlagged} طلب كان "مرفوض" من قبل بنفس اليوم، بدون علامة "تم إعادة المراجعة" — اتشال كتكرار غير مبرر.\n`;
+  if (log.stillPending > 0) msg += `• ${log.stillPending} طلب موجود بالفعل بنفس اليوم ولسه معلّق/تحت المراجعة — اتشال.\n`;
   if (log.allowedReReview > 0) msg += `\n✅ اتسمح بمرور ${log.allowedReReview} طلب "إعادة مراجعة" فعلي (كان مرفوض ومعلّم بإعادة المراجعة)، وهياخد نفس المراجع اللي راجعه قبل كده.\n`;
   msg += `\nالإجمالي بعد التنظيف: ${parsedCsvData.length} طلب.`;
   msg += `\n\n📋 هتلاقي أرقام كل الطلبات اللي اتشالت دي (وسبب كل واحد) في لوحة "🚫 طلبات اتشالت تلقائيًا" تحت، وتقدر تنزلهم شيت إكسيل من هناك.`;
@@ -4053,7 +4041,7 @@ function renderCsvDuplicatesPanel(data) {
   let html = '';
 
   if (dupToday.length > 0) {
-    html += `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚨 ${dupToday.length} رقم طلب مسجل بالفعل بنفس تاريخه في قاعدة البيانات — يبقى ممكن الطلب ده يتراجع مرتين في نفس اليوم غلط!</p>`;
+    html += `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚨 ${dupToday.length} رقم طلب مسجل بالفعل بتاريخ النهاردة — يبقى ممكن الطلب ده يتراجع مرتين في نفس اليوم غلط!</p>`;
     html += `<div style="max-height:130px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--badge-reject-text); border-radius: 6px; padding: 8px; margin-bottom:14px;">`;
     html += dupToday.join('، ');
     html += `</div>`;
@@ -4185,7 +4173,7 @@ async function resolveExistingDuplicatesBySmartRule() {
   const preview = applyDuplicateRuleToRows(parsedCsvData);
 
   if (preview.kept.length === parsedCsvData.length) {
-    alert(`لا توجد طلبات مكررة (لا بأي تاريخ سابق "مقبول"، ولا بنفس تاريخ كل طلب) لمعالجتها.`);
+    alert(`لا توجد طلبات مكررة (لا بأي تاريخ سابق "مقبول"، ولا بنفس تاريخ الدفعة ${targetDate}) لمعالجتها.`);
     return;
   }
 
@@ -4193,7 +4181,7 @@ async function resolveExistingDuplicatesBySmartRule() {
   const confirmProcess = confirm(
     `هيتم فحص الطلبات المكررة:\n` +
     `- اللي سبق واتقبل ("مقبول") في أي تاريخ سابق هيتشال نهائيًا (${log.acceptedAnyDate} طلب).\n` +
-    `- اللي حالته "مقبول" بنفس تاريخه هيتشال من الملف تمامًا (${log.accepted} طلب).\n` +
+    `- اللي حالته "مقبول" بنفس تاريخ الدفعة (${targetDate}) هيتشال من الملف تمامًا (${log.accepted} طلب).\n` +
     `- اللي حالته "مرفوض" ومعلّم "تم إعادة المراجعة" هيفضل، وهيتحط عليه نفس المراجع السابق (${log.allowedReReview} طلب).\n` +
     `- اللي حالته "مرفوض" من غير علامة إعادة مراجعة هيتشال (${log.rejectedNotFlagged} طلب).\n` +
     `- اللي لسه معلّق/تحت المراجعة هيتشال برضو (${log.stillPending} طلب).\n\nتأكيد؟`
@@ -4206,19 +4194,15 @@ async function resolveExistingDuplicatesBySmartRule() {
   alert(buildDuplicateCleanupReport({ totalRemoved: removedNow, withinBatchRemoved: 0, log, targetDate }) || 'تم التنظيف.');
 }
 
-// بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بنفس تاريخها هي (تاريخ كل صف
-// من الملف نفسه لو موجود، وإلا تاريخ الدفعة العام كاحتياطي) - نفس منطق applyDuplicateRuleToRows بالظبط.
+// بيرجّع أرقام الطلبات (من data) اللي موجودة بالفعل في قاعدة البيانات بنفس تاريخ الدفعة الحالية بالظبط
 function getTodayDuplicateOrderNumbers(data) {
-  const fallbackDate = getCsvUploadTargetDateIso();
-  const idx = getMasterDataIndex();
-  return [...new Set(data.map(row => {
-    const num = getCsvRowOrderNumber(row);
-    if (!num) return null;
-    const rowDate = extractDateString(row) || fallbackDate;
-    const candidates = idx.get(num);
-    const existsSameDate = candidates && candidates.some(o => extractDateString(o) === rowDate);
-    return existsSameDate ? num : null;
-  }))].filter(Boolean);
+  const targetDate = getCsvUploadTargetDateIso();
+  const targetSet = new Set(
+    (window.masterData || [])
+      .filter(o => extractDateString(o) === targetDate)
+      .map(o => String(o.order_number || o.order_no || o['رقم الطلب']))
+  );
+  return [...new Set(data.map(getCsvRowOrderNumber))].filter(num => num && targetSet.has(num));
 }
 
 // بيشيل كل طلبات شركة معينة من الملف المرفوع قبل التوزيع/الرفع لـ Supabase
@@ -4715,16 +4699,17 @@ async function uploadCsvToSupabase() {
 }
 
 // زرار منفصل تمامًا عن التوزيع العادي فوق: مخصص لملف "جاهز ومنتهي" أصلاً (زي ملف مسترجع من نسخة قديمة،
-// أو تصدير كامل من مكان تاني) - فيه تاريخ/حالة مراجعة/مراجع/سبب رفض لكل صف بالفعل. بيرفع كل الصفوف
+// أو تصدير كامل من مكان تاني) - فيه حالة مراجعة/مراجع/سبب رفض لكل صف بالفعل. بيرفع كل الصفوف
 // زي ما هي حرفيًا من غير شرط "لازم يكون له مراجع محدد" (عكس uploadCsvToSupabase اللي مبني على فكرة
 // إن الملف لسه محتاج يتوزّع دلوقتي)، مع الاحتفاظ بنفس قاعدة استبعاد "مقبول قبل كده" (autoCleanCsvDuplicates
 // اللي بتتشغل تلقائيًا وقت رفع/تعديل الملف بالفعل قبل ما نوصل هنا).
 async function uploadReadyDistributedCsvToSupabase() {
   if (!canDelete()) { alert('رفع/توزيع الطلبات متاح لعمر وموندي فقط'); return; }
   if (parsedCsvData.length === 0) return;
+  if (!ensureCsvUploadDateSelected()) return;
 
   const confirmUpload = confirm(
-    `هيتم رفع ${parsedCsvData.length} طلب كـ "طلبات جاهزة" زي ما هي بالظبط في الملف (نفس التاريخ، الحالة، المراجع، سبب الرفض لكل صف) - من غير أي شرط إن الطلب يكون له مراجع محدد.\n\n` +
+    `هيتم رفع ${parsedCsvData.length} طلب كـ "طلبات جاهزة" بحالتهم والمراجع وسبب الرفض زي ما هو في الملف، وبالتاريخ المختار فوق لكل الطلبات - من غير أي شرط إن الطلب يكون له مراجع محدد.\n\n` +
     `(هتفضل قاعدة استبعاد "الطلب المقبول قبل كده" شغالة زي العادة.)\n\nتأكيد الرفع؟`
   );
   if (!confirmUpload) return;

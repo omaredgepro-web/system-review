@@ -4658,6 +4658,28 @@ function renderCsvDistSummary(counts, leftoverCount) {
 // مش تعديل صف موجود بالغلط لو حد رفع ملف فيه عمود id قديم (زي ملف مُصدَّر من النظام قبل كده).
 const ALLOWED_ORDER_COLUMNS = ['order_number', 'company', 'reviewer', 'date', 'status', 'review_status', 'rejection_reason'];
 
+// بيجهّز صفوف الرفع النهائية: بيسيب بس الأعمدة المسموحة، وبيوحّد صيغة عمود "date" لـ ISO (YYYY-MM-DD)
+// دايمًا قبل ما يوصل لقاعدة البيانات. السبب: ملفات إكسيل/CSV أحيانًا بترجّع التاريخ بصيغ غريبة (زي
+// "9/21/2026 0:00:00" بوقت زيادة، أو صيغ تانية حسب فورمات الخلية الأصلي)، ولو اتخزنت زي ما هي كده
+// حرفيًا، فلتر التاريخ العادي (اللي بيقارن نص بنص في قاعدة البيانات) مش هيلاقيها ومش هتظهر - رغم إن
+// أي أداة تانية بتفلتر في المتصفح (زي أداة تحديد المتعدد) هتلاقيها عادي لأنها بتشيل جزء الوقت وتفهم
+// الصيغة صح. توحيد الصيغة هنا يضمن إن الطلب يظهر صح في كل مكان في التطبيق من غير استثناءات.
+function buildCleanUploadRows(rows) {
+  return rows.map(row => {
+    const newRow = {};
+    ALLOWED_ORDER_COLUMNS.forEach(key => {
+      if (row[key] === undefined || row[key] === '') return;
+      if (key === 'date') {
+        const iso = parseToIsoDate(row.date);
+        newRow.date = iso || row.date; // لو الصيغة غريبة جدًا ومعرفناش نفهمها، منسيبش التاريخ يضيع خالص
+      } else {
+        newRow[key] = row[key];
+      }
+    });
+    return newRow;
+  });
+}
+
 async function uploadCsvToSupabase() {
   if (!canDelete()) { alert('رفع/توزيع الطلبات متاح لعمر وموندي فقط'); return; }
   if (parsedCsvData.length === 0) return;
@@ -4677,13 +4699,7 @@ async function uploadCsvToSupabase() {
   btn.innerText = 'جاري الرفع...'; btn.disabled = true;
 
   try {
-    const cleanData = dataToUpload.map(row => {
-      const newRow = {};
-      ALLOWED_ORDER_COLUMNS.forEach(key => {
-        if (row[key] !== undefined && row[key] !== '') newRow[key] = row[key];
-      });
-      return newRow;
-    });
+    const cleanData = buildCleanUploadRows(dataToUpload);
 
     const error = await runBatchedUpsert(TABLE_NAME, cleanData);
     if (error) { alert('خطأ أثناء الرفع: ' + error.message); } 
@@ -4717,13 +4733,7 @@ async function uploadReadyDistributedCsvToSupabase() {
   btn.innerText = 'جاري الرفع...'; btn.disabled = true;
 
   try {
-    const cleanData = parsedCsvData.map(row => {
-      const newRow = {};
-      ALLOWED_ORDER_COLUMNS.forEach(key => {
-        if (row[key] !== undefined && row[key] !== '') newRow[key] = row[key];
-      });
-      return newRow;
-    });
+    const cleanData = buildCleanUploadRows(parsedCsvData);
 
     const error = await runBatchedUpsert(TABLE_NAME, cleanData);
     if (error) { alert('خطأ أثناء الرفع: ' + error.message); }

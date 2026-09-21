@@ -2028,23 +2028,47 @@ async function findLatestVisibleDate() {
   return dates[0] || '';
 }
 
+// تاريخ اليوم الفعلي بتوقيت مصر (Africa/Cairo) بصيغة ISO (YYYY-MM-DD)
+function getTodayCairoIsoDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${d}`;
+}
+
 async function loadData() {
   const tbody = document.getElementById('orders-tbody');
   tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري جلب البيانات من Supabase...</td></tr>`;
 
   try {
-    // الخطوة 1: تحديد التاريخ المستهدف (المحدد يدويًا فوق، أو أحدث تاريخ فعليًا مرئي للمستخدم الحالي)
+    // الخطوة 1: تحديد التاريخ المستهدف
+    // - لو محدد يدويًا فوق، بنستخدمه زي ما هو
+    // - غير كده، بنجرب "تاريخ النهاردة الفعلي" (بتوقيت مصر) الأول، عشان ده اللي المفروض
+    //   يظهر افتراضيًا لما حد يفتح الموقع. لو مفيش طلبات النهاردة لسه (قبل التوزيع مثلًا)،
+    //   نرجع لأحدث تاريخ فعليًا موجود بيانات بيه (الطريقة القديمة، للاحتياط بس).
     let targetDate = document.getElementById('date-filter').value;
+    let dateRows = [];
 
     if (!targetDate) {
-      targetDate = await findLatestVisibleDate();
+      const todayIso = getTodayCairoIsoDate();
+      const todayRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(todayIso)));
+      if (todayRows.length > 0) {
+        targetDate = todayIso;
+        dateRows = todayRows;
+      } else {
+        targetDate = await findLatestVisibleDate();
+      }
     }
 
     // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله. بنقارن بكل صيغ
     // التاريخ المحتملة (مش بس ISO) عشان الصفوف القديمة بصيغة تانية تظهر برضو.
-    const dateRows = targetDate
-      ? await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)))
-      : [];
+    // (لو جبناها فعلاً في محاولة "تاريخ النهاردة" فوق، منكررش نفس الطلب تاني)
+    if (dateRows.length === 0 && targetDate) {
+      dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+    }
 
     // لو مفيش تاريخ خالص في الجدول، أو التاريخ المحدد (سواء يدوي أو متبقّي من المتصفح) مفيهوش
     // أي طلبات - لازم نوقف "جاري التحميل" ونوضح للمستخدم مفيش بيانات، بدل ما الصفحة تفضل عالقة

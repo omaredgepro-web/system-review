@@ -350,7 +350,7 @@
 
         <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px; background: rgba(99, 102, 241, 0.08); border-color: var(--accent-purple);">
           <h3 style="font-size: 14px; margin-bottom: 8px;">📅 تاريخ تسجيل هذه الدفعة من الطلبات (مطلوب)</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">التاريخ ده بيتحط بس للطلبات اللي مفيهاش تاريخ خاص بيها في الملف نفسه. أي طلب جاي من الملف ومعاه تاريخه (وحالته/سبب رفضه...إلخ) بيتسجل بنفس البيانات دي زي ما هي من غير أي تغيير.</p>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">اختار التاريخ اللي هتتسجل بيه كل الطلبات دي في قاعدة البيانات. لازم تحدده قبل ما تقدر تعمل توزيع أو ترفع الطلبات.</p>
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <input type="date" id="csv-upload-date-input" class="date-input" onchange="applyCsvUploadDateToAllRows()">
             <button class="btn btn-secondary" onclick="useCsvUploadTodayDate()" style="padding: 6px 14px; font-size: 12px;">استخدام تاريخ النهاردة</button>
@@ -452,7 +452,7 @@
           <button class="btn btn-secondary" id="btn-export-csv-preview" onclick="exportCsvPreviewToExcel()" style="width: auto;">📤 تصدير معاينة Excel (قبل الرفع)</button>
           <button class="btn btn-primary" id="btn-upload-supabase" onclick="uploadCsvToSupabase()" style="width: auto;">تأكيد وتوزيع الطلبات لـ Supabase</button>
           <button class="btn btn-primary" id="btn-upload-ready-distributed" onclick="uploadReadyDistributedCsvToSupabase()" style="width: auto; background: var(--badge-accept-text);">📥 رفع وتوزيع طلبات جاهزة (كما هي في الملف)</button>
-          <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">استخدم الزرار ده لو الملف أصلاً كامل ومنتهي (فيه تاريخ، حالة مراجعة، مراجع لكل طلب) - هيترفع كل صف زي ما هو من غير أي شرط "لازم يكون له مراجع"، مع الاحتفاظ بقاعدة استبعاد "المقبول قبل كده" العادية.</p>
+          <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">استخدم الزرار ده لو الملف أصلاً كامل ومنتهي (فيه حالة مراجعة ومراجع لكل طلب) - هيترفع كل صف زي ما هو من غير أي شرط "لازم يكون له مراجع"، بنفس التاريخ المختار فوق لكل الطلبات، مع الاحتفاظ بقاعدة استبعاد "المقبول قبل كده" العادية.</p>
         </div>
       </div>
     </div>

@@ -2009,23 +2009,46 @@ async function ensureFullMasterData() {
   }
 }
 
-// بيحسب "أحدث تاريخ" فعليًا وبدقة، من غير ما يجيب الجدول كله (ده اللي كان بيبطّئ التحميل).
-// بيجيب بس آخر 300 صف بترتيب الـ id (استعلام واحد سريع، عمود "date" بس)، وياخد أحدث تاريخ
-// حقيقي منهم بعد التطبيع (parseToIsoDate) - ده بيغطي حالة إن صف قديم اتعدّل/اتوزّع تاني
-// بعد ما صفوف أحدث اتضافت (300 صف مسافة كافية جدًا عمليًا)، من غير ما نجيب آلاف الصفوف.
-// طبيعي إن ده بيحترم RLS: المراجع العادي هيرجعله بس تواريخ طلباته هو، والأدمن هيرجعله كل التواريخ.
+// بيحسب "أحدث تاريخ" فعليًا وبدقة وبسرعة، من غير ما يجيب الجدول كله.
+// الطريقة الأساسية: نرتب مباشرة على عمود "date" تنازليًا (مش على id) - كده قاعدة البيانات
+// بتستخدم index على date نفسه وبترجع النتيجة فورًا، بغض النظر عن حجم الجدول أو عدد طلبات
+// المراجع مقارنة بيه. الطريقة القديمة (آخر 300 صف بالـ id) كانت بتفترض إن أحدث طلبات أي
+// مراجع قريبة من أعلى id في الجدول كله - وده مش صحيح لو المراجع عنده طلبات قليلة نسبيًا
+// مقارنة بحجم الجدول (زي جدول فيه 68,000+ صف)، فقاعدة البيانات كانت مضطرة تفحص عدد ضخم
+// من الصفوف عشان تلاقي 300 صف بتخصه هو تحديدًا، وده كان بيسبب بطء شديد أو Timeout - وده
+// اللي كان بيخلي المشكلة "تحصل مع مراجع مختلف كل شوية" (حسب عدد طلبات كل واحد وقت التحميل،
+// مش حاجة ثابتة). لو الطريقة الأساسية فشلت لأي سبب (خطأ شبكة، إلخ)، بنرجع للطريقة القديمة
+// كاحتياطي أخير بدل ما نرمي error ونوقف تحميل الصفحة كلها.
 async function findLatestVisibleDate() {
-  const { data, error } = await supabaseClient
-    .from(TABLE_NAME)
-    .select('date')
-    .not('date', 'is', null)
-    .neq('date', '')
-    .order('id', { ascending: false })
-    .limit(300);
-  if (error) throw error;
+  try {
+    const { data, error } = await supabaseClient
+      .from(TABLE_NAME)
+      .select('date')
+      .not('date', 'is', null)
+      .neq('date', '')
+      .order('date', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    if (dates[0]) return dates[0];
+  } catch (e) {
+    // منكملش نوقّف هنا - ننزل للطريقة الاحتياطية القديمة تحت
+  }
 
-  const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
-  return dates[0] || '';
+  try {
+    const { data, error } = await supabaseClient
+      .from(TABLE_NAME)
+      .select('date')
+      .not('date', 'is', null)
+      .neq('date', '')
+      .order('id', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    return dates[0] || '';
+  } catch (e) {
+    return ''; // آخر حل احتياطي: منرميش error، بنسيب الصفحة تكمل وتوضح "لا توجد بيانات" بدل ما توقف بالكامل
+  }
 }
 
 // تاريخ اليوم الفعلي بتوقيت مصر (Africa/Cairo) بصيغة ISO (YYYY-MM-DD)
@@ -2054,7 +2077,12 @@ async function loadData() {
 
     if (!targetDate) {
       const todayIso = getTodayCairoIsoDate();
-      const todayRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(todayIso)));
+      let todayRows = [];
+      try {
+        todayRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(todayIso)));
+      } catch (e) {
+        todayRows = []; // خطأ مؤقت في محاولة "النهاردة" - منوقفش التحميل، بنكمل لأحدث تاريخ تحت
+      }
       if (todayRows.length > 0) {
         targetDate = todayIso;
         dateRows = todayRows;

@@ -2075,25 +2075,16 @@ async function loadData() {
     let targetDate = document.getElementById('date-filter').value;
     let dateRows = [];
 
+    // بما إن findLatestVisibleDate() بقت سريعة (بترتب على عمود date نفسه)، مبقاش فيه داعي
+    // لمحاولة "النهاردة" الأول كخطوة منفصلة (كانت أصلاً عشان الأداء بس، قبل ما تتحسّن السرعة).
+    // دلوقتي بنجيب أحدث تاريخ فعلي موجود له بيانات مباشرة - ده ممكن يكون النهاردة، أو تاريخ
+    // مستقبلي لو فيه طلبات موزّعة مسبقًا (زي بكرة)، أو تاريخ قديم لو مفيش طلبات جديدة خالص.
     if (!targetDate) {
-      const todayIso = getTodayCairoIsoDate();
-      let todayRows = [];
-      try {
-        todayRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(todayIso)));
-      } catch (e) {
-        todayRows = []; // خطأ مؤقت في محاولة "النهاردة" - منوقفش التحميل، بنكمل لأحدث تاريخ تحت
-      }
-      if (todayRows.length > 0) {
-        targetDate = todayIso;
-        dateRows = todayRows;
-      } else {
-        targetDate = await findLatestVisibleDate();
-      }
+      targetDate = await findLatestVisibleDate();
     }
 
     // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله. بنقارن بكل صيغ
     // التاريخ المحتملة (مش بس ISO) عشان الصفوف القديمة بصيغة تانية تظهر برضو.
-    // (لو جبناها فعلاً في محاولة "تاريخ النهاردة" فوق، منكررش نفس الطلب تاني)
     if (dateRows.length === 0 && targetDate) {
       dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
     }

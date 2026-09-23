@@ -484,6 +484,7 @@
           <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
           <input type="date" id="cert-date-filter" class="date-input" onchange="onCertDateFilterChange()">
           <button class="btn btn-secondary" onclick="resetCertDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+          <button class="btn btn-secondary" id="cert-view-all-dates-btn" onclick="toggleShowAllCertDates()" style="padding: 6px 12px; font-size: 12px;">📅 عرض كل التواريخ</button>
           <select id="cert-status-filter" class="filter-select">
             <option value="ALL">كل الحالات</option>
             <option value="UNPRINTED">⛔ لم يتم الطباعة</option>

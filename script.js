@@ -182,6 +182,9 @@ let certAllData = [];
 // نوع الشهادات المعروض حاليًا: 'عادي' (تاب طباعة الشهادات) أو 'تعمير' (تاب طباعة شهادات التعمير)
 // الاتنين بيستخدموا نفس الجدول (layout) ونفس عناصر الصفحة، وبس بيتفلتروا حسب عمود cert_type
 let activeCertType = 'عادي';
+// لو true، تاب الطباعة (عادي/تعمير) بيعرض كل الطلبات بكل التواريخ مع بعض، بدل تاريخ واحد بس.
+// بيترتب تلقائيًا لـ false لما المستخدم يختار تاريخ معيّن أو يدوس "أحدث تاريخ" أو يبدّل التاب.
+let showAllCertDates = false;
 let certCurrentPage = 1;
 const certPageSize = 100;
 let certTotalRecordsCount = 0;
@@ -6630,6 +6633,15 @@ function applyCertDateFiltering() {
     return;
   }
 
+  if (showAllCertDates) {
+    certAllData = scopedMasterData;
+    document.getElementById('cert-active-date-label').innerText = `يعرض كل التواريخ (${certAllData.length} طلب)`;
+    certTotalRecordsCount = certAllData.length;
+    renderCertKpis(certAllData);
+    renderCertPage();
+    return;
+  }
+
   const dateInput = document.getElementById('cert-date-filter').value;
   let targetDate = dateInput;
 
@@ -6648,6 +6660,21 @@ function applyCertDateFiltering() {
   certTotalRecordsCount = certAllData.length;
   renderCertKpis(certAllData);
   renderCertPage();
+}
+
+// بتحدّث نص زرار "عرض كل التواريخ" حسب الوضع الحالي (شغّال أو لأ)
+function updateShowAllCertDatesBtnLabel() {
+  const btn = document.getElementById('cert-view-all-dates-btn');
+  if (btn) btn.innerText = showAllCertDates ? '📅 عرض تاريخ واحد بس' : '📅 عرض كل التواريخ';
+}
+
+function toggleShowAllCertDates() {
+  showAllCertDates = !showAllCertDates;
+  updateShowAllCertDatesBtnLabel();
+  certCurrentPage = 1;
+  selectedCertOrderNumbers.clear();
+  updateCertSelectedCount();
+  applyCertDateFiltering();
 }
 
 // ============ تحديد متعدد عن طريق لصق أرقام طلبات أو رفع ملف (تاب الشهادات) ============
@@ -6791,8 +6818,8 @@ function verifyAndSelectCertOrders() {
   resultsEl.innerHTML = html;
 }
 
-function onCertDateFilterChange() { certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
-function resetCertDateToLatest() { document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
+function onCertDateFilterChange() { showAllCertDates = false; updateShowAllCertDatesBtnLabel(); certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
+function resetCertDateToLatest() { showAllCertDates = false; updateShowAllCertDatesBtnLabel(); document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
 
 // بيحدد فلتر "المسؤول" على اسم المستخدم الحالي (لو موجود ضمن الخيارات)، عشان أول ما يفتح
 // التاب يشوف طلباته هو بس بشكل افتراضي. لو مش موجود لأي سبب (مثلاً مش من ضمن الأدمنز)، يفضل "الكل".

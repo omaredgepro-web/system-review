@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+    <style id="anti-clickjack-style">html{display:none !important;}</style>
+    <script>
+      if (self === top) {
+        document.documentElement.style.display = 'block';
+        var s = document.getElementById('anti-clickjack-style');
+        if (s) s.parentNode.removeChild(s);
+      } else {
+        try { top.location = self.location; } catch (e) {}
+      }
+    </script>
   <meta charset="UTF-8">
      
   <!-- منع المتصفح من تخزين نسخة قديمة من الصفحة نفسها (HTML)، عشان أي تحديث جديد يوصل فورًا من غير Hard Refresh -->

@@ -2053,10 +2053,24 @@ async function searchCertAcrossAllDates(searchValue, certType) {
   if (error) throw error;
   mergeRowsIntoCertMasterData(data || []);
 }
+// لو عمود taqneen_number مش موجود في جدول mawaqef بالاسم ده، البحث بيتحول تلقائيًا لرقم الطلب بس
+// (بدل ما يفشل). بنفتكر ده بعد أول مرة عشان منبعتش طلب فاشل كل مرة.
+let _mawaqefTanzeenColMissing = false;
 async function searchMawaqefAcrossAllDates(searchValue) {
-  const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').or(`order_number.ilike.%${searchValue}%,tanzeen_number.ilike.%${searchValue}%`).order('id', { ascending: false }).limit(300);
-  if (error) throw error;
-  mergeRowsIntoMawaqefMasterData(data || []);
+  const base = () => supabaseClient.from(MAWAQEF_TABLE_NAME).select('*');
+  let res;
+  if (!_mawaqefTanzeenColMissing) {
+    res = await base().or(`order_number.ilike.%${searchValue}%,taqneen_number.ilike.%${searchValue}%`).order('id', { ascending: false }).limit(300);
+    if (res.error && /taqneen_number/i.test(res.error.message || '') && /does not exist/i.test(res.error.message || '')) {
+      _mawaqefTanzeenColMissing = true;
+      console.warn('عمود taqneen_number مش موجود في جدول mawaqef - البحث برقم الطلب فقط');
+    }
+  }
+  if (_mawaqefTanzeenColMissing) {
+    res = await base().ilike('order_number', `%${searchValue}%`).order('id', { ascending: false }).limit(300);
+  }
+  if (res.error) throw res.error;
+  mergeRowsIntoMawaqefMasterData(res.data || []);
 }
 async function fetchCertRowsByOrderNumbers(orderNumbers) {
   const uniq = [...new Set((orderNumbers || []).filter(Boolean).map(String))];
@@ -8582,7 +8596,7 @@ function getFilteredMawaqefRows() {
   if (searchValue) {
     rows = rows.filter(o =>
       String(o.order_number || '').toLowerCase().includes(searchValue) ||
-      String(o.tanzeen_number || '').toLowerCase().includes(searchValue)
+      String(o.taqneen_number || '').toLowerCase().includes(searchValue)
     );
   }
   return rows;
@@ -8617,7 +8631,7 @@ function renderMawaqefPage() {
       <tr>
         <td><input type="checkbox" class="mawaqef-row-checkbox" value="${mawaqefRowKey}" data-ordernum="${o.order_number}" ${isChecked} onchange="toggleMawaqefSelection('${safeMawaqefRowKey}', this.checked)"></td>
         <td class="order-no-cell">${orderNoCopyHtml(o.order_number || '-')}</td>
-        <td>${o.tanzeen_number || '-'}</td>
+        <td>${o.taqneen_number || '-'}</td>
         <td>${o.status || '-'}</td>
         <td>${o.governorate || '-'}</td>
         <td>${o.coordination_body || '-'}</td>
@@ -8788,7 +8802,7 @@ function openMawaqefEditModal(id) {
   selectedMawaqefOrder = (mawaqefMasterData || []).find(o => String(o.id) === String(id));
   if (!selectedMawaqefOrder) return;
   document.getElementById('mawaqef-modal-order-no').value = selectedMawaqefOrder.order_number || '';
-  document.getElementById('mawaqef-modal-tanzeen').value = selectedMawaqefOrder.tanzeen_number || '';
+  document.getElementById('mawaqef-modal-tanzeen').value = selectedMawaqefOrder.taqneen_number || '';
   document.getElementById('mawaqef-modal-status').value = selectedMawaqefOrder.status || '';
   document.getElementById('mawaqef-modal-governorate').value = selectedMawaqefOrder.governorate || '';
   document.getElementById('mawaqef-modal-coordination').value = selectedMawaqefOrder.coordination_body || '';
@@ -8806,7 +8820,7 @@ function closeMawaqefModal() {
 async function saveMawaqefUpdate() {
   if (!selectedMawaqefOrder) return;
   const updateData = {
-    tanzeen_number: document.getElementById('mawaqef-modal-tanzeen').value || null,
+    taqneen_number: document.getElementById('mawaqef-modal-tanzeen').value || null,
     status: document.getElementById('mawaqef-modal-status').value || null,
     governorate: document.getElementById('mawaqef-modal-governorate').value || null,
     coordination_body: document.getElementById('mawaqef-modal-coordination').value || null,
@@ -8858,7 +8872,7 @@ function exportMawaqefExcel() {
   if (rows.length === 0) { alert('لا توجد بيانات لتصديرها'); return; }
   const exportRows = rows.map(o => ({
     'رقم الطلب': o.order_number || '-',
-    'رقم طلب التقنين': o.tanzeen_number || '-',
+    'رقم طلب التقنين': o.taqneen_number || '-',
     'جهة الولاية': o.status || '-',
     'المحافظة': o.governorate || '-',
     'جهة التنسيق': o.coordination_body || '-',

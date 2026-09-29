@@ -66,21 +66,47 @@ function getRole(username) {
   const p = ALL_PROFILES.find(p => p.username === username);
   return p ? p.role : null;
 }
+const PROFILE_CACHE_KEY = 'cached_own_profile_v1';
+const PROFILES_CACHE_KEY = 'cached_all_profiles_v1';
+function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function _readCache(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
+function _writeCache(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+
+// بيعيد المحاولة على أخطاء الشبكة/429/timeout المؤقتة (وقت الـ Hard Refresh الطلبات بتتزاحم)
+async function withRetry(fn, tries = 3) {
+  let lastError = null;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fn();
+      if (!res.error) return res;
+      lastError = res.error;
+    } catch (e) { lastError = e; }
+    await _sleep(300 * (i + 1));
+  }
+  return { data: null, error: lastError };
+}
+
+// بيرجّع البروفايل، أو null لو الحساب فعلاً معندوش صف في profiles.
+// لو حصل خطأ مؤقت (شبكة/تزاحم) بيرجّع النسخة المخزّنة بدل ما يطلّع اليوزر بره - وده كان سبب
+// إن اليوزر "يظهر وبعدين يختفي" بعد Ctrl+Shift+R. الصلاحيات الحقيقية لسه بتتحكم فيها Supabase (RLS).
 async function fetchOwnProfile(userId) {
-  const { data, error } = await supabaseClient
-    .from('profiles')
-    .select('id, username, name, role')
-    .eq('id', userId)
-    .single();
-  if (error) { console.error(error); return null; }
-  return data;
+  const { data, error } = await withRetry(() =>
+    supabaseClient.from('profiles').select('id, username, name, role').eq('id', userId).maybeSingle()
+  );
+  if (!error && data) { _writeCache(PROFILE_CACHE_KEY, data); return data; }
+  if (!error && !data) { localStorage.removeItem(PROFILE_CACHE_KEY); return null; }
+  console.error(error);
+  const cached = _readCache(PROFILE_CACHE_KEY);
+  if (cached && cached.id === userId) return cached;
+  throw error;
 }
 async function fetchAllProfiles() {
-  const { data, error } = await supabaseClient
-    .from('profiles')
-    .select('id, username, name, role');
-  if (error) { console.error(error); return []; }
-  return data;
+  const { data, error } = await withRetry(() =>
+    supabaseClient.from('profiles').select('id, username, name, role')
+  );
+  if (!error && data && data.length) { _writeCache(PROFILES_CACHE_KEY, data); return data; }
+  if (error) console.error(error);
+  return _readCache(PROFILES_CACHE_KEY) || [];
 }
 
 // بيحوّل اليوزرنيم المخزّن (زي "adham") للاسم العربي المعروض (زي "ادهم") في أي مكان بيتعرض للمستخدم.
@@ -270,7 +296,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       await clearAppCacheAndReload();
       return;
     }
-    const profile = await fetchOwnProfile(session.user.id);
+    let profile = null;
+    try {
+      profile = await fetchOwnProfile(session.user.id);
+    } catch (e) {
+      const errEl = document.getElementById('login-error');
+      if (errEl) { errEl.innerText = 'تعذر الاتصال بالسيرفر مؤقتًا. اعمل تحديث للصفحة (F5) - جلستك لسه محفوظة.'; errEl.style.display = 'block'; }
+      return; // مفيش signOut هنا: الجلسة سليمة، المشكلة في الاتصال بس
+    }
     if (profile) {
       await setupUserSession(profile);
     } else {
@@ -888,9 +921,11 @@ async function setupUserSession(profile) {
   if (rejLayoutWrapper) rejLayoutWrapper.style.display = isAdmin ? 'inline-block' : 'none';
   if (rejLayoutOnlyMeBtn) rejLayoutOnlyMeBtn.style.display = isAdmin ? 'inline-flex' : 'none';
 
-  ALL_PROFILES = await fetchAllProfiles();
+  // القايمة المخزّنة بتظهر فورًا، والنسخة الحديثة بتتجاب بالتوازي مع البيانات (مش قبلها)
+  ALL_PROFILES = _readCache(PROFILES_CACHE_KEY) || [];
   populateReviewerDropdowns();
   populateMawaqefStatusDropdowns();
+  const profilesPromise = fetchAllProfiles();
 
   // بعض المتصفحات (Chrome خصوصًا) بترجّع آخر تاريخ اتكتب في الحقل ده من جلسة سابقة حتى بعد
   // Hard Refresh. بنصفّره هنا يدويًا عشان أول تحميل بعد الدخول يجيب "أحدث تاريخ" فعليًا دايمًا،
@@ -899,6 +934,13 @@ async function setupUserSession(profile) {
   if (dateFilterEl) dateFilterEl.value = '';
 
   loadData();
+  profilesPromise.then(profiles => {
+    if (!profiles || profiles.length === 0) return;
+    ALL_PROFILES = profiles;
+    populateReviewerDropdowns();
+    // أسماء المراجعين في الجدول والإحصائيات تتحدّث لو البيانات وصلت قبل البروفايلات
+    if (window.masterData && window.masterData.length > 0) applyDateFiltering();
+  });
   subscribeToLiveUpdates();
   startRejectionNagTimer();
   // بعد ما البيانات تحمل (لودTData شغالة async)، نتأكد فورًا لو المراجع عنده طلبات
@@ -1877,6 +1919,18 @@ function formatActionTimestamp(item) {
 // 2026-08-07، وM/D/Y وMM/DD/YYYY وD/M/Y بكل احتمالات الأصفار) - عشان لو فيه صفوف قديمة اتسجلت
 // بصيغة تاريخ مختلفة عن اللي بيحطها حقل اختيار التاريخ (type="date")، لسه تتفلتر وتظهر صح بدل
 // ما تختفي بسبب مطابقة نصية حرفية مش مطابقة لصيغتها.
+// نفس الفكرة بس بـ IN بدل OR: قاعدة البيانات بتستخدم الـ index بسهولة أكتر مع IN (= ANY)
+function filterByDateVariants(q, isoDate) {
+  const parts = String(isoDate || '').split('-').map(Number);
+  const [y, m, d] = parts;
+  if (!y || !m || !d) return q.eq('date', isoDate);
+  const pad = n => String(n).padStart(2, '0');
+  const variants = [...new Set([
+    isoDate, `${m}/${d}/${y}`, `${pad(m)}/${pad(d)}/${y}`, `${d}/${m}/${y}`, `${pad(d)}/${pad(m)}/${y}`
+  ])];
+  return q.in('date', variants);
+}
+
 function buildDateEqOrFilter(isoDate) {
   const parts = String(isoDate || '').split('-').map(Number);
   const [y, m, d] = parts;
@@ -1933,20 +1987,7 @@ async function ensureFullCertData(onProgress = null) {
   if (window.__certScope === 'full') return certMasterData;
   if (_fullCertPromise) return _fullCertPromise;
   _fullCertPromise = (async () => {
-    let allFetched = [];
-    // دفعات صغيرة (200) عشان offset الكبير ميعملش timeout في Supabase مع الجداول الكبيرة
-    const step = 200;
-    let from = 0;
-    while (true) {
-      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      allFetched = allFetched.concat(data);
-      from += step;
-      if (onProgress) onProgress(allFetched.length);
-      if (data.length < step) break;
-    }
-    certMasterData = allFetched;
+    certMasterData = await fetchAllRowsFromTable(CERT_TABLE_NAME, null, onProgress);
     window.__certScope = 'full';
     certDataLoaded = true;
     return certMasterData;
@@ -1957,56 +1998,45 @@ async function ensureFullMawaqefData(onProgress = null) {
   if (window.__mawaqefScope === 'full') return mawaqefMasterData;
   if (_fullMawaqefPromise) return _fullMawaqefPromise;
   _fullMawaqefPromise = (async () => {
-    let allFetched = [];
-    const step = 200;
-    let from = 0;
-    while (true) {
-      const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      allFetched = allFetched.concat(data);
-      from += step;
-      if (onProgress) onProgress(allFetched.length);
-      if (data.length < step) break;
-    }
-    mawaqefMasterData = allFetched;
+    mawaqefMasterData = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, null, onProgress);
     window.__mawaqefScope = 'full';
     mawaqefDataLoaded = true;
     return mawaqefMasterData;
   })();
   try { return await _fullMawaqefPromise; } finally { _fullMawaqefPromise = null; }
 }
+// أسرع طريقة لأحدث تاريخ: استعلامين بالتوازي - واحد بالـ id (بيمشي على الـ PK، سريع دايمًا) وواحد
+// بالتاريخ نفسه (أدق). لو الأدق اتأخر أكتر من 1.5 ثانية بنكمل بنتيجة الـ id من غير ما نستناه.
+async function findLatestDateRacing(runByDate, runById, toIso) {
+  const pick = (run) => Promise.resolve(run()).then(r => {
+    if (!r || r.error) return null;
+    return (r.data || []).map(toIso).filter(Boolean).sort().reverse()[0] || null;
+  }).catch(() => null);
+  const idP = pick(runById);
+  const dateP = pick(runByDate);
+  const idDate = await idP;
+  let dateDate = await Promise.race([dateP, new Promise(res => setTimeout(() => res(null), 1500))]);
+  if (!idDate && !dateDate) dateDate = await dateP;
+  return [idDate, dateDate].filter(Boolean).sort().reverse()[0] || '';
+}
 async function findLatestCertDate(certType) {
-  try {
+  const base = () => {
     let q = supabaseClient.from(CERT_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '');
     if (certType) q = q.eq('cert_type', certType);
-    const { data, error } = await q.order('date', { ascending: false }).limit(20);
-    if (error) throw error;
-    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
-    if (dates[0]) return dates[0];
-  } catch (e) {}
-  try {
-    let q2 = supabaseClient.from(CERT_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '');
-    if (certType) q2 = q2.eq('cert_type', certType);
-    const { data, error } = await q2.order('id', { ascending: false }).limit(300);
-    if (error) throw error;
-    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
-    return dates[0] || '';
-  } catch (e) { return ''; }
+    return q;
+  };
+  return findLatestDateRacing(
+    () => base().order('date', { ascending: false }).limit(20),
+    () => base().order('id', { ascending: false }).limit(300),
+    r => parseToIsoDate(r.date)
+  );
 }
 async function findLatestMawaqefDate() {
-  try {
-    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date,created_at').order('date', { ascending: false }).limit(20);
-    if (error) throw error;
-    const dates = (data || []).map(r => parseToIsoDate(r.date || r.created_at)).filter(Boolean).sort().reverse();
-    if (dates[0]) return dates[0];
-  } catch (e) {}
-  try {
-    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date,created_at').order('id', { ascending: false }).limit(300);
-    if (error) throw error;
-    const dates = (data || []).map(r => parseToIsoDate(r.date || r.created_at)).filter(Boolean).sort().reverse();
-    return dates[0] || '';
-  } catch (e) { return ''; }
+  return findLatestDateRacing(
+    () => supabaseClient.from(MAWAQEF_TABLE_NAME).select('date,created_at').not('date', 'is', null).order('date', { ascending: false }).limit(20),
+    () => supabaseClient.from(MAWAQEF_TABLE_NAME).select('date,created_at').order('id', { ascending: false }).limit(300),
+    r => parseToIsoDate(r.date || r.created_at)
+  );
 }
 async function searchCertAcrossAllDates(searchValue, certType) {
   let q = supabaseClient.from(CERT_TABLE_NAME).select('*').ilike('order_number', `%${searchValue}%`).order('id', { ascending: false }).limit(300);
@@ -2120,12 +2150,92 @@ async function fetchAllRowsPaginated(runQuery, initialStep = 300, onProgress = n
   return allFetched;
 }
 
-async function fetchAllRowsFromTable(tableName, extraFilter) {
-  return fetchAllRowsPaginated((from, to) => {
+// جلب الصفحات بالتوازي (4 طلبات مع بعض) بدل واحد ورا التاني. لو حصل أي خطأ (timeout مثلًا)
+// بنرجع تلقائيًا للطريقة التسلسلية القديمة اللي بتصغّر حجم الدفعة.
+async function fetchAllRowsParallel(runQuery, step = 300, concurrency = 4, onProgress = null) {
+  const first = await runQuery(0, step - 1);
+  if (first.error) throw first.error;
+  let all = first.data || [];
+  if (onProgress) onProgress(all.length);
+  if (all.length < step) return all;
+  let from = step;
+  let done = false;
+  while (!done) {
+    const reqs = [];
+    for (let i = 0; i < concurrency; i++) {
+      const f = from + i * step;
+      reqs.push(runQuery(f, f + step - 1));
+    }
+    const results = await Promise.all(reqs);
+    for (const r of results) {
+      if (r.error) throw r.error;
+      const d = r.data || [];
+      all = all.concat(d);
+      if (d.length < step) { done = true; break; }
+    }
+    if (onProgress) onProgress(all.length);
+    from += concurrency * step;
+  }
+  return all;
+}
+
+// جلب الجدول كله بتقسيمه لمدى من الـ id (مثلًا 1-1000، 1001-2000...) وتنفيذ 6 طلبات مع بعض.
+// ده أسرع بكتير من offset/range لأن كل طلب بيمشي على index الـ id مباشرة من غير ما يعدّي آلاف الصفوف.
+// لو الـ id مش رقم، أو المدى واسع جدًا، بيرمي error والدالة اللي فوق بترجع للطريقة العادية.
+async function fetchAllRowsByIdRanges(tableName, onProgress = null) {
+  const [topRes, botRes] = await Promise.all([
+    supabaseClient.from(tableName).select('id').order('id', { ascending: false }).limit(2000),
+    supabaseClient.from(tableName).select('id').order('id', { ascending: true }).limit(1)
+  ]);
+  if (topRes.error) throw topRes.error;
+  if (botRes.error) throw botRes.error;
+  const topIds = topRes.data || [];
+  if (topIds.length === 0) return [];
+  const maxId = topIds[0].id;
+  const minId = (botRes.data && botRes.data[0]) ? botRes.data[0].id : null;
+  if (typeof maxId !== 'number' || typeof minId !== 'number') throw new Error('id is not numeric');
+
+  // أقصى عدد صفوف السيرفر بيرجّعه في الطلب الواحد >= عدد اللي رجع في أول استعلام، فالعرض ده آمن دايمًا
+  const width = Math.max(1, Math.min(1000, topIds.length));
+  const ranges = [];
+  for (let a = minId; a <= maxId; a += width) ranges.push([a, a + width]);
+  if (ranges.length > 600) throw new Error('id range too sparse');
+
+  const results = new Array(ranges.length);
+  let next = 0, fetched = 0, failed = false;
+  const worker = async () => {
+    while (!failed) {
+      const i = next++;
+      if (i >= ranges.length) return;
+      const [a, b] = ranges[i];
+      const { data, error } = await withRetry(() =>
+        supabaseClient.from(tableName).select('*').gte('id', a).lt('id', b).order('id', { ascending: true })
+      );
+      if (error) { failed = true; throw error; }
+      results[i] = data || [];
+      fetched += results[i].length;
+      if (onProgress) onProgress(fetched);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, ranges.length) }, worker));
+  return results.flat();
+}
+
+async function fetchAllRowsFromTable(tableName, extraFilter, onProgress = null) {
+  // الجدول كله (من غير فلتر): مدى الـ id بالتوازي أسرع طريقة
+  if (!extraFilter) {
+    try { return await fetchAllRowsByIdRanges(tableName, onProgress); } catch (e) { console.warn('id-range fetch failed, falling back', e); }
+  }
+  const runQuery = (from, to) => {
     let query = supabaseClient.from(tableName).select('*').order('id', { ascending: true }).range(from, to);
     if (extraFilter) query = extraFilter(query);
     return query;
-  });
+  };
+  try {
+    return await fetchAllRowsParallel(runQuery, 1000, 4, onProgress);
+  } catch (e) {
+    return fetchAllRowsPaginated(runQuery, 300, onProgress);
+  }
 }
 
 // بيجيب باقي الجدول كله (كل التواريخ) مرة واحدة بس، ويخزنه في window.masterData. لو النداء اتكرر
@@ -2234,13 +2344,27 @@ async function loadData() {
     // دلوقتي بنجيب أحدث تاريخ فعلي موجود له بيانات مباشرة - ده ممكن يكون النهاردة، أو تاريخ
     // مستقبلي لو فيه طلبات موزّعة مسبقًا (زي بكرة)، أو تاريخ قديم لو مفيش طلبات جديدة خالص.
     if (!targetDate) {
-      targetDate = await findLatestVisibleDate();
+      // بدل ما نستنى "أحدث تاريخ" وبعدين نبدأ نجيب الصفوف (طلبين ورا بعض)، بنبدأ فورًا نجيب صفوف
+      // آخر تاريخ اتفتح بالتوازي مع البحث عن الأحدث. لو طلع هو نفسه (الحالة الغالبة) وفّرنا رحلة كاملة للسيرفر.
+      const cachedDate = localStorage.getItem('last_review_date') || '';
+      const latestPromise = findLatestVisibleDate();
+      if (cachedDate) {
+        const speculative = fetchAllRowsFromTable(TABLE_NAME, q => filterByDateVariants(q, cachedDate)).catch(() => null);
+        const latest = await latestPromise;
+        if (latest && latest === cachedDate) {
+          const rows = await speculative;
+          if (rows && rows.length > 0) dateRows = rows;
+        }
+        targetDate = latest || cachedDate;
+      } else {
+        targetDate = await latestPromise;
+      }
     }
 
     // الخطوة 2: نجيب بس صفوف التاريخ ده (استعلام مفلتر وسريع)، بدل الجدول كله. بنقارن بكل صيغ
     // التاريخ المحتملة (مش بس ISO) عشان الصفوف القديمة بصيغة تانية تظهر برضو.
     if (dateRows.length === 0 && targetDate) {
-      dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => filterByDateVariants(q, targetDate));
     }
 
     // لو مفيش تاريخ خالص في الجدول، أو التاريخ المحدد (سواء يدوي أو متبقّي من المتصفح) مفيهوش
@@ -2260,7 +2384,10 @@ async function loadData() {
 
     window.masterData = dateRows;
     window.__masterDataScope = 'date';
-    if (targetDate) document.getElementById('date-filter').value = targetDate;
+    if (targetDate) {
+      document.getElementById('date-filter').value = targetDate;
+      try { localStorage.setItem('last_review_date', targetDate); } catch (e) {}
+    }
     applyDateFiltering();
 
   } catch (err) {
@@ -2319,7 +2446,7 @@ async function onDateFilterChange() {
     const tbody = document.getElementById('orders-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
-      const dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      const dateRows = await fetchAllRowsFromTable(TABLE_NAME, q => filterByDateVariants(q, targetDate));
       mergeRowsIntoMasterData(dateRows);
     } catch (err) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
@@ -5684,12 +5811,29 @@ async function loadCertificatesData(onProgress = null) {
   if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     let targetDate = document.getElementById('cert-date-filter') ? document.getElementById('cert-date-filter').value : '';
-    if (!targetDate) targetDate = await findLatestCertDate(activeCertType);
+    let dateRows = [];
+    let prefetched = false;
+    if (!targetDate) {
+      // نبدأ فورًا نجيب صفوف آخر تاريخ اتفتح بالتوازي مع البحث عن الأحدث؛ لو طلع نفسه بنوفّر رحلة كاملة
+      const certCacheKey = 'last_cert_date_' + (activeCertType || 'all');
+      const cachedDate = localStorage.getItem(certCacheKey) || '';
+      const latestPromise = findLatestCertDate(activeCertType).then(d => d || findLatestCertDate(null));
+      if (cachedDate) {
+        const speculative = fetchAllRowsFromTable(CERT_TABLE_NAME, q => filterByDateVariants(q, cachedDate)).catch(() => null);
+        const latest = await latestPromise;
+        if (latest && latest === cachedDate) {
+          const rows = await speculative;
+          if (rows && rows.length > 0) { dateRows = rows; prefetched = true; }
+        }
+        targetDate = latest || cachedDate;
+      } else {
+        targetDate = await latestPromise;
+      }
+    }
     // fallback: لو النوع الحالي مفيهوش تاريخ (نوع جديد)، جرّب أحدث تاريخ عام
     if (!targetDate) targetDate = await findLatestCertDate(null);
-    let dateRows = [];
-    if (targetDate) {
-      dateRows = await fetchAllRowsFromTable(CERT_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+    if (targetDate && !prefetched) {
+      dateRows = await fetchAllRowsFromTable(CERT_TABLE_NAME, q => filterByDateVariants(q, targetDate));
       if (onProgress) onProgress(dateRows.length);
     }
     if (dateRows.length === 0) {
@@ -5709,6 +5853,7 @@ async function loadCertificatesData(onProgress = null) {
     window.__certScope = 'date';
     certDataLoaded = true;
     if (targetDate && document.getElementById('cert-date-filter')) document.getElementById('cert-date-filter').value = targetDate;
+    if (targetDate) { try { localStorage.setItem('last_cert_date_' + (activeCertType || 'all'), targetDate); } catch (e) {} }
     populateCertLayoutFilter();
     applyCertDateFiltering();
   } catch (err) {
@@ -7030,7 +7175,7 @@ async function onCertDateFilterChange() {
     const tbody = document.getElementById('cert-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
-      const dateRows = await fetchAllRowsFromTable(CERT_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      const dateRows = await fetchAllRowsFromTable(CERT_TABLE_NAME, q => filterByDateVariants(q, targetDate));
       mergeRowsIntoCertMasterData(dateRows);
     } catch (err) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
@@ -7935,18 +8080,33 @@ async function loadMawaqefData() {
   if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     let targetDate = document.getElementById('mawaqef-date-filter') ? document.getElementById('mawaqef-date-filter').value : '';
-    if (!targetDate) targetDate = await findLatestMawaqefDate();
     let dateRows = [];
-    if (targetDate) {
+    let prefetched = false;
+    if (!targetDate) {
+      const cachedDate = localStorage.getItem('last_mawaqef_date') || '';
+      const latestPromise = findLatestMawaqefDate();
+      if (cachedDate) {
+        const speculative = fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => filterByDateVariants(q, cachedDate)).catch(() => null);
+        const latest = await latestPromise;
+        if (latest && latest === cachedDate) {
+          const rows = await speculative;
+          if (rows && rows.length > 0) { dateRows = rows; prefetched = true; }
+        }
+        targetDate = latest || cachedDate;
+      } else {
+        targetDate = await latestPromise;
+      }
+    }
+    if (targetDate && !prefetched) {
       try {
-        dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+        dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => filterByDateVariants(q, targetDate));
       } catch (e) {
         // لو فلتر التاريخ فشل (مثلا عمود date بصيغة مختلفة)، جرّب مطابقة مباشرة بسيطة
         const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').eq('date', targetDate).limit(1000);
         if (!error) dateRows = data || [];
         else throw e;
       }
-    } else {
+    } else if (!prefetched) {
       dateRows = await fetchAllRowsPaginated((from, to) => supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: false }).range(from, to), 300);
       dateRows = (dateRows || []).slice(0, 300);
     }
@@ -7984,6 +8144,7 @@ async function loadMawaqefData() {
     window.__mawaqefScope = 'date';
     mawaqefDataLoaded = true;
     if (targetDate && document.getElementById('mawaqef-date-filter')) document.getElementById('mawaqef-date-filter').value = targetDate;
+    if (targetDate) { try { localStorage.setItem('last_mawaqef_date', targetDate); } catch (e) {} }
     populateMawaqefStatusFilter();
     applyMawaqefDateFiltering();
   } catch (err) {
@@ -8158,7 +8319,7 @@ async function applyMawaqefDateFiltering() {
     const tbody = document.getElementById('mawaqef-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
-      const dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      const dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => filterByDateVariants(q, targetDate));
       mergeRowsIntoMawaqefMasterData(dateRows);
       populateMawaqefStatusFilter();
     } catch (err) {

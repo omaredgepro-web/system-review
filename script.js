@@ -888,6 +888,8 @@ async function setupUserSession(profile) {
   document.getElementById('certificates-renovation-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
+  const certMoveGroup = document.getElementById('cert-move-mawaqef-group');
+  if (certMoveGroup) certMoveGroup.style.display = canViewMawaqef() ? 'flex' : 'none';
   document.getElementById('gehat-wlaya-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   document.getElementById('reviewer-stats-tab-btn').style.display = isAdmin ? 'block' : 'none';
 
@@ -945,6 +947,9 @@ async function setupUserSession(profile) {
   startRejectionNagTimer();
   // بعد ما البيانات تحمل (لودTData شغالة async)، نتأكد فورًا لو المراجع عنده طلبات
   // مرفوضة قديمة اتجاهلت من قبل - بدل ما يستنى أول تكرار للتايمر (بعد 5 دقايق)
+  if (currentUser && currentUser.role !== 'admin') {
+    ensureAllRejectedCertRows().then(() => showRejectionNagModal()).catch(() => {});
+  }
   setTimeout(() => showRejectionNagModal(), 3000);
 }
 
@@ -955,6 +960,8 @@ function populateMawaqefStatusDropdowns() {
   if (modalStatus) modalStatus.innerHTML = optionsHtml;
   const bulkStatus = document.getElementById('mawaqef-bulk-status-select');
   if (bulkStatus) bulkStatus.innerHTML = '<option value="">تغيير الحالة إلى...</option>' + optionsHtml;
+  const certMoveStatus = document.getElementById('cert-bulk-mawaqef-status');
+  if (certMoveStatus) certMoveStatus.innerHTML = '<option value="">حالة الموقف...</option>' + optionsHtml;
 }
 
 // اشتراك Realtime: أي إضافة/تعديل/حذف يحصل في الجداول دي (من أي حد، من أي مكان)
@@ -1989,6 +1996,7 @@ async function ensureFullCertData(onProgress = null) {
   _fullCertPromise = (async () => {
     certMasterData = await fetchAllRowsFromTable(CERT_TABLE_NAME, null, onProgress);
     window.__certScope = 'full';
+    window.__rejectedScope = 'all';
     certDataLoaded = true;
     return certMasterData;
   })();
@@ -5096,59 +5104,62 @@ function closeModal() { document.getElementById('edit-modal').style.display = 'n
 
 // نسخ رقم الطلب من زرار 📋 صغير جنب رقم الطلب في أي صف جدول (مش بس في مودال المراجعة) —
 // بياخد القيمة من data-ordernum على الزرار نفسه، عشان يشتغل حتى لو رقم الطلب فيه رموز خاصة.
-function copyOrderNumberCell(btnEl) {
-  const value = btnEl.getAttribute('data-ordernum');
-  if (!value) return;
-
-  const original = btnEl.innerText;
-  const finish = (ok) => {
-    btnEl.innerText = ok ? '✅' : '⚠️';
-    setTimeout(() => { btnEl.innerText = original; }, 1000);
-  };
-
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(value).then(() => finish(true)).catch(() => finish(false));
-  } else {
-    try {
-      const temp = document.createElement('textarea');
-      temp.value = value;
-      temp.style.position = 'fixed';
-      temp.style.opacity = '0';
-      document.body.appendChild(temp);
-      temp.select();
-      document.execCommand('copy');
-      document.body.removeChild(temp);
-      finish(true);
-    } catch (e) {
-      finish(false);
+// نسخ نص للحافظة: بيجرب الطريقة الحديثة الأول، ولو فشلت (صلاحيات/تركيز الصفحة) بيرجع لطريقة textarea القديمة
+async function copyTextToClipboard(text) {
+  text = String(text == null ? '' : text).trim();
+  if (!text || text === '-') return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
     }
+  } catch (e) { /* نكمل للطريقة الاحتياطية */ }
+  try {
+    const temp = document.createElement('textarea');
+    temp.value = text;
+    temp.setAttribute('readonly', '');
+    temp.style.cssText = 'position:fixed; top:0; left:0; opacity:0; pointer-events:none;';
+    document.body.appendChild(temp);
+    temp.focus();
+    temp.select();
+    temp.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(temp);
+    return !!ok;
+  } catch (e) {
+    return false;
   }
 }
 
-// نسخ رقم الطلب من أي input (زي حقل رقم الطلب المعطّل في مودال المراجعة) بضغطة واحدة،
-// مع تغيير مؤقت في نص الزرار نفسه يفيد إن النسخ نجح.
-function copyOrderNumberFromInput(inputId, btnEl) {
+// زرار نسخ رقم الطلب جنب الرقم نفسه - مستخدم في كل التابات (المراجعة، الشهادات، المرفوضات، المواقف)
+function orderNoCopyHtml(orderNum) {
+  const safe = String(orderNum == null ? '' : orderNum).replace(/"/g, '&quot;');
+  if (!safe || safe === '-') return `<span>${safe || '-'}</span>`;
+  return `<span style="display:inline-flex; align-items:center; gap:6px;">
+    <span>${safe}</span>
+    <button type="button" onclick="event.stopPropagation(); copyOrderNumberCell(this)" data-ordernum="${safe}" title="نسخ رقم الطلب" style="background:none; border:none; cursor:pointer; font-size:12px; padding:2px 4px; opacity:0.7; line-height:1;">📋</button>
+  </span>`;
+}
+
+// بينسخ رقم الطلب المخزّن في data-ordernum بتاع الزرار نفسه ويوريك ✅ أو ❌ لحظة
+async function copyOrderNumberCell(btnEl) {
+  const value = btnEl.getAttribute('data-ordernum');
+  if (!value) return;
+  const original = btnEl.innerText;
+  const ok = await copyTextToClipboard(value);
+  btnEl.innerText = ok ? '✅' : '❌';
+  setTimeout(() => { btnEl.innerText = original; }, 1000);
+}
+
+// نفس الفكرة لكن بتنسخ القيمة من حقل input (زي حقل رقم الطلب جوه نافذة التعديل)
+async function copyOrderNumberFromInput(inputId, btnEl) {
   const input = document.getElementById(inputId);
   if (!input || !input.value) return;
-
-  const finish = (ok) => {
-    if (!btnEl) return;
-    const original = btnEl.innerHTML;
-    btnEl.innerHTML = ok ? '✅ اتنسخ' : '⚠️ فشل النسخ';
-    setTimeout(() => { btnEl.innerHTML = original; }, 1200);
-  };
-
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(input.value).then(() => finish(true)).catch(() => finish(false));
-  } else {
-    try {
-      input.select();
-      document.execCommand('copy');
-      finish(true);
-    } catch (e) {
-      finish(false);
-    }
-  }
+  const ok = await copyTextToClipboard(input.value);
+  if (!btnEl) return;
+  const original = btnEl.innerHTML;
+  btnEl.innerHTML = ok ? '✅ تم النسخ' : '❌ فشل النسخ';
+  setTimeout(() => { btnEl.innerHTML = original; }, 1200);
 }
 function toggleRejectionField() {
   const status = document.getElementById('modal-review-status').value;
@@ -5851,6 +5862,7 @@ async function loadCertificatesData(onProgress = null) {
     }
     certMasterData = dateRows;
     window.__certScope = 'date';
+    window.__rejectedScope = 'none';
     certDataLoaded = true;
     if (targetDate && document.getElementById('cert-date-filter')) document.getElementById('cert-date-filter').value = targetDate;
     if (targetDate) { try { localStorage.setItem('last_cert_date_' + (activeCertType || 'all'), targetDate); } catch (e) {} }
@@ -6067,6 +6079,36 @@ function filterRejectionsByMeAsLayout() {
   renderRejectionsTab();
 }
 
+// تاب المرفوضات بيقرأ من certMasterData، وده بقى بيتحمّل بتاريخ واحد بس (عشان السرعة).
+// عشان كده "عرض كل التواريخ" والبحث وتغيير التاريخ كانوا بيشوفوا التاريخ الجديد بس.
+// الحل: نجيب من السيرفر الطلبات المرفوضة بس (مش الجدول كله) من كل التواريخ، مرة واحدة، وندمجها.
+// للمراجع بنجيب مرفوضاته هو بس.
+window.__rejectedScope = 'none'; // 'none' | 'loading' | 'all' | 'error'
+let _rejectedPromise = null;
+async function ensureAllRejectedCertRows() {
+  if (window.__rejectedScope === 'all') return;
+  if (_rejectedPromise) return _rejectedPromise;
+  _rejectedPromise = (async () => {
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    const owners = currentUser ? [...new Set([currentUser.username, currentUser.name].filter(Boolean))] : [];
+    const build = (orFilter) => (q) => {
+      q = q.or(orFilter);
+      if (!isAdmin) q = q.in('reviewer', owners);
+      return q;
+    };
+    let rows;
+    try {
+      rows = await fetchAllRowsFromTable(CERT_TABLE_NAME, build('status.eq.مرفوض,was_rejected.eq.true'));
+    } catch (e) {
+      // لو عمود was_rejected مش موجود لأي سبب، نجيب الحالة الحالية "مرفوض" على الأقل
+      rows = await fetchAllRowsFromTable(CERT_TABLE_NAME, build('status.eq.مرفوض'));
+    }
+    mergeRowsIntoCertMasterData(rows);
+    window.__rejectedScope = 'all';
+  })();
+  try { await _rejectedPromise; } finally { _rejectedPromise = null; }
+}
+
 function getRejectedCertRows() {
   // بيشمل أي طلب حالته حاليًا "مرفوض"، أو اتعمله رفض قبل كده أي وقت (was_rejected) حتى لو
   // اتغيرت حالته بعدين لـ"تم الطباعة" أو أي حالة تانية - عشان يفضل ظاهر في سجل المرفوضات
@@ -6083,6 +6125,13 @@ function getRejectedCertRows() {
 let rejectionsShowAllDates = false;
 
 function applyRejectionsDateFiltering() {
+  // أول ما التاب يتفتح: نكمّل في الخلفية تحميل كل المرفوضات القديمة، وأول ما توصل نعيد الرسم
+  if (window.__rejectedScope === 'none' && certDataLoaded) {
+    window.__rejectedScope = 'loading';
+    ensureAllRejectedCertRows()
+      .then(() => applyRejectionsDateFiltering())
+      .catch(err => { console.error('فشل تحميل كل المرفوضات:', err); window.__rejectedScope = 'error'; });
+  }
   const rejected = getRejectedCertRows();
 
   if (rejected.length === 0) {
@@ -6335,7 +6384,7 @@ function renderRejectionsTab() {
       return `
         <tr>
           <td style="text-align:center;"><input type="checkbox" class="rejections-row-checkbox" value="${rejRowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleRejectionSelection('${safeRejRowKey}', this.checked)"></td>
-          <td class="order-no-cell">${orderNum}</td>
+          <td class="order-no-cell">${orderNoCopyHtml(orderNum)}</td>
           <td>${o.cert_type === 'تعمير' ? '📠 تعمير' : '🖨️ عادي'}</td>
           <td>${layout}</td>
           <td>${reviewerName}</td>
@@ -7394,7 +7443,7 @@ function renderCertTable(orders) {
         <td style="text-align:center;"><input type="checkbox" class="cert-row-checkbox" data-rowkey="${certRowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleCertRowSelect(this, '${safeCertRowKey}')"></td>
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openCertEditModal('${orderNum}')">تحديث</button></td>
         <td class="sticky-action-col">${canDelete() ? `<button class="btn-delete-row" onclick="deleteSingleCertOrder('${safeCertRowKey}')">🗑️ مسح</button>` : ''}</td>
-        <td class="order-no-cell">${orderNum}</td>
+        <td class="order-no-cell">${orderNoCopyHtml(orderNum)}</td>
         <td ${layoutClass}>${layout}</td>
         <td><span class="badge ${badgeClass}">${status}</span></td>
         <td ${dateClass}>${date}</td>
@@ -7660,6 +7709,64 @@ async function executeCertBulkTypeUpdate() {
       applyCertDateFiltering(); // الطلبات اللي اتغير نوعها هتختفي من القايمة الحالية فورًا لأنها بقت من النوع التاني
     }
   } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// نقل الطلبات المحددة في تاب الشهادات إلى جدول المواقف بحالة يختارها المستخدم.
+// بيتأكد الأول من الأرقام الموجودة بالفعل في المواقف (من السيرفر مباشرة) عشان ميكررهاش.
+// الطلبات بتفضل كمان في تاب الشهادات زي ما هي (الإضافة بس، من غير حذف).
+async function executeCertBulkMoveToMawaqef() {
+  if (!canViewMawaqef()) { alert('نقل الطلبات للمواقف متاح لأدمن المواقف فقط'); return; }
+  const statusEl = document.getElementById('cert-bulk-mawaqef-status');
+  const status = statusEl ? statusEl.value : '';
+  if (!status) { alert('برجاء اختيار حالة الموقف من القائمة'); return; }
+  if (selectedCertOrderNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetOrders = (certMasterData || []).filter(o => selectedCertOrderNumbers.has(getRowKey(o)));
+  const orderNumbers = [...new Set(targetOrders.map(o => String(o.order_number || '').trim()).filter(Boolean))];
+  if (orderNumbers.length === 0) { alert('مفيش أرقام طلبات صالحة في المحدد'); return; }
+
+  const moveBtn = document.querySelector('button[onclick="executeCertBulkMoveToMawaqef()"]');
+  const originalText = moveBtn ? moveBtn.innerText : '';
+  if (moveBtn) { moveBtn.disabled = true; moveBtn.innerText = '⏳ جاري الفحص...'; }
+
+  try {
+    // الأرقام الموجودة بالفعل في المواقف (فحص مستهدف من السيرفر، مش تحميل الجدول كله)
+    const existing = new Set();
+    for (let i = 0; i < orderNumbers.length; i += 200) {
+      const batch = orderNumbers.slice(i, i + 200);
+      const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('order_number').in('order_number', batch);
+      if (error) { alert('حصل خطأ أثناء فحص التكرار: ' + error.message); return; }
+      (data || []).forEach(r => existing.add(String(r.order_number)));
+    }
+
+    const newRows = orderNumbers
+      .filter(n => !existing.has(String(n)))
+      .map(n => ({ order_number: n, status: status, date: getTodayCairoIsoDate() }));
+    const skipped = orderNumbers.length - newRows.length;
+
+    if (newRows.length === 0) { alert('كل الطلبات المحددة موجودة بالفعل في جدول المواقف، مفيش حاجة جديدة تتضاف.'); return; }
+    if (!confirm(`هيتم نقل ${newRows.length} طلب لجدول المواقف بحالة "${status}"` +
+                 (skipped > 0 ? ` (${skipped} موجود بالفعل هيتجاهل)` : '') +
+                 `.\nالطلبات هتفضل كمان في تاب الشهادات. تأكيد؟`)) return;
+
+    if (moveBtn) moveBtn.innerText = '⏳ جاري النقل...';
+    for (const batch of chunkArray(newRows, 150)) {
+      const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).insert(batch);
+      if (error) { alert('حصل خطأ أثناء النقل: ' + error.message); return; }
+    }
+
+    alert(`تم نقل ${newRows.length} طلب بنجاح إلى تاب المواقف بحالة "${status}"!`);
+    selectedCertOrderNumbers.clear();
+    updateCertSelectedCount();
+    renderCertPage();
+    // تاب المواقف هيتحمل من جديد أول ما تفتحه
+    mawaqefDataLoaded = false;
+    window.__mawaqefScope = 'none';
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    if (moveBtn) { moveBtn.disabled = false; moveBtn.innerText = originalText; }
+  }
 }
 
 async function executeCertBulkStatusUpdate() {
@@ -8509,7 +8616,7 @@ function renderMawaqefPage() {
     return `
       <tr>
         <td><input type="checkbox" class="mawaqef-row-checkbox" value="${mawaqefRowKey}" data-ordernum="${o.order_number}" ${isChecked} onchange="toggleMawaqefSelection('${safeMawaqefRowKey}', this.checked)"></td>
-        <td class="order-no-cell">${o.order_number || '-'}</td>
+        <td class="order-no-cell">${orderNoCopyHtml(o.order_number || '-')}</td>
         <td>${o.tanzeen_number || '-'}</td>
         <td>${o.status || '-'}</td>
         <td>${o.governorate || '-'}</td>

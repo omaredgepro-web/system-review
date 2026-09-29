@@ -572,6 +572,10 @@
             </select>
             <button class="btn btn-secondary btn-sm" onclick="executeCertBulkTypeUpdate()">تطبيق النقل</button>
           </div>
+          <div class="bulk-group" id="cert-move-mawaqef-group" style="display:none;">
+            <select id="cert-bulk-mawaqef-status" class="filter-select btn-sm" style="width: 170px;"><option value="">حالة الموقف...</option></select>
+            <button class="btn btn-secondary btn-sm" onclick="executeCertBulkMoveToMawaqef()">🚚 نقل للمواقف</button>
+          </div>
           <div class="bulk-group">
             <input type="number" id="cert-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
             <button class="btn btn-secondary btn-sm" onclick="selectNextCertFromFiltered()">تحديد الأول من النتائج</button>
@@ -1411,6 +1415,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260929b"></script>
+  <script src="script.js?v=20260929c"></script>
 </body>
 </html>

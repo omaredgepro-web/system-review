@@ -5538,22 +5538,81 @@ function updatePaginationControls(from, to) {
 function changePage(direction) { currentPage += direction; renderCurrentPage(); }
 
 // ============ تاب طباعة الشهادات (أدمن فقط) ============
+// بنجيب الأحدث الأول (id تنازلي) دايمًا. فور ما نجمع كل صفوف أحدث تاريخ (أول صف بتاريخ مختلف
+// نشوفه معناه خلصنا على أحدث تاريخ)، بنعرضها فورًا من غير ما ننتظر باقي الجدول كله - فـ"أحدث
+// تاريخ" يظهر بسرعة. التحميل الكامل بيكمل في الخلفية عادي وبيحدّث العرض تاني لما يخلص، عشان
+// أي حاجة محتاجة كل البيانات (فحص التكرار، الإحصائيات، عرض تاريخ قديم) تلاقيها جاهزة.
 async function loadCertificatesData(onProgress = null) {
   document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  let allFetched = [];
+  let latestDate = null;
+  let earlyRendered = false;
+
   try {
-    // مهم: بنجيب الأحدث الأول (id تنازلي) مش الأقدم الأول. لو حصل أي مشكلة أو انقطاع أثناء
-    // الجلب (شبكة بطيئة، جدول كبير..) وبعض الصفحات ماوصلتش، أهم حاجة تفضل موجودة هي أحدث
-    // الطلبات (النهاردة)، مش القديمة - عشان "أحدث تاريخ" يتحسب صح دايمًا حتى لو الجلب اتقطع بدري.
-    const allFetched = await fetchAllRowsPaginated((from, to) =>
-      supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: false }).range(from, to)
-    , 300, onProgress);
+    let from = 0;
+    let step = 300;
+    let hasMore = true;
+
+    while (hasMore) {
+      let attemptStep = step;
+      let succeeded = false;
+
+      while (attemptStep >= 25) {
+        const { data, error } = await supabaseClient
+          .from(CERT_TABLE_NAME).select('*')
+          .order('id', { ascending: false })
+          .range(from, from + attemptStep - 1);
+
+        if (!error) {
+          if (data && data.length > 0) {
+            allFetched = allFetched.concat(data);
+            from += attemptStep;
+            if (data.length < attemptStep) hasMore = false;
+            if (onProgress) onProgress(allFetched.length);
+
+            if (!earlyRendered) {
+              for (const row of data) {
+                const d = extractDateString(row);
+                if (!d) continue;
+                if (latestDate === null) latestDate = d;
+                else if (d !== latestDate) { earlyRendered = true; break; }
+              }
+              if (earlyRendered) {
+                certMasterData = allFetched.slice();
+                populateCertLayoutFilter();
+                applyCertDateFiltering();
+              }
+            }
+          } else {
+            hasMore = false;
+          }
+          succeeded = true;
+          break;
+        }
+
+        if (error.message && error.message.toLowerCase().includes('timeout')) {
+          attemptStep = Math.floor(attemptStep / 2);
+          continue;
+        }
+        throw error;
+      }
+
+      if (!succeeded) throw new Error('فشل تحميل البيانات حتى مع تصغير حجم الدفعة كتير - جرب تاني.');
+    }
 
     certMasterData = allFetched;
     certDataLoaded = true;
     populateCertLayoutFilter();
     applyCertDateFiltering();
   } catch (err) {
-    document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    if (earlyRendered) {
+      // البيانات المعروضة دلوقتي (أحدث تاريخ) صح ومعروضة بالفعل، فمنمسحش الشاشة برسالة خطأ
+      // فوقها - بس لازم لسه نرمي الخطأ نفسه، عشان أي حاجة تانية محتاجة تتأكد إن كل التواريخ
+      // اتحمّلت (فحص تكرار، إحصائيات) متكملش شغلها على بيانات ناقصة من غير ما تعرف.
+      console.warn('فشل استكمال تحميل بيانات الطباعة كاملة:', err.message);
+    } else {
+      document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    }
     throw err;
   }
 }

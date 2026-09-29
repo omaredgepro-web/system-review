@@ -245,7 +245,9 @@ async function enforce24hCacheReset() {
 window.addEventListener('DOMContentLoaded', async () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   applyThemeIcon();
-  await enforce24hCacheReset();
+  // ⚠️ تسجيل الخروج التلقائي كل 24 ساعة اتشال بناءً على طلبك (كان بيسبب مشاكل تسجيل دخول
+  // لو فاتح الموقع في أكتر من تاب). الدوال لسه موجودة تحت لو حبيت ترجعها تاني يوم من الأيام.
+  // await enforce24hCacheReset();
 
   // دوس Enter في خانة اليوزرنيم أو الباسورد في شاشة تسجيل الدخول = تسجيل دخول مباشرة
   const loginUsernameEl = document.getElementById('login-username');
@@ -5539,8 +5541,11 @@ function changePage(direction) { currentPage += direction; renderCurrentPage(); 
 async function loadCertificatesData(onProgress = null) {
   document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
+    // مهم: بنجيب الأحدث الأول (id تنازلي) مش الأقدم الأول. لو حصل أي مشكلة أو انقطاع أثناء
+    // الجلب (شبكة بطيئة، جدول كبير..) وبعض الصفحات ماوصلتش، أهم حاجة تفضل موجودة هي أحدث
+    // الطلبات (النهاردة)، مش القديمة - عشان "أحدث تاريخ" يتحسب صح دايمًا حتى لو الجلب اتقطع بدري.
     const allFetched = await fetchAllRowsPaginated((from, to) =>
-      supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, to)
+      supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: false }).range(from, to)
     , 300, onProgress);
 
     certMasterData = allFetched;
@@ -6661,8 +6666,15 @@ function applyCertDateFiltering() {
   let targetDate = dateInput;
 
   if (!targetDate) {
-    const dates = scopedMasterData.map(extractDateString).filter(Boolean).sort().reverse();
-    targetDate = dates[0] || '';
+    // زي تاب المراجعة بالظبط: نفضّل تاريخ النهاردة الفعلي لو موجود له بيانات، قبل أي تخمين تاني
+    const todayIso = getTodayCairoIsoDate();
+    const hasToday = scopedMasterData.some(item => extractDateString(item) === todayIso);
+    if (hasToday) {
+      targetDate = todayIso;
+    } else {
+      const dates = scopedMasterData.map(extractDateString).filter(Boolean).sort().reverse();
+      targetDate = dates[0] || '';
+    }
     if (targetDate) document.getElementById('cert-date-filter').value = targetDate;
   }
 

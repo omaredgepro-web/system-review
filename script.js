@@ -1912,6 +1912,117 @@ function buildDateEqOrFilter(isoDate) {
 // تنادي ensureFullMasterData() (زي البحث برقم الطلب).
 window.__masterDataScope = 'none'; // 'none' (لسه معملش تحميل) | 'date' (تاريخ واحد بس) | 'full' (الجدول كله)
 let _fullMasterDataPromise = null;
+window.__certScope = 'none'; // نفس الفكرة لجدول الطباعة (layout): 'none' | 'date' | 'full'
+window.__mawaqefScope = 'none'; // نفس الفكرة لجدول المواقف: 'none' | 'date' | 'full'
+let _fullCertPromise = null;
+let _fullMawaqefPromise = null;
+
+function mergeRowsIntoCertMasterData(newRows) {
+  if (!newRows || newRows.length === 0) return;
+  const existingIds = new Set((certMasterData || []).map(o => o.id));
+  const toAdd = newRows.filter(o => !existingIds.has(o.id));
+  if (toAdd.length > 0) certMasterData = (certMasterData || []).concat(toAdd);
+}
+function mergeRowsIntoMawaqefMasterData(newRows) {
+  if (!newRows || newRows.length === 0) return;
+  const existingIds = new Set((mawaqefMasterData || []).map(o => o.id));
+  const toAdd = newRows.filter(o => !existingIds.has(o.id));
+  if (toAdd.length > 0) mawaqefMasterData = (mawaqefMasterData || []).concat(toAdd);
+}
+async function ensureFullCertData() {
+  if (window.__certScope === 'full') return certMasterData;
+  if (_fullCertPromise) return _fullCertPromise;
+  _fullCertPromise = (async () => {
+    const allFetched = await fetchAllRowsFromTable(CERT_TABLE_NAME);
+    certMasterData = allFetched;
+    window.__certScope = 'full';
+    certDataLoaded = true;
+    return certMasterData;
+  })();
+  try { return await _fullCertPromise; } finally { _fullCertPromise = null; }
+}
+async function ensureFullMawaqefData() {
+  if (window.__mawaqefScope === 'full') return mawaqefMasterData;
+  if (_fullMawaqefPromise) return _fullMawaqefPromise;
+  _fullMawaqefPromise = (async () => {
+    const allFetched = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME);
+    mawaqefMasterData = allFetched;
+    window.__mawaqefScope = 'full';
+    mawaqefDataLoaded = true;
+    return mawaqefMasterData;
+  })();
+  try { return await _fullMawaqefPromise; } finally { _fullMawaqefPromise = null; }
+}
+async function findLatestCertDate(certType) {
+  try {
+    let q = supabaseClient.from(CERT_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '');
+    if (certType) q = q.eq('cert_type', certType);
+    const { data, error } = await q.order('date', { ascending: false }).limit(20);
+    if (error) throw error;
+    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    if (dates[0]) return dates[0];
+  } catch (e) {}
+  try {
+    let q2 = supabaseClient.from(CERT_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '');
+    if (certType) q2 = q2.eq('cert_type', certType);
+    const { data, error } = await q2.order('id', { ascending: false }).limit(300);
+    if (error) throw error;
+    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    return dates[0] || '';
+  } catch (e) { return ''; }
+}
+async function findLatestMawaqefDate() {
+  try {
+    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').order('date', { ascending: false }).limit(20);
+    if (error) throw error;
+    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    if (dates[0]) return dates[0];
+  } catch (e) {}
+  try {
+    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').order('id', { ascending: false }).limit(300);
+    if (error) throw error;
+    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    return dates[0] || '';
+  } catch (e) { return ''; }
+}
+async function searchCertAcrossAllDates(searchValue, certType) {
+  let q = supabaseClient.from(CERT_TABLE_NAME).select('*').ilike('order_number', `%${searchValue}%`).order('id', { ascending: false }).limit(300);
+  if (certType) q = q.eq('cert_type', certType);
+  const { data, error } = await q;
+  if (error) throw error;
+  mergeRowsIntoCertMasterData(data || []);
+}
+async function searchMawaqefAcrossAllDates(searchValue) {
+  const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').or(`order_number.ilike.%${searchValue}%,tanzeen_number.ilike.%${searchValue}%`).order('id', { ascending: false }).limit(300);
+  if (error) throw error;
+  mergeRowsIntoMawaqefMasterData(data || []);
+}
+async function fetchCertRowsByOrderNumbers(orderNumbers) {
+  const uniq = [...new Set((orderNumbers || []).filter(Boolean).map(String))];
+  if (uniq.length === 0) return [];
+  let out = [];
+  for (let i = 0; i < uniq.length; i += 200) {
+    const batch = uniq.slice(i, i + 200);
+    const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').in('order_number', batch);
+    if (error) throw error;
+    if (data) out = out.concat(data);
+  }
+  mergeRowsIntoCertMasterData(out);
+  return out;
+}
+async function fetchMawaqefRowsByOrderNumbers(orderNumbers) {
+  const uniq = [...new Set((orderNumbers || []).filter(Boolean).map(String))];
+  if (uniq.length === 0) return [];
+  let out = [];
+  for (let i = 0; i < uniq.length; i += 200) {
+    const batch = uniq.slice(i, i + 200);
+    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').in('order_number', batch);
+    if (error) throw error;
+    if (data) out = out.concat(data);
+  }
+  mergeRowsIntoMawaqefMasterData(out);
+  return out;
+}
 
 // بيجيب من قاعدة البيانات بس الصفوف اللي رقم الطلب بتاعها موجود ضمن قائمة أرقام محددة (مش الجدول
 // كله) - مفيدة جدًا لأي عملية بتحتاج تتأكد من عدم تكرار عدد محدود من الأرقام (زي الإضافة السريعة،
@@ -3525,7 +3636,7 @@ function submitQuickPrintOrders(forceCertType) {
 
 // بيدور على أي رقم من parsedPrintOrderNumbers الحالية موجود بالفعل قبل كده في جدول الطباعة (certMasterData)،
 // بغض النظر عن تاريخه أو نوعه، ويعرضهم في لوحة تحذير مع تفاصيل حالتهم/مسؤولهم/نوعهم الحاليين.
-function renderPrintDuplicatesPanel() {
+async function renderPrintDuplicatesPanel() {
   const area = document.getElementById('print-duplicates-area');
   const container = document.getElementById('print-duplicates-panel');
   if (!area || !container) return;
@@ -3536,6 +3647,8 @@ function renderPrintDuplicatesPanel() {
     window.lastPrintDupNums = [];
     return;
   }
+  // فحص سريع عبر السيرفر بس للأرقام المرفوعة حاليًا (بدل تحميل الجدول كله)
+  try { await fetchCertRowsByOrderNumbers(parsedPrintOrderNumbers); } catch (e) { console.warn('فحص تكرار الطباعة:', e.message); }
 
   const existingMap = {};
   (certMasterData || []).forEach(o => { existingMap[String(o.order_number)] = o; });
@@ -3867,9 +3980,10 @@ async function uploadPrintOrdersToSupabase() {
   btn.disabled = true;
 
   try {
-    // فحص التكرار: نفصل الأرقام الجديدة تمامًا عن أي رقم موجود بالفعل، ولو فيه تكرار
-    // نوضحله بتاريخ كل نسخة موجودة ونسأله هل يسمح بإضافته كنسخة زيادة ولا يتجاهله
-    if (!certDataLoaded) await loadCertificatesData();
+    // فحص التكرار: نجيب بس الصفوف اللي أرقامها مطابقة للأرقام المطلوب رفعها (سريع)،
+    // بدل تحميل الجدول كله - ثم نفصل الجديد عن المكرر
+    btn.innerText = 'جاري فحص التكرار...';
+    try { await fetchCertRowsByOrderNumbers(parsedPrintOrderNumbers); } catch (e) { console.warn('فحص التكرار:', e.message); }
     const certTypeForBatch = document.getElementById('print-cert-type-select').value || 'عادي';
     const { fresh, allowedDuplicates, skippedCount } = checkForDuplicatesAndConfirm(parsedPrintOrderNumbers);
 
@@ -3926,6 +4040,7 @@ async function uploadPrintOrdersToSupabase() {
     }
 
     certDataLoaded = false;
+    window.__certScope = 'none';
     await loadCertificatesData();
     switchTab(certTypeForBatch === 'تعمير' ? 'certificates-renovation' : 'certificates');
   } catch (err) {
@@ -5538,81 +5653,43 @@ function updatePaginationControls(from, to) {
 function changePage(direction) { currentPage += direction; renderCurrentPage(); }
 
 // ============ تاب طباعة الشهادات (أدمن فقط) ============
-// بنجيب الأحدث الأول (id تنازلي) دايمًا. فور ما نجمع كل صفوف أحدث تاريخ (أول صف بتاريخ مختلف
-// نشوفه معناه خلصنا على أحدث تاريخ)، بنعرضها فورًا من غير ما ننتظر باقي الجدول كله - فـ"أحدث
-// تاريخ" يظهر بسرعة. التحميل الكامل بيكمل في الخلفية عادي وبيحدّث العرض تاني لما يخلص، عشان
-// أي حاجة محتاجة كل البيانات (فحص التكرار، الإحصائيات، عرض تاريخ قديم) تلاقيها جاهزة.
+// تحميل ذكي: أحدث تاريخ فقط بسرعة (استعلام مفلتر)، وباقي التواريخ عند الطلب فقط.
+// ده نفس أسلوب لوحة المراجعة الرئيسية - بيخلي أحدث تاريخ يظهر فورًا، وأي تاريخ تاني
+// يتحمّل لوحده بسرعة بدل ما نجيب الجدول كله كل مرة.
 async function loadCertificatesData(onProgress = null) {
-  document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
-  let allFetched = [];
-  let latestDate = null;
-  let earlyRendered = false;
-
+  const tbody = document.getElementById('cert-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
-    let from = 0;
-    let step = 300;
-    let hasMore = true;
-
-    while (hasMore) {
-      let attemptStep = step;
-      let succeeded = false;
-
-      while (attemptStep >= 25) {
-        const { data, error } = await supabaseClient
-          .from(CERT_TABLE_NAME).select('*')
-          .order('id', { ascending: false })
-          .range(from, from + attemptStep - 1);
-
-        if (!error) {
-          if (data && data.length > 0) {
-            allFetched = allFetched.concat(data);
-            from += attemptStep;
-            if (data.length < attemptStep) hasMore = false;
-            if (onProgress) onProgress(allFetched.length);
-
-            if (!earlyRendered) {
-              for (const row of data) {
-                const d = extractDateString(row);
-                if (!d) continue;
-                if (latestDate === null) latestDate = d;
-                else if (d !== latestDate) { earlyRendered = true; break; }
-              }
-              if (earlyRendered) {
-                certMasterData = allFetched.slice();
-                populateCertLayoutFilter();
-                applyCertDateFiltering();
-              }
-            }
-          } else {
-            hasMore = false;
-          }
-          succeeded = true;
-          break;
-        }
-
-        if (error.message && error.message.toLowerCase().includes('timeout')) {
-          attemptStep = Math.floor(attemptStep / 2);
-          continue;
-        }
-        throw error;
-      }
-
-      if (!succeeded) throw new Error('فشل تحميل البيانات حتى مع تصغير حجم الدفعة كتير - جرب تاني.');
+    let targetDate = document.getElementById('cert-date-filter') ? document.getElementById('cert-date-filter').value : '';
+    if (!targetDate) targetDate = await findLatestCertDate(activeCertType);
+    // fallback: لو النوع الحالي مفيهوش تاريخ (نوع جديد)، جرّب أحدث تاريخ عام
+    if (!targetDate) targetDate = await findLatestCertDate(null);
+    let dateRows = [];
+    if (targetDate) {
+      dateRows = await fetchAllRowsFromTable(CERT_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      if (onProgress) onProgress(dateRows.length);
     }
-
-    certMasterData = allFetched;
+    if (dateRows.length === 0) {
+      certMasterData = [];
+      certAllData = [];
+      window.__certScope = 'date';
+      certDataLoaded = true;
+      populateCertLayoutFilter();
+      const msg = targetDate ? `لا توجد بيانات لتاريخ ${targetDate}` : 'لا توجد بيانات متاحة';
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">${msg}</td></tr>`;
+      const lbl = document.getElementById('cert-active-date-label');
+      if (lbl) lbl.innerText = targetDate ? `يعرض شهادات تاريخ: ${targetDate}` : 'لا يوجد بيانات';
+      renderCertKpis([]);
+      return;
+    }
+    certMasterData = dateRows;
+    window.__certScope = 'date';
     certDataLoaded = true;
+    if (targetDate && document.getElementById('cert-date-filter')) document.getElementById('cert-date-filter').value = targetDate;
     populateCertLayoutFilter();
     applyCertDateFiltering();
   } catch (err) {
-    if (earlyRendered) {
-      // البيانات المعروضة دلوقتي (أحدث تاريخ) صح ومعروضة بالفعل، فمنمسحش الشاشة برسالة خطأ
-      // فوقها - بس لازم لسه نرمي الخطأ نفسه، عشان أي حاجة تانية محتاجة تتأكد إن كل التواريخ
-      // اتحمّلت (فحص تكرار، إحصائيات) متكملش شغلها على بيانات ناقصة من غير ما تعرف.
-      console.warn('فشل استكمال تحميل بيانات الطباعة كاملة:', err.message);
-    } else {
-      document.getElementById('cert-tbody').innerHTML = `<tr><td colspan="8" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
-    }
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
     throw err;
   }
 }
@@ -5625,6 +5702,7 @@ async function refreshCertDashboardData() {
 
   try {
     certDataLoaded = false;
+    window.__certScope = 'none';
     await loadCertificatesData();
   } catch (err) {
     alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
@@ -5661,12 +5739,10 @@ async function auditCertDuplicates() {
   if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري الفحص... (0 صف)'; }
 
   try {
-    // بيجيب أحدث نسخة من الداتابيز فعليًا وقت الفحص، مش بس يعتمد على النسخة المخزنة عندك محليًا.
-    // بنحدّث نص الزرار كل ما صف جديد يوصل، عشان تتأكد إنها فعلاً شغالة مش واقفة. ولو عدّت دقيقتين
-    // من غير ما تخلص، بتوقف نفسها وتديك رسالة واضحة بدل ما تفضل معلّقة للأبد.
-    certDataLoaded = false;
+    // فحص التكرار محتاج الجدول كله - بنجيبه مرة واحدة فقط عند الطلب
+    if (btn) btn.innerText = '⏳ جاري تحميل كل البيانات للفحص...';
     await withTimeout(
-      loadCertificatesData((count) => { if (btn) btn.innerText = `⏳ جاري الفحص... (${count} صف)`; }),
+      ensureFullCertData(),
       120000,
       'الفحص ياخد وقت أطول من المتوقع (أكتر من دقيقتين) - غالبًا في مشكلة في الاتصال بالإنترنت أو بقاعدة البيانات. جرب تاني أو تأكد من اتصالك بالنت.'
     );
@@ -6754,12 +6830,18 @@ function updateShowAllCertDatesBtnLabel() {
   if (btn) btn.innerText = showAllCertDates ? '📅 عرض تاريخ واحد بس' : '📅 عرض كل التواريخ';
 }
 
-function toggleShowAllCertDates() {
+async function toggleShowAllCertDates() {
   showAllCertDates = !showAllCertDates;
   updateShowAllCertDatesBtnLabel();
   certCurrentPage = 1;
   selectedCertOrderNumbers.clear();
   updateCertSelectedCount();
+  if (showAllCertDates && window.__certScope !== 'full') {
+    const tbody = document.getElementById('cert-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل كل التواريخ...</td></tr>`;
+    try { await ensureFullCertData(); populateCertLayoutFilter(); }
+    catch (err) { if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
+  }
   applyCertDateFiltering();
 }
 
@@ -6828,9 +6910,8 @@ async function processCertMultiSelectFile(file) {
   }
 }
 
-// بيدور على أرقام الطلبات (من المربع + الملف) داخل التاريخ المعروض حاليًا بس، ويحددهم تلقائيًا (checkboxes)
-// من غير ما يعمل أي Sort أو تغيير في ترتيب الجدول نفسه.
-function verifyAndSelectCertOrders() {
+// بيدور على أرقام الطلبات (من المربع + الملف) في كل التواريخ عبر السيرفر، ويحددهم تلقائيًا
+async function verifyAndSelectCertOrders() {
   const textValue = document.getElementById('cert-multiselect-textarea').value;
   const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
   const combined = [...new Set([...fromText, ...certMultiSelectFileRows])];
@@ -6839,6 +6920,10 @@ function verifyAndSelectCertOrders() {
     alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
     return;
   }
+  const resultsEl0 = document.getElementById('cert-multiselect-results');
+  if (resultsEl0) resultsEl0.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث في كل التواريخ...</p>`;
+  try { await fetchCertRowsByOrderNumbers(combined); }
+  catch (err) { alert('تعذّر البحث: ' + err.message); return; }
 
   if (!certMasterData || certMasterData.length === 0) {
     alert('لا يوجد بيانات محمّلة حاليًا.');
@@ -6904,8 +6989,31 @@ function verifyAndSelectCertOrders() {
   resultsEl.innerHTML = html;
 }
 
-function onCertDateFilterChange() { showAllCertDates = false; updateShowAllCertDatesBtnLabel(); certCurrentPage = 1; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
-function resetCertDateToLatest() { showAllCertDates = false; updateShowAllCertDatesBtnLabel(); document.getElementById('cert-date-filter').value = ''; selectedCertOrderNumbers.clear(); updateCertSelectedCount(); applyCertDateFiltering(); }
+async function onCertDateFilterChange() {
+  showAllCertDates = false; updateShowAllCertDatesBtnLabel(); certCurrentPage = 1;
+  selectedCertOrderNumbers.clear(); updateCertSelectedCount();
+  const targetDate = document.getElementById('cert-date-filter').value;
+  // لو التاريخ المطلوب مش متحمل عندنا، نجيب بس صفوفه من السيرفر (سريع) بدل الجدول كله
+  if (targetDate && !(certMasterData || []).some(o => extractDateString(o) === targetDate)) {
+    const tbody = document.getElementById('cert-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
+    try {
+      const dateRows = await fetchAllRowsFromTable(CERT_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      mergeRowsIntoCertMasterData(dateRows);
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      return;
+    }
+  }
+  applyCertDateFiltering();
+}
+async function resetCertDateToLatest() {
+  showAllCertDates = false; updateShowAllCertDatesBtnLabel(); document.getElementById('cert-date-filter').value = '';
+  selectedCertOrderNumbers.clear(); updateCertSelectedCount();
+  // لو لسه محملناش أي بيانات (أو البيانات الحالية فاضية)، نجيب أحدث تاريخ بسرعة
+  if (!certMasterData || certMasterData.length === 0) { await loadCertificatesData(); return; }
+  applyCertDateFiltering();
+}
 
 // بيحدد فلتر "المسؤول" على اسم المستخدم الحالي (لو موجود ضمن الخيارات)، عشان أول ما يفتح
 // التاب يشوف طلباته هو بس بشكل افتراضي. لو مش موجود لأي سبب (مثلاً مش من ضمن الأدمنز)، يفضل "الكل".
@@ -7590,9 +7698,44 @@ function exportUnassignedCertOrders() {
   XLSX.writeFile(workbook, `طلبات_غير_موزعة_${dateLabel}.xlsx`);
 }
 
-document.getElementById('cert-search-input').addEventListener('input', () => { certCurrentPage = 1; renderCertPage(); });
+let _certSearchDebounceTimer = null;
+document.getElementById('cert-search-input').addEventListener('input', () => {
+  certCurrentPage = 1;
+  const searchValue = document.getElementById('cert-search-input').value.trim();
+  if (_certSearchDebounceTimer) clearTimeout(_certSearchDebounceTimer);
+  if (!searchValue) { renderCertPage(); return; }
+  const tbody = document.getElementById('cert-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري البحث...</td></tr>`;
+  _certSearchDebounceTimer = setTimeout(async () => {
+    const stillSame = () => document.getElementById('cert-search-input').value.trim() === searchValue;
+    try { await searchCertAcrossAllDates(searchValue, activeCertType); }
+    catch (err) { if (stillSame() && tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
+    if (stillSame()) renderCertPage();
+  }, 400);
+});
 document.getElementById('cert-status-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 document.getElementById('cert-layout-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
+// بحث المواقف عبر السيرفر (رقم الطلب أو رقم التقنين) - سريع حتى مع الجداول الكبيرة
+let _mawaqefSearchDebounceTimer = null;
+(function attachMawaqefSearch() {
+  const inp = document.getElementById('mawaqef-search-input');
+  if (!inp) return;
+  inp.addEventListener('input', () => {
+    mawaqefCurrentPage = 1;
+    const v = inp.value.trim();
+    if (_mawaqefSearchDebounceTimer) clearTimeout(_mawaqefSearchDebounceTimer);
+    if (!v) { renderMawaqefPage(); return; }
+    _mawaqefSearchDebounceTimer = setTimeout(async () => {
+      if (document.getElementById('mawaqef-search-input').value.trim() !== v) return;
+      const tbody = document.getElementById('mawaqef-tbody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري البحث...</td></tr>`;
+      try { await searchMawaqefAcrossAllDates(v); }
+      catch (err) { if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
+      if (document.getElementById('mawaqef-search-input').value.trim() !== v) return;
+      renderMawaqefPage();
+    }, 400);
+  });
+})();
 
 // البحث برقم الطلب بيدور عبر كل التواريخ (مش بس التاريخ المعروض). بدل ما نحمّل الجدول كله في
 // المتصفح (كان بياخد وقت طويل جدًا مع الجداول الكبيرة)، بنستنى المستخدم يوقف عن الكتابة شوية
@@ -7757,19 +7900,39 @@ function exportMyOrdersToExcel() {
 
 async function loadMawaqefData() {
   const tbody = document.getElementById('mawaqef-tbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
-
+  if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
-    const allFetched = await fetchAllRowsPaginated((from, to) =>
-      supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, to)
-    );
-
-    mawaqefMasterData = allFetched;
+    let targetDate = document.getElementById('mawaqef-date-filter') ? document.getElementById('mawaqef-date-filter').value : '';
+    if (!targetDate) targetDate = await findLatestMawaqefDate();
+    let dateRows = [];
+    if (targetDate) {
+      dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+    } else {
+      // لو الجدول فاضي تمامًا من التواريخ، هات أول 300 صف عشان الشاشة متفضلش فاضية بسبب فلتر التاريخ
+      dateRows = await fetchAllRowsPaginated((from, to) => supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: false }).range(from, to), 300);
+      // اقطع بعد أول دفعة فقط للعرض الأولي السريع
+      dateRows = (dateRows || []).slice(0, 300);
+    }
+    if (dateRows.length === 0) {
+      mawaqefMasterData = [];
+      mawaqefAllData = [];
+      window.__mawaqefScope = 'date';
+      mawaqefDataLoaded = true;
+      populateMawaqefStatusFilter();
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">${targetDate ? `لا توجد بيانات لتاريخ ${targetDate}` : 'لا توجد بيانات متاحة'}</td></tr>`;
+      const lbl = document.getElementById('mawaqef-active-date-label');
+      if (lbl) lbl.innerText = targetDate ? `يعرض مواقف تاريخ: ${targetDate}` : 'لا يوجد بيانات';
+      renderMawaqefKpis([]);
+      return;
+    }
+    mawaqefMasterData = dateRows;
+    window.__mawaqefScope = 'date';
     mawaqefDataLoaded = true;
+    if (targetDate && document.getElementById('mawaqef-date-filter')) document.getElementById('mawaqef-date-filter').value = targetDate;
     populateMawaqefStatusFilter();
     applyMawaqefDateFiltering();
   } catch (err) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}<br><button class="btn btn-secondary" style="margin-top:8px;" onclick="loadMawaqefData()">🔄 إعادة المحاولة</button></td></tr>`;
   }
 }
 
@@ -7779,6 +7942,7 @@ async function refreshMawaqefData() {
   if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحديث...'; }
   try {
     mawaqefDataLoaded = false;
+    window.__mawaqefScope = 'none';
     await loadMawaqefData();
   } catch (err) {
     alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
@@ -7860,9 +8024,8 @@ async function processMawaqefMultiSelectFile(file) {
   }
 }
 
-// بيدور على أرقام الطلبات (من المربع + الملف) في كل التواريخ، ويحددهم تلقائيًا (checkboxes)
-// من غير ما يعمل أي Sort أو تغيير في ترتيب الجدول نفسه.
-function verifyAndSelectMawaqefOrders() {
+// بيدور على أرقام الطلبات (من المربع + الملف) في كل التواريخ عبر السيرفر، ويحددهم تلقائيًا
+async function verifyAndSelectMawaqefOrders() {
   const textValue = document.getElementById('mawaqef-multiselect-textarea').value;
   const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
   const combined = [...new Set([...fromText, ...mawaqefMultiSelectFileRows])];
@@ -7871,6 +8034,10 @@ function verifyAndSelectMawaqefOrders() {
     alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
     return;
   }
+  const resEl = document.getElementById('mawaqef-multiselect-results');
+  if (resEl) resEl.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث في كل التواريخ...</p>`;
+  try { await fetchMawaqefRowsByOrderNumbers(combined); }
+  catch (err) { alert('تعذّر البحث: ' + err.message); return; }
 
   if (!mawaqefMasterData || mawaqefMasterData.length === 0) {
     alert('لا يوجد بيانات محمّلة حاليًا.');
@@ -7929,7 +8096,21 @@ function verifyAndSelectMawaqefOrders() {
   resultsEl.innerHTML = html;
 }
 
-function applyMawaqefDateFiltering() {
+async function applyMawaqefDateFiltering() {
+  const targetDate = document.getElementById('mawaqef-date-filter') ? document.getElementById('mawaqef-date-filter').value : '';
+  // لو المستخدم اختار تاريخ مش متحمل عندنا، نجيب بس صفوفه من السيرفر (سريع) بدل الجدول كله
+  if (targetDate && !(mawaqefMasterData || []).some(o => extractDateString(o) === targetDate)) {
+    const tbody = document.getElementById('mawaqef-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
+    try {
+      const dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      mergeRowsIntoMawaqefMasterData(dateRows);
+      populateMawaqefStatusFilter();
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      return;
+    }
+  }
   if (!mawaqefMasterData || mawaqefMasterData.length === 0) {
     mawaqefAllData = [];
     renderMawaqefKpis([]);
@@ -7938,27 +8119,36 @@ function applyMawaqefDateFiltering() {
     if (label) label.innerText = 'لا يوجد بيانات';
     return;
   }
-
-  const targetDate = document.getElementById('mawaqef-date-filter').value;
-
-  // من غير ما يحدد تاريخ بنفسه، نعرض كل المواقف بكل التواريخ (مش بس أحدث تاريخ زي قبل كده)
-  mawaqefAllData = targetDate
-    ? mawaqefMasterData.filter(item => { const d = extractDateString(item); return d === targetDate || !d; })
+  // الافتراضي: أحدث تاريخ فقط (سريع). "عرض كل التواريخ" بزر مخصص بيحمّل الكل عند الطلب.
+  let effectiveDate = targetDate;
+  if (!effectiveDate) {
+    const dates = mawaqefMasterData.map(extractDateString).filter(Boolean).sort().reverse();
+    effectiveDate = dates[0] || '';
+    if (effectiveDate && document.getElementById('mawaqef-date-filter')) document.getElementById('mawaqef-date-filter').value = effectiveDate;
+  }
+  mawaqefAllData = effectiveDate
+    ? mawaqefMasterData.filter(item => { const d = extractDateString(item); return d === effectiveDate || !d; })
     : mawaqefMasterData;
 
   const label = document.getElementById('mawaqef-active-date-label');
-  if (label) label.innerText = targetDate ? `يعرض مواقف تاريخ: ${targetDate}` : 'عرض كل التواريخ';
+  if (label) label.innerText = effectiveDate ? `يعرض مواقف تاريخ: ${effectiveDate}` : 'عرض كل التواريخ';
 
   renderMawaqefKpis(mawaqefAllData);
   mawaqefCurrentPage = 1;
   renderMawaqefPage();
 }
 
-function showAllMawaqefDates() {
+async function showAllMawaqefDates() {
   document.getElementById('mawaqef-date-filter').value = '';
+  if (window.__mawaqefScope !== 'full') {
+    const tbody = document.getElementById('mawaqef-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل كل التواريخ...</td></tr>`;
+    try { await ensureFullMawaqefData(); populateMawaqefStatusFilter(); }
+    catch (err) { if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
+  }
   mawaqefAllData = mawaqefMasterData || [];
   const label = document.getElementById('mawaqef-active-date-label');
-  if (label) label.innerText = 'عرض كل التواريخ';
+  if (label) label.innerText = `عرض كل التواريخ (${mawaqefAllData.length} موقف)`;
   renderMawaqefKpis(mawaqefAllData);
   mawaqefCurrentPage = 1;
   renderMawaqefPage();
@@ -8063,7 +8253,8 @@ function getFilteredMawaqefRows() {
   const searchValue = (document.getElementById('mawaqef-search-input').value || '').trim().toLowerCase();
   const statusValue = document.getElementById('mawaqef-status-filter').value;
 
-  let rows = mawaqefAllData || [];
+  // لو فيه بحث، ندور في كل البيانات المحملة (كل التواريخ المدمجة من السيرفر) مش بس التاريخ المعروض
+  let rows = searchValue ? (mawaqefMasterData || []) : (mawaqefAllData || []);
   if (statusValue && statusValue !== 'ALL') rows = rows.filter(o => o.status === statusValue);
   if (searchValue) {
     rows = rows.filter(o =>

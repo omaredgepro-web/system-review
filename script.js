@@ -1846,7 +1846,7 @@ function parseToIsoDate(dateStr) {
     }
   }
 
-  const cleanStr = strVal.split(' ')[0];
+  const cleanStr = strVal.split(' ')[0].split('T')[0];
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleanStr)) return cleanStr;
   return '';
 }
@@ -1929,11 +1929,23 @@ function mergeRowsIntoMawaqefMasterData(newRows) {
   const toAdd = newRows.filter(o => !existingIds.has(o.id));
   if (toAdd.length > 0) mawaqefMasterData = (mawaqefMasterData || []).concat(toAdd);
 }
-async function ensureFullCertData() {
+async function ensureFullCertData(onProgress = null) {
   if (window.__certScope === 'full') return certMasterData;
   if (_fullCertPromise) return _fullCertPromise;
   _fullCertPromise = (async () => {
-    const allFetched = await fetchAllRowsFromTable(CERT_TABLE_NAME);
+    let allFetched = [];
+    // دفعات صغيرة (200) عشان offset الكبير ميعملش timeout في Supabase مع الجداول الكبيرة
+    const step = 200;
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      allFetched = allFetched.concat(data);
+      from += step;
+      if (onProgress) onProgress(allFetched.length);
+      if (data.length < step) break;
+    }
     certMasterData = allFetched;
     window.__certScope = 'full';
     certDataLoaded = true;
@@ -1941,11 +1953,22 @@ async function ensureFullCertData() {
   })();
   try { return await _fullCertPromise; } finally { _fullCertPromise = null; }
 }
-async function ensureFullMawaqefData() {
+async function ensureFullMawaqefData(onProgress = null) {
   if (window.__mawaqefScope === 'full') return mawaqefMasterData;
   if (_fullMawaqefPromise) return _fullMawaqefPromise;
   _fullMawaqefPromise = (async () => {
-    const allFetched = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME);
+    let allFetched = [];
+    const step = 200;
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: true }).range(from, from + step - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      allFetched = allFetched.concat(data);
+      from += step;
+      if (onProgress) onProgress(allFetched.length);
+      if (data.length < step) break;
+    }
     mawaqefMasterData = allFetched;
     window.__mawaqefScope = 'full';
     mawaqefDataLoaded = true;
@@ -1973,15 +1996,15 @@ async function findLatestCertDate(certType) {
 }
 async function findLatestMawaqefDate() {
   try {
-    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').order('date', { ascending: false }).limit(20);
+    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date,created_at').order('date', { ascending: false }).limit(20);
     if (error) throw error;
-    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    const dates = (data || []).map(r => parseToIsoDate(r.date || r.created_at)).filter(Boolean).sort().reverse();
     if (dates[0]) return dates[0];
   } catch (e) {}
   try {
-    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').order('id', { ascending: false }).limit(300);
+    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('date,created_at').order('id', { ascending: false }).limit(300);
     if (error) throw error;
-    const dates = (data || []).map(r => parseToIsoDate(r.date)).filter(Boolean).sort().reverse();
+    const dates = (data || []).map(r => parseToIsoDate(r.date || r.created_at)).filter(Boolean).sort().reverse();
     return dates[0] || '';
   } catch (e) { return ''; }
 }
@@ -6790,7 +6813,7 @@ function applyCertDateFiltering() {
 
   if (showAllCertDates) {
     certAllData = scopedMasterData;
-    document.getElementById('cert-active-date-label').innerText = `يعرض كل التواريخ (${certAllData.length} طلب)`;
+    document.getElementById('cert-active-date-label').innerText = `يعرض كل التواريخ للنوع "${activeCertType}" (${certAllData.length.toLocaleString('ar-EG')} طلب من أصل ${(certMasterData || []).length.toLocaleString('ar-EG')} في الجدول كله)`;
     certTotalRecordsCount = certAllData.length;
     renderCertKpis(certAllData);
     renderCertPage();
@@ -6838,9 +6861,18 @@ async function toggleShowAllCertDates() {
   updateCertSelectedCount();
   if (showAllCertDates && window.__certScope !== 'full') {
     const tbody = document.getElementById('cert-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل كل التواريخ...</td></tr>`;
-    try { await ensureFullCertData(); populateCertLayoutFilter(); }
+    const btn = document.getElementById('cert-view-all-dates-btn');
+    const origBtn = btn ? btn.innerText : '';
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل كل التواريخ... (0)</td></tr>`;
+    try {
+      await ensureFullCertData((n) => {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل كل التواريخ... (${n.toLocaleString('ar-EG')})</td></tr>`;
+        if (btn) btn.innerText = `⏳ جاري التحميل... (${n.toLocaleString('ar-EG')})`;
+      });
+      populateCertLayoutFilter();
+    }
     catch (err) { if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
+    finally { if (btn) btn.innerText = origBtn; updateShowAllCertDatesBtnLabel(); }
   }
   applyCertDateFiltering();
 }
@@ -7906,14 +7938,37 @@ async function loadMawaqefData() {
     if (!targetDate) targetDate = await findLatestMawaqefDate();
     let dateRows = [];
     if (targetDate) {
-      dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      try {
+        dateRows = await fetchAllRowsFromTable(MAWAQEF_TABLE_NAME, q => q.or(buildDateEqOrFilter(targetDate)));
+      } catch (e) {
+        // لو فلتر التاريخ فشل (مثلا عمود date بصيغة مختلفة)، جرّب مطابقة مباشرة بسيطة
+        const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').eq('date', targetDate).limit(1000);
+        if (!error) dateRows = data || [];
+        else throw e;
+      }
     } else {
-      // لو الجدول فاضي تمامًا من التواريخ، هات أول 300 صف عشان الشاشة متفضلش فاضية بسبب فلتر التاريخ
       dateRows = await fetchAllRowsPaginated((from, to) => supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: false }).range(from, to), 300);
-      // اقطع بعد أول دفعة فقط للعرض الأولي السريع
       dateRows = (dateRows || []).slice(0, 300);
     }
+    // لو فلتر التاريخ رجّع صفر رغم إن الجدول فيه داتا (صيغة تاريخ مختلفة / created_at)،
+    // اعرض أحدث 500 صف مباشرة بدل ما الشاشة تفضل فاضية وتوحي إن مفيش اتصال
     if (dateRows.length === 0) {
+      try {
+        const { data } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('*').order('id', { ascending: false }).limit(500);
+        if (data && data.length > 0) {
+          mawaqefMasterData = data;
+          mawaqefAllData = data;
+          window.__mawaqefScope = 'date';
+          mawaqefDataLoaded = true;
+          populateMawaqefStatusFilter();
+          const lbl2 = document.getElementById('mawaqef-active-date-label');
+          if (lbl2) lbl2.innerText = `يعرض أحدث ${data.length} موقف (تعذّرت الفلترة بالتاريخ - اختر تاريخًا أو اعرض الكل)`;
+          renderMawaqefKpis(mawaqefAllData);
+          mawaqefCurrentPage = 1;
+          renderMawaqefPage();
+          return;
+        }
+      } catch (e) {}
       mawaqefMasterData = [];
       mawaqefAllData = [];
       window.__mawaqefScope = 'date';
@@ -8142,8 +8197,8 @@ async function showAllMawaqefDates() {
   document.getElementById('mawaqef-date-filter').value = '';
   if (window.__mawaqefScope !== 'full') {
     const tbody = document.getElementById('mawaqef-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل كل التواريخ...</td></tr>`;
-    try { await ensureFullMawaqefData(); populateMawaqefStatusFilter(); }
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل كل التواريخ... (0)</td></tr>`;
+    try { await ensureFullMawaqefData((n) => { if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل كل التواريخ... (${n.toLocaleString('ar-EG')})</td></tr>`; }); populateMawaqefStatusFilter(); }
     catch (err) { if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
   }
   mawaqefAllData = mawaqefMasterData || [];

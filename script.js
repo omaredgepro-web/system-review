@@ -199,8 +199,24 @@ function isLoginExpired() {
   if (!loginTime) return false;
   return (Date.now() - loginTime > SESSION_TTL_MS);
 }
+// بيمنع أكتر من تاب مفتوح في نفس اللحظة من عمل تصفير 24 ساعة مع بعض (ده اللي كان بيسبب
+// طلبات refresh_token كتير في نفس الثانية وبيخلي Supabase يوقفهم بخطأ 429 Too Many Requests)
 async function clearAppCacheAndReload() {
+  const LOCK_KEY = 'app_cache_reset_lock';
+  const now = Date.now();
+  const existingLock = parseInt(localStorage.getItem(LOCK_KEY) || '0', 10);
+
+  // لو تاب تاني بدأ نفس العملية من أقل من 5 ثواني، سيبه هو يخلص وانتظر بس (منعمل نفس الحاجة مرتين)
+  if (existingLock && (now - existingLock < 5000)) {
+    setTimeout(() => location.reload(), 1500);
+    return;
+  }
+  localStorage.setItem(LOCK_KEY, String(now));
+
   const theme = localStorage.getItem('app_theme');
+  // نسجل خروج الأول (وقت ما الجلسة لسه موجودة في الذاكرة)، وبعدين نمسح التخزين المحلي -
+  // الترتيب العكسي كان بيخلي أي تاب تاني يحاول يستخدم توكن اتمسح بالفعل، فيفشل ويحاول تاني بسرعة
+  try { await supabaseClient.auth.signOut(); } catch (e) {}
   try {
     localStorage.clear();
     sessionStorage.clear();
@@ -215,7 +231,6 @@ async function clearAppCacheAndReload() {
     }
   } catch (e) {}
   localStorage.setItem('app_cached_at', String(Date.now()));
-  try { await supabaseClient.auth.signOut(); } catch (e) {}
   location.href = location.pathname + '?fresh=' + Date.now();
 }
 async function enforce24hCacheReset() {

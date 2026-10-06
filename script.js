@@ -9694,6 +9694,21 @@ function populateReadyDropdowns() {
       ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
     reviewerFilter.value = [...reviewerFilter.options].some(o => o.value === curRF) ? curRF : 'ALL';
   }
+  // قوايم التغيير الجماعي: المسؤول (أدمن بس) + المراجع (الكل) — مع الحفاظ على الاختيار الحالي
+  const bulkLayoutSel = document.getElementById('ready-bulk-layout-select');
+  if (bulkLayoutSel) {
+    const curBL = bulkLayoutSel.value;
+    bulkLayoutSel.innerHTML = '<option value="">تغيير إلى المسؤول...</option>' +
+      ALL_PROFILES.filter(p => p.role === 'admin').map(p => `<option value="${p.username}">${p.name}</option>`).join('');
+    if (curBL) bulkLayoutSel.value = curBL;
+  }
+  const bulkReviewerSel = document.getElementById('ready-bulk-reviewer-select');
+  if (bulkReviewerSel) {
+    const curBR = bulkReviewerSel.value;
+    bulkReviewerSel.innerHTML = '<option value="">تغيير إلى المراجع...</option>' +
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+    if (curBR) bulkReviewerSel.value = curBR;
+  }
 }
 
 const READY_KPI_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
@@ -9707,10 +9722,20 @@ const READY_STATUS_META = {
   'معلق': { icon: '⏸️', color: '#fbbf24' }
 };
 
-// دوسة على أي كارت حالة بتفلتر جدول الجاهز تحت بيها فورًا وتنزلك عليه
+// دوسة على أي كارت حالة بتفلتر جدول الجاهز تحت بيها فورًا وتنزلك عليه.
+// لو الحالة قديمة ومش موجودة في قايمة الفلتر، بنضيفها كخيار مؤقت الأول،
+// وإلا الدوسة مكنتش بتعمل حاجة (القيمة مبتتثبتش على القايمة والفلتر بيرجع يعرض الكل).
 function filterReadyByStatus(status) {
   const select = document.getElementById('ready-status-filter');
-  if (select) select.value = status;
+  if (select) {
+    if (status && ![...select.options].some(o => o.value === status)) {
+      const extraOpt = document.createElement('option');
+      extraOpt.value = status;
+      extraOpt.innerText = status;
+      select.appendChild(extraOpt);
+    }
+    select.value = status;
+  }
   renderReadyPage();
   const table = document.querySelector('#tab-ready-print .main-content');
   if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -10085,43 +10110,7 @@ function toggleShowOnlySelectedReady() {
   renderReadyPage();
 }
 
-// تحديد أول N طلب "غير موزّع" (لسه معندوش مسؤول)، بداية من الصفحة اللي واقف فيها الأدمن دلوقتي
-// (مش من أول نتيجة في الفلتر كله دايمًا) - وبيتخطى أي طلب متحدد بالفعل، فلو دست الزرار تاني
-// هيكمل ياخد اللي بعد كده تلقائيًا (نفس سلوك تاب الطباعة بالظبط).
-function selectNextReadyBatch() {
-  const input = document.getElementById('ready-bulk-count-input');
-  const count = parseInt(input.value, 10);
 
-  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
-  if (!window.readyFilteredData || window.readyFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
-
-  const startIndex = (readyCurrentPage - 1) * readyPageSize;
-  const poolFromCurrentPage = window.readyFilteredData.slice(startIndex);
-
-  const unassigned = poolFromCurrentPage.filter(o => {
-    const layout = o.Layout || o.layout || '';
-    return !layout && !selectedReadyNumbers.has(getRowKey(o));
-  });
-
-  if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد من الصفحة الحالية لآخر النتائج'); return; }
-
-  const batch = unassigned.slice(0, count);
-  batch.forEach(o => selectedReadyNumbers.add(getRowKey(o)));
-
-  // ينقل تلقائيًا لآخر صفحة فيها طلب اتحدد، عشان تشوف نتيجة التحديد على طول، وعشان لو دست
-  // الزرار تاني يكمل من هنا (من غير ما ترجع بنفسك لأول صفحة).
-  const lastSelected = batch[batch.length - 1];
-  const lastIndexInFiltered = window.readyFilteredData.findIndex(o => o.order_number === lastSelected.order_number);
-  if (lastIndexInFiltered >= 0) readyCurrentPage = Math.floor(lastIndexInFiltered / readyPageSize) + 1;
-
-  updateReadySelectedCount();
-  renderReadyPage();
-  input.value = '';
-
-  if (batch.length < count) {
-    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح غير الموزّع من الصفحة الحالية لآخر النتائج)`);
-  }
-}
 
 // تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع أو لا)، بداية من الصفحة
 // اللي واقف فيها الأدمن دلوقتي — مفيد لو فلترت بالفعل على اسمك في "المسؤول" وعايز تصدّر أرقام
@@ -10269,6 +10258,60 @@ async function executeReadyBulkTypeUpdate() {
     if (error) { alert('حدث خطأ أثناء تحويل النوع: ' + error.message); return; }
     targetOrders.forEach(o => { o.cert_type = newType; });
     alert(`تم تحويل نوع ${targetOrders.length} طلب بنجاح إلى "${newType}"!`);
+    selectedReadyNumbers.clear();
+    if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+    updateReadySelectedCount();
+    if (sel) sel.value = '';
+    applyReadyDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// تغيير المسؤول (Layout) لكل الصفوف المحددة دفعة واحدة
+async function executeReadyBulkLayoutUpdate() {
+  const sel = document.getElementById('ready-bulk-layout-select');
+  const newLayout = sel ? sel.value : '';
+  if (!newLayout) { alert('برجاء اختيار المسؤول من القائمة أولاً'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const layoutName = getDisplayName(newLayout);
+  if (!confirm(`هل أنت متأكد من تغيير المسؤول لـ (${selectedReadyNumbers.size}) طلب إلى "${layoutName}"؟`)) return;
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'update', { Layout: newLayout });
+    if (error) { alert('حدث خطأ أثناء تغيير المسؤول: ' + error.message); return; }
+    targetOrders.forEach(o => { o.Layout = newLayout; o.layout = newLayout; });
+    alert(`تم تغيير المسؤول لـ ${targetOrders.length} طلب بنجاح إلى "${layoutName}"!`);
+    selectedReadyNumbers.clear();
+    if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+    updateReadySelectedCount();
+    if (sel) sel.value = '';
+    applyReadyDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// تغيير المراجع لكل الصفوف المحددة دفعة واحدة
+async function executeReadyBulkReviewerUpdate() {
+  const sel = document.getElementById('ready-bulk-reviewer-select');
+  const newReviewer = sel ? sel.value : '';
+  if (!newReviewer) { alert('برجاء اختيار المراجع من القائمة أولاً'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const reviewerName = getDisplayName(newReviewer);
+  if (!confirm(`هل أنت متأكد من تغيير المراجع لـ (${selectedReadyNumbers.size}) طلب إلى "${reviewerName}"؟`)) return;
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'update', { reviewer: newReviewer });
+    if (error) { alert('حدث خطأ أثناء تغيير المراجع: ' + error.message); return; }
+    targetOrders.forEach(o => { o.reviewer = newReviewer; });
+    alert(`تم تغيير المراجع لـ ${targetOrders.length} طلب بنجاح إلى "${reviewerName}"!`);
     selectedReadyNumbers.clear();
     if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
     updateReadySelectedCount();

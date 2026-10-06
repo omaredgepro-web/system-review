@@ -264,7 +264,7 @@ body {
 .kpi-card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; text-align: center; box-shadow: var(--shadow-card); }
 .kpi-title { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; font-weight: 600; }
 .kpi-value { font-size: 32px; font-weight: 800; }
-#dashboard-kpi-container, #cert-kpi-container, #rejections-kpi-container, #mawaqef-kpi-container { margin-bottom: 18px; }
+#dashboard-kpi-container, #cert-kpi-container, #rejections-kpi-container, #mawaqef-kpi-container, #ready-kpi-container { margin-bottom: 18px; }
 
 .dashboard-layout { position: relative; width: 100%; }
 .sidebar-drawer {

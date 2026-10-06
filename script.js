@@ -9747,6 +9747,24 @@ function clearReadyStatusFilter() {
   renderReadyPage();
 }
 
+// دوسة على أي كارت حالة مراجع بتفلتر جدول الجاهز بيها فورًا وتنزلك عليه
+// (القيم الأربعة موجودة في قايمة الفلتر، فمش محتاجة خيار مؤقت)
+function filterReadyByAction(action) {
+  const select = document.getElementById('ready-action-filter');
+  if (select) select.value = action;
+  renderReadyPage();
+  const table = document.querySelector('#tab-ready-print .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const READY_ACTION_META = {
+  'PENDING': { label: 'بانتظار المراجع', icon: '⏳', color: '#94a3b8' },
+  'تم التعديل': { icon: '✅', color: '#34d399' },
+  'تم الرفض للشركة': { icon: '🚫', color: '#f87171' },
+  'معلق': { icon: '⏸️', color: '#fbbf24' }
+};
+const READY_ACTION_ORDER = ['PENDING', 'تم التعديل', 'تم الرفض للشركة', 'معلق'];
+
 function renderReadyKpis(data) {
   const counts = {};
   data.forEach(o => {
@@ -9781,6 +9799,43 @@ function renderReadyKpis(data) {
     html += `
       <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterReadyByStatus('${status.replace(/'/g, "\'")}')">
         <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${status}</div>
+        <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
+        <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+      </div>
+    `;
+  });
+
+  // كروت حالة الطلب (للمراجع): بانتظار المراجع + الـ 3 قيم — بنفس بيانات التاريخ المعروضة.
+  // "بانتظار المراجع" بتتحسب بس للطلبات اللي حالتها "مرفوض" ولسه متصرفش فيها —
+  // أي حالة تانية مبتسمعش فيها حتى لو reviewer_action فاضي.
+  const actionCounts = { 'PENDING': 0, 'تم التعديل': 0, 'تم الرفض للشركة': 0, 'معلق': 0 };
+  data.forEach(o => {
+    const a = (o.reviewer_action && String(o.reviewer_action).trim());
+    if (a) {
+      if (actionCounts[a] === undefined) actionCounts[a] = 0;
+      actionCounts[a]++;
+    } else if (o.status === 'مرفوض') {
+      actionCounts['PENDING']++;
+    }
+  });
+  const activeAction = (document.getElementById('ready-action-filter') || {}).value || 'ALL';
+
+  html += `
+    <div style="grid-column: 1 / -1; font-size:13px; color:var(--text-muted); font-weight:800; padding-top:6px;">📋 حالة الطلب (للمراجع) — اضغط على أي كارت للفلترة</div>
+  `;
+
+  READY_ACTION_ORDER.forEach(key => {
+    const meta = READY_ACTION_META[key];
+    const label = key === 'PENDING' ? meta.label : key;
+    const count = actionCounts[key] || 0;
+    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const isActive = activeAction === key;
+    html += `
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterReadyByAction('${key}')">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${label}</div>
         <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
         <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
           <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
@@ -9954,11 +10009,13 @@ async function ensureMyPendingReadyRows() {
   return data || [];
 }
 
-function getReadyReviewerActionBadge(action) {
+function getReadyReviewerActionBadge(action, status) {
   if (action === 'تم التعديل') return '<span class="badge badge-accepted">تم التعديل</span>';
   if (action === 'تم الرفض للشركة') return '<span class="badge badge-rejected">تم الرفض للشركة</span>';
   if (action === 'معلق') return '<span class="badge badge-hold">معلق</span>';
-  return '<span class="badge badge-hold">بانتظار المراجع</span>';
+  // الفاضي يظهر "بانتظار المراجع" بس لو الحالة مرفوض — غير كده شرطة (مفيش حاجة منتظرة المراجع أصلًا)
+  if (status === 'مرفوض') return '<span class="badge badge-hold">بانتظار المراجع</span>';
+  return '-';
 }
 
 function getReadyStatusBadge(status) {
@@ -10009,7 +10066,7 @@ function renderReadyPage() {
     const matchesStatus = (statusValue === 'ALL') || (status === statusValue);
     const action = item.reviewer_action || '';
     const matchesAction = (actionValue === 'ALL')
-      || (actionValue === 'PENDING' ? !action : (action === actionValue));
+      || (actionValue === 'PENDING' ? (!action && status === 'مرفوض') : (action === actionValue));
     const type = item.cert_type || 'عادي';
     const matchesType = (typeValue === 'ALL') || (type === typeValue);
     return matchesSearch && matchesLayout && matchesReviewer && matchesStatus && matchesAction && matchesType;
@@ -10044,7 +10101,7 @@ function renderReadyTable(orders) {
     const layoutLabel = rawLayout ? getDisplayName(rawLayout) : 'غير موزعة';
     const statusBadge = getReadyStatusBadge(order.status);
     const reviewerLabel = getDisplayName(order.reviewer) || '-';
-    const actionBadge = getReadyReviewerActionBadge(order.reviewer_action);
+    const actionBadge = getReadyReviewerActionBadge(order.reviewer_action, order.status);
     const reason = order.reason || '-';
     const rawDate = order.date || extractDateString(order) || '';
     const dateLabel = rawDate || 'غير محدد';

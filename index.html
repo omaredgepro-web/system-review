@@ -128,6 +128,7 @@
     <div class="tabs-bar">
       <button class="tab-btn active" id="dashboard-tab-btn" onclick="switchTab('dashboard')">لوحة المراجعة والإحصائيات</button>
       <button class="tab-btn" id="rejections-tab-btn" onclick="switchTab('rejections')">🚫 مرفوضات</button>
+      <button class="tab-btn" id="ready-print-tab-btn" onclick="switchTab('ready-print')">✅ جاهز على الطباعة</button>
       <div style="position: relative;">
         <button class="tab-btn" id="admin-menu-toggle-btn" style="display: none;" onclick="toggleAdminTabsMenu()">⚙️ لوحة الأدمن ⌄</button>
         <div id="admin-tabs-dropdown" style="display: none; position: absolute; top: 110%; right: 0; z-index: 60; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; min-width: 260px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); padding: 8px; flex-direction: column; gap: 4px;">
@@ -138,6 +139,7 @@
 
           <div style="font-size: 11px; color: var(--text-muted); padding: 4px 8px; margin-top: 4px; border-top: 1px solid var(--card-border); font-weight: 800;">الطباعة والشهادات</div>
           <button class="tab-btn" id="print-distribute-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('print-distribute'); closeAdminTabsMenu();">📦 توزيع طلبات الطباعة</button>
+          <button class="tab-btn" id="ready-distribute-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('ready-distribute'); closeAdminTabsMenu();">📦 توزيع جاهز على الطباعة</button>
           <button class="tab-btn" id="certificates-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('certificates'); closeAdminTabsMenu();">🖨️ قائمة الشهادات (عادي)</button>
           <button class="tab-btn" id="certificates-renovation-tab-btn" style="display: none; text-align: right; width: 100%; font-size: 13px;" onclick="switchTab('certificates-renovation'); closeAdminTabsMenu();">📠 طباعة شهادات التعمير</button>
 
@@ -777,6 +779,57 @@
       </div>
     </div>
 
+    <!-- TAB: ✅ جاهز على الطباعة (بره لوحة الأدمن - للكل: أدمن + مراجع) -->
+    <div id="tab-ready-print" style="display: none;">
+      <div class="main-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" id="refresh-ready-btn" onclick="refreshReadyData()">🔄 تحديث يدوي</button>
+            <span id="ready-live-status-indicator" style="font-size: 11px; color: var(--text-muted);" title="جاري الاتصال بالتحديث اللحظي...">⚪ جاري الاتصال...</span>
+            <span id="ready-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
+          </div>
+          <h3 style="font-size: 16px;">✅ جاهز على الطباعة</h3>
+        </div>
+
+        <div class="table-filters">
+          <input type="text" id="ready-search-input" class="search-input" placeholder="ابحث برقم الطلب...">
+          <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
+          <input type="date" id="ready-date-filter" class="date-input" onchange="onReadyDateFilterChange()">
+          <button class="btn btn-secondary" onclick="resetReadyDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th class="sticky-action-col" style="width: 80px; min-width: 80px; text-align: center;">إجراء</th>
+                <th>رقم الطلب</th>
+                <th>المسؤول</th>
+                <th>الحالة</th>
+                <th>المراجع</th>
+                <th>حالة الطلب (للمراجع)</th>
+                <th>السبب</th>
+                <th>التاريخ</th>
+                <th id="ready-action-time-header">🕐 آخر إجراء</th>
+              </tr>
+            </thead>
+            <tbody id="ready-tbody">
+              <tr><td colspan="9" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination-bar">
+          <div class="pagination-info" id="ready-pagination-info">عرض الصفوف...</div>
+          <div class="pagination-buttons">
+            <button class="page-btn" id="ready-btn-prev" onclick="changeReadyPage(-1)" disabled>السابق</button>
+            <span id="ready-page-num" style="font-size: 13px; align-self: center;">صفحة 1</span>
+            <button class="page-btn" id="ready-btn-next" onclick="changeReadyPage(1)">التالي</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB 4: توزيع طلبات الطباعة (رفع أرقام طلبات جديدة لجدول الطباعة) -->
     <div id="tab-print-distribute" style="display: none;">
       <div class="admin-container">
@@ -865,6 +918,115 @@
             </table>
           </div>
           <button class="btn btn-primary" id="btn-upload-print" onclick="uploadPrintOrdersToSupabase()" style="width: auto;">تأكيد ورفع الطلبات لجدول الطباعة</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: 📦 توزيع جاهز على الطباعة (رفع طلبات جديدة لجدول ready_to_print) -->
+    <div id="tab-ready-distribute" style="display: none;">
+      <div class="admin-container">
+        <h2 style="font-size: 20px; margin-bottom: 10px;">توزيع جاهز على الطباعة: رفع طلبات جديدة</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+          ارفع ملف (CSV أو Excel) فيه عمود برقم الطلب — النظام هيتعرف على العمود ده تلقائيًا حتى لو اسمه مختلف (زي requestnumber)، وهيضيف الطلبات دي في جدول "جاهز على الطباعة" بالتاريخ والمراجع والمسؤول اللي تحددهم تحت.
+        </p>
+
+        <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px; background: rgba(99, 102, 241, 0.08); border-color: var(--accent-purple);">
+          <h3 style="font-size: 14px; margin-bottom: 8px;">🗂️ بيانات الدفعة (مطلوبة قبل الرفع)</h3>
+          <div style="display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end;">
+            <div style="min-width: 200px;">
+              <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">📅 تاريخ تسجيل الدفعة <span style="color: #f87171;">*</span></label>
+              <input type="date" id="ready-dist-date-input" class="date-input" style="width: 100%;">
+            </div>
+            <div style="min-width: 220px;">
+              <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">🗂️ نوع الشهادة</label>
+              <select id="ready-dist-cert-type-select" class="filter-select" style="width: 100%;">
+                <option value="عادي">🖨️ عادي</option>
+                <option value="تعمير">📠 تعمير</option>
+              </select>
+            </div>
+            <div style="flex: 1; min-width: 220px;">
+              <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">👤 المراجع للدفعة كلها (عشان يشوف طلباته — اختياري)</label>
+              <select id="ready-dist-reviewer-select" class="filter-select" style="width: 100%;" onchange="onReadyDistReviewerChange()"><option value="">بدون مراجع الآن</option></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="upload-box" id="ready-dist-upload-box" ondragover="handleReadyDistDragOver(event)" ondragleave="handleReadyDistDragLeave(event)" ondrop="handleReadyDistFileDrop(event)">
+          <p style="margin-bottom: 15px; font-weight: 700;">قم بسحب وإفلات ملف أو أكتر (CSV أو Excel) هنا أو اضغط للاختيار</p>
+          <p style="margin-bottom: 15px; font-size: 12px; color: var(--text-muted);">بيقرا عمود رقم الطلب بس، وأي عمود تاني في الملف بيتجاهله. تقدر ترفع أكتر من ملف مرة واحدة أو ورا بعض.</p>
+          <input type="file" id="ready-dist-file-input" class="file-input" accept=".csv,.xlsx,.xls" multiple onchange="handleReadyDistFileSelect(event)">
+          <button class="btn btn-secondary" onclick="document.getElementById('ready-dist-file-input').click()">اختيار ملف أو أكتر (CSV أو Excel)</button>
+          <button class="btn btn-danger" onclick="resetReadyDistData()" style="margin-right: 8px;">🗑️ مسح الكل والبدء من جديد</button>
+          <p id="ready-dist-file-name-display" style="margin-top: 10px; font-size: 12px; color: var(--badge-accept-text);"></p>
+        </div>
+
+        <div class="admin-container" style="padding: 16px 18px; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleReadyDistQuickPanel()">
+            <h3 style="font-size: 15px;">⚡ توزيع سريع بالأرقام (بدون ملف)</h3>
+            <span id="ready-dist-quick-toggle-icon" style="color: var(--text-muted);">▼</span>
+          </div>
+          <div id="ready-dist-quick-panel" style="display: none; margin-top: 14px;">
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">ألصق أو اكتب أرقام الطلبات (رقم في كل سطر أو مفصولين بفاصلة)، واختياريًا حدد مسؤول واحد يتوزعوا عليه كلهم على طول. لو رقم الطلب موجود بالفعل في جدول "جاهز على الطباعة"، هيظهرلك تحذير قبل الرفع.</p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+              <div style="flex: 1; min-width: 220px;">
+                <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">المسؤول (اختياري)</label>
+                <select id="ready-dist-quick-layout" class="filter-select" style="width: 100%;"><option value="">بدون توزيع الآن</option></select>
+              </div>
+            </div>
+            <textarea id="ready-dist-quick-textarea" class="form-control" rows="4" placeholder="ألصق أو اكتب أرقام الطلبات هنا..." style="margin-bottom: 12px;"></textarea>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-primary" style="width: auto; padding: 8px 20px;" onclick="submitQuickReadyDistOrders()">➕ إضافة للمعاينة</button>
+              <button class="btn btn-secondary" onclick="document.getElementById('ready-dist-quick-textarea').value=''">مسح النص</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="ready-dist-total-banner" class="kpi-card" style="display: none; margin-bottom: 20px; text-align: center;">
+          <div class="kpi-title">إجمالي أرقام الطلبات المرفوعة</div>
+          <div class="kpi-value" id="ready-dist-total-banner-count" style="color: var(--accent-purple);">0</div>
+        </div>
+
+        <div id="ready-dist-duplicates-area" class="admin-container" style="display: none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+          <h3 style="font-size: 15px; margin-bottom: 6px;">🔁 فحص أرقام الطلبات المكررة</h3>
+          <div id="ready-dist-duplicates-panel" style="font-size: 13px;"></div>
+        </div>
+
+        <div id="ready-dist-panel" style="display: none;">
+          <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+            <h3 style="font-size: 15px; margin-bottom: 6px;">⚖️ توزيع المسؤول (Layout) على الدفعة</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+              وزّع الدفعة كلها على مسؤول واحد من القايمة، أو وزّعها تلقائيًا بالتساوي على الأدمن المختارين (Round-robin). لو حددت "عدد الطلبات لكل شخص"، التوزيع التلقائي هيوقف عند الوصول للعدد ده لكل واحد.
+            </p>
+
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+              <label style="font-size: 13px; color: var(--text-muted);">المسؤول للدفعة كلها:</label>
+              <select id="ready-dist-layout-select" class="filter-select" style="width: 200px; padding: 6px 10px; font-size: 13px;"><option value="">اختر المسؤول...</option></select>
+              <button class="btn btn-secondary" onclick="applyReadyDistSingleLayout()" style="padding: 6px 12px; font-size: 12px;">تطبيق على الكل</button>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+              <label style="font-size: 13px; color: var(--text-muted);">عدد الطلبات المستهدف لكل شخص (اختياري):</label>
+              <input type="number" id="ready-dist-target-input" class="filter-select" min="1" placeholder="مثال: 100" style="width: 130px; padding: 6px 10px; font-size: 13px;">
+              <button class="btn btn-secondary" onclick="selectAllReadyDistUsers(true)" style="padding: 6px 12px; font-size: 12px;">تحديد الكل</button>
+              <button class="btn btn-secondary" onclick="selectAllReadyDistUsers(false)" style="padding: 6px 12px; font-size: 12px;">إلغاء تحديد الكل</button>
+              <button class="btn btn-primary" onclick="runReadyDistBalancedDistribution()" style="width: auto; padding: 8px 16px;">⚖️ توزيع تلقائي الآن</button>
+            </div>
+
+            <div id="ready-dist-users-list" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; max-height: 160px; overflow-y: auto; padding: 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;"></div>
+
+            <div id="ready-dist-summary"></div>
+          </div>
+        </div>
+
+        <div id="ready-dist-preview-area" style="display: none;">
+          <h3 style="margin-bottom: 10px; font-size: 16px;">معاينة أرقام الطلبات (<span id="ready-dist-count">0</span> طلب)</h3>
+          <div style="max-height: 300px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--card-border); border-radius: 8px;">
+            <table>
+              <thead><tr><th>رقم الطلب</th><th>المسؤول المخصص</th><th>المراجع</th></tr></thead>
+              <tbody id="ready-dist-preview-tbody"></tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" id="btn-upload-ready-dist" onclick="uploadReadyDistOrdersToSupabase()" style="width: auto;">تأكيد ورفع الطلبات لجدول جاهز على الطباعة</button>
         </div>
       </div>
     </div>
@@ -1414,7 +1576,72 @@
     </div>
   </div>
 
+  <!-- Modal تحديث طلب "جاهز على الطباعة" - الأدمن يعدّل كل حاجة، المراجع يعدّل reviewer_action بس -->
+  <div class="modal-overlay" id="ready-edit-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>تحديث طلب (جاهز على الطباعة)</h3>
+        <button class="close-btn" onclick="closeReadyModal()">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>رقم الطلب</label>
+        <input type="text" id="ready-modal-order-no" class="form-control" disabled>
+      </div>
+      <div id="ready-modal-admin-fields">
+        <div class="form-group">
+          <label>المسؤول (Layout)</label>
+          <select id="ready-modal-layout" class="filter-select form-control"></select>
+        </div>
+        <div class="form-group">
+          <label>الحالة</label>
+          <select id="ready-modal-status" class="filter-select form-control">
+            <option value="تم الطباعة">تم الطباعة</option>
+            <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
+            <option value="مرفوض">مرفوض</option>
+            <option value="محجوز">محجوز</option>
+            <option value="خطأ جهة ولاية">خطأ جهة ولاية</option>
+            <option value="خطأ عنوان">خطأ عنوان</option>
+            <option value="معلق">معلق</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>المراجع</label>
+          <select id="ready-modal-reviewer" class="filter-select form-control"></select>
+        </div>
+        <div class="form-group">
+          <label>السبب</label>
+          <textarea id="ready-modal-reason" class="form-control" placeholder="اكتب السبب هنا..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>التاريخ</label>
+          <input type="date" id="ready-modal-date" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>نوع الشهادة</label>
+          <select id="ready-modal-type" class="filter-select form-control">
+            <option value="عادي">🖨️ عادي</option>
+            <option value="تعمير">📠 تعمير</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>حالة الطلب (للمراجع) <span style="color: #f87171;">*</span></label>
+        <select id="ready-modal-reviewer-action" class="filter-select form-control">
+          <option value="">-- اختر --</option>
+          <option value="تم التعديل">✅ تم التعديل</option>
+          <option value="تم الرفض للشركة">🚫 تم الرفض للشركة</option>
+          <option value="معلق">⏸️ معلق</option>
+        </select>
+      </div>
+      <p id="ready-modal-reviewer-note" style="display:none; font-size: 12px; color: var(--text-muted); background: var(--badge-pending-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 10px;">انت كمراجع مسموح لك بتعديل "حالة الطلب (للمراجع)" فقط، وباقي البيانات للعرض فقط.</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeReadyModal()">إلغاء</button>
+        <button class="btn btn-primary" id="ready-btn-save-modal" onclick="saveReadyUpdate()" style="width: auto;">حفظ</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20260929e"></script>
+  <script src="script.js?v=20261006a"></script>
 </body>
 </html>

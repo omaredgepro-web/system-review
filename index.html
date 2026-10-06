@@ -785,6 +785,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <button class="btn btn-secondary" id="refresh-ready-btn" onclick="refreshReadyData()">🔄 تحديث يدوي</button>
+            <button class="btn btn-secondary" onclick="toggleReadyMultiSelectPanel()">📋 تحديد متعدد (نسخ/لصق أو ملف)</button>
             <span id="ready-live-status-indicator" style="font-size: 11px; color: var(--text-muted);" title="جاري الاتصال بالتحديث اللحظي...">⚪ جاري الاتصال...</span>
             <span id="ready-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
           </div>
@@ -793,15 +794,101 @@
 
         <div class="table-filters">
           <input type="text" id="ready-search-input" class="search-input" placeholder="ابحث برقم الطلب...">
+          <label style="font-size: 13px; color: var(--text-muted);">المسؤول:</label>
+          <select id="ready-layout-filter" class="filter-select"><option value="ALL">كل المسؤولين</option><option value="UNASSIGNED">⛔ غير موزع</option></select>
+          <label style="font-size: 13px; color: var(--text-muted);">المراجع:</label>
+          <select id="ready-reviewer-filter" class="filter-select"><option value="ALL">كل المراجعين</option></select>
           <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
           <input type="date" id="ready-date-filter" class="date-input" onchange="onReadyDateFilterChange()">
           <button class="btn btn-secondary" onclick="resetReadyDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+          <select id="ready-status-filter" class="filter-select">
+            <option value="ALL">كل الحالات</option>
+            <option value="لم يتم المراجعة">لم يتم المراجعة</option>
+            <option value="جاهز للطباعه">جاهز للطباعه</option>
+            <option value="تم مراجعته سابقا">تم مراجعته سابقا</option>
+            <option value="له جهة ولاية">له جهة ولاية</option>
+            <option value="مرفوض">مرفوض</option>
+            <option value="محجوز">محجوز</option>
+            <option value="معلق">معلق</option>
+          </select>
+          <select id="ready-action-filter" class="filter-select">
+            <option value="ALL">كل حالات المراجع</option>
+            <option value="PENDING">⏳ بانتظار المراجع</option>
+            <option value="تم التعديل">تم التعديل</option>
+            <option value="تم الرفض للشركة">تم الرفض للشركة</option>
+            <option value="معلق">معلق</option>
+          </select>
+          <select id="ready-type-filter" class="filter-select">
+            <option value="ALL">كل الأنواع</option>
+            <option value="عادي">🖨️ عادي</option>
+            <option value="تعمير">📠 تعمير</option>
+          </select>
+        </div>
+
+        <div id="ready-multiselect-panel" class="admin-container" style="display:none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+            <h3 style="font-size: 15px;">📋 إدخال متعدد / ملف</h3>
+            <button type="button" onclick="clearReadyMultiSelectInput()" style="background:none; border:none; color: var(--badge-reject-text); font-size: 12px; cursor:pointer; font-weight:600;">مسح</button>
+          </div>
+          <p style="font-size:12px; color: var(--text-muted); margin-bottom: 12px;">الصق أو اكتب أرقام الطلبات (رقم في كل سطر، أو مفصولة بفاصلة)، أو ارفع ملف فيه عمود رقم الطلب. النظام هيحددهم تلقائيًا في الجدول تحت — بيدور في كل التواريخ.</p>
+          <textarea id="ready-multiselect-textarea" class="form-control" style="min-height: 110px; margin-bottom: 12px; resize: vertical;" placeholder="أدخل أرقام الطلبات هنا..."></textarea>
+          <div class="upload-box" id="ready-multiselect-dropzone" ondragover="handleReadyMultiSelectDragOver(event)" ondragleave="handleReadyMultiSelectDragLeave(event)" ondrop="handleReadyMultiSelectDrop(event)" style="padding: 16px; margin-bottom: 14px;">
+            <p style="font-size: 13px; margin-bottom: 8px;">اضغط لرفع ملف أو اسحبه هنا</p>
+            <input type="file" id="ready-multiselect-file-input" class="file-input" accept=".csv,.xlsx,.xls" onchange="handleReadyMultiSelectFileSelect(event)">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('ready-multiselect-file-input').click()" style="padding: 6px 14px; font-size: 12px;">اختيار ملف</button>
+            <p id="ready-multiselect-file-name" style="margin-top: 8px; font-size: 11px; color: var(--badge-accept-text);"></p>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="verifyAndSelectReadyOrders()" style="width:auto; padding: 10px 24px;">✚ تحقق وإضافة للتحديد</button>
+          <div id="ready-multiselect-results" style="margin-top: 14px; font-size: 13px;"></div>
+        </div>
+
+        <!-- شريط الإجراءات الجماعية لتاب جاهز على الطباعة (للأدمن فقط) -->
+        <div id="ready-bulk-bar" class="admin-bulk-actions" style="display: none;">
+          <details class="bulk-details">
+            <summary class="bulk-summary">
+              <span class="bulk-summary-title">🛠️ إجراءات جماعية</span>
+              <span class="bulk-count-pill">تم تحديد: <span id="ready-selected-count">0</span> طلب</span>
+              <span class="bulk-hint-close">اضغط للطي ⌃</span>
+              <span class="bulk-hint-open">اضغط للفتح ⌄</span>
+            </summary>
+          <div class="bulk-group">
+            <button class="btn btn-secondary btn-sm" onclick="clearReadySelection()">مسح التحديد</button>
+            <button id="show-selected-only-ready-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedReady()">📌 عرض المحدد فقط</button>
+          </div>
+          <div class="bulk-group">
+            <select id="ready-bulk-status-select" class="filter-select btn-sm" style="width: 170px;">
+              <option value="">تغيير الحالة إلى...</option>
+              <option value="لم يتم المراجعة">لم يتم المراجعة</option>
+              <option value="جاهز للطباعه">جاهز للطباعه</option>
+              <option value="تم مراجعته سابقا">تم مراجعته سابقا</option>
+              <option value="له جهة ولاية">له جهة ولاية</option>
+              <option value="مرفوض">مرفوض</option>
+              <option value="محجوز">محجوز</option>
+              <option value="معلق">معلق</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkStatusUpdate()">تطبيق الحالة</button>
+          </div>
+          <div class="bulk-group">
+            <select id="ready-bulk-type-select" class="filter-select btn-sm" style="width: 130px;">
+              <option value="">نقل النوع...</option>
+              <option value="عادي">🖨️ عادي</option>
+              <option value="تعمير">📠 تعمير</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkTypeUpdate()">تطبيق النقل</button>
+          </div>
+          <div class="bulk-group" style="margin-right: auto; border-left: none;">
+            <button id="ready-bulk-delete-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="executeReadyBulkDelete()">🗑️ حذف المحدد</button>
+          </div>
+          </details>
         </div>
 
         <div class="table-container">
           <table>
             <thead>
               <tr>
+                <th style="width: 40px; min-width: 40px; text-align: center;">
+                  <input type="checkbox" id="ready-select-all-checkbox" onchange="toggleReadySelectAll(this)">
+                </th>
                 <th class="sticky-action-col" style="width: 80px; min-width: 80px; text-align: center;">إجراء</th>
                 <th>رقم الطلب</th>
                 <th>المسؤول</th>
@@ -814,7 +901,7 @@
               </tr>
             </thead>
             <tbody id="ready-tbody">
-              <tr><td colspan="9" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+              <tr><td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1595,12 +1682,12 @@
         <div class="form-group">
           <label>الحالة</label>
           <select id="ready-modal-status" class="filter-select form-control">
-            <option value="تم الطباعة">تم الطباعة</option>
-            <option value="تم إعادة الطباعة">تم إعادة الطباعة</option>
+            <option value="لم يتم المراجعة">لم يتم المراجعة</option>
+            <option value="جاهز للطباعه">جاهز للطباعه</option>
+            <option value="تم مراجعته سابقا">تم مراجعته سابقا</option>
+            <option value="له جهة ولاية">له جهة ولاية</option>
             <option value="مرفوض">مرفوض</option>
             <option value="محجوز">محجوز</option>
-            <option value="خطأ جهة ولاية">خطأ جهة ولاية</option>
-            <option value="خطأ عنوان">خطأ عنوان</option>
             <option value="معلق">معلق</option>
           </select>
         </div>
@@ -1633,7 +1720,11 @@
           <option value="معلق">⏸️ معلق</option>
         </select>
       </div>
-      <p id="ready-modal-reviewer-note" style="display:none; font-size: 12px; color: var(--text-muted); background: var(--badge-pending-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 10px;">انت كمراجع مسموح لك بتعديل "حالة الطلب (للمراجع)" فقط، وباقي البيانات للعرض فقط.</p>
+      <div class="form-group" id="ready-reviewer-reason-group" style="display: none;">
+        <label>السبب (مع حالة المراجعة — اختياري)</label>
+        <textarea id="ready-modal-reviewer-reason" class="form-control" placeholder="اكتب السبب هنا لو حابب توضحه..."></textarea>
+      </div>
+      <p id="ready-modal-reviewer-note" style="display:none; font-size: 12px; color: var(--text-muted); background: var(--badge-pending-bg); padding: 8px 12px; border-radius: 8px; margin-bottom: 10px;">انت كمراجع مسموح لك بتعديل "حالة الطلب (للمراجع)" والسبب فقط، وباقي البيانات للعرض فقط.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeReadyModal()">إلغاء</button>
         <button class="btn btn-primary" id="ready-btn-save-modal" onclick="saveReadyUpdate()" style="width: auto;">حفظ</button>
@@ -1642,6 +1733,6 @@
   </div>
 
   <!-- ربط ملف الـ JavaScript -->
-  <script src="script.js?v=20261006a"></script>
+  <script src="script.js?v=20261006b"></script>
 </body>
 </html>

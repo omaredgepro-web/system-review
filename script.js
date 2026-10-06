@@ -10123,6 +10123,95 @@ function selectNextReadyBatch() {
   }
 }
 
+// تحديد أول N طلب من نتائج الفلتر الحالي (بغض النظر عن كونه موزّع أو لا)، بداية من الصفحة
+// اللي واقف فيها الأدمن دلوقتي — مفيد لو فلترت بالفعل على اسمك في "المسؤول" وعايز تصدّر أرقام
+// طلباتك على دفعات (مثلاً 100 في كل مرة)، وكل دوسة على الزرار تكمل من بعد آخر تحديد تلقائيًا.
+function selectNextReadyFromFiltered() {
+  const input = document.getElementById('ready-export-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  if (!window.readyFilteredData || window.readyFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const startIndex = (readyCurrentPage - 1) * readyPageSize;
+  const poolFromCurrentPage = window.readyFilteredData.slice(startIndex);
+
+  const unselected = poolFromCurrentPage.filter(o => !selectedReadyNumbers.has(getRowKey(o)));
+
+  if (unselected.length === 0) { alert('كل الطلبات من الصفحة الحالية لآخر النتائج متحددة بالفعل'); return; }
+
+  const batch = unselected.slice(0, count);
+  batch.forEach(o => selectedReadyNumbers.add(getRowKey(o)));
+
+  const lastSelected = batch[batch.length - 1];
+  const lastIndexInFiltered = window.readyFilteredData.findIndex(o => o.order_number === lastSelected.order_number);
+  if (lastIndexInFiltered >= 0) readyCurrentPage = Math.floor(lastIndexInFiltered / readyPageSize) + 1;
+
+  updateReadySelectedCount();
+  renderReadyPage();
+  input.value = '';
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح من الصفحة الحالية لآخر النتائج)`);
+  }
+}
+
+// تصدير أرقام الطلبات المحددة فقط (بدون باقي الأعمدة) - Excel أو TXT
+function getSelectedReadyExportFileLabel() {
+  const layoutFilterValue = (document.getElementById('ready-layout-filter') || {}).value;
+  const nameLabel = (layoutFilterValue && layoutFilterValue !== 'ALL' && layoutFilterValue !== 'UNASSIGNED') ? `_${layoutFilterValue}` : '';
+  const dateLabel = (document.getElementById('ready-date-filter') || {}).value || 'غير محدد';
+  return `ارقام_جاهز_على_الطباعة${nameLabel}_${dateLabel}`;
+}
+
+// بيرجّع أرقام الطلبات الحقيقية للصفوف المحددة في تاب الجاهز (للتصدير)
+function getSelectedReadyOrderNumbersList() {
+  const nums = [];
+  const seen = new Set();
+  (readyMasterData || []).forEach(o => {
+    if (selectedReadyNumbers.has(getRowKey(o))) {
+      const n = String(o.order_number);
+      if (!seen.has(n)) { seen.add(n); nums.push(n); }
+    }
+  });
+  return nums;
+}
+
+function exportSelectedReadyOrderNumbers() {
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
+
+  const orderNumbers = getSelectedReadyOrderNumbersList();
+  const rows = orderNumbers.map(num => ({ 'رقم الطلب': num }));
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = [{ wch: 28 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'أرقام الطلبات');
+
+  XLSX.writeFile(workbook, `${getSelectedReadyExportFileLabel()}.xlsx`);
+}
+
+// نفس التصدير بس كملف TXT، رقم طلب في كل سطر (من غير عناوين أو أي تنسيق إضافي)
+function exportSelectedReadyOrderNumbersTxt() {
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للتصدير'); return; }
+
+  const orderNumbers = getSelectedReadyOrderNumbersList();
+  const content = orderNumbers.join('\r\n');
+
+  // \uFEFF: BOM عشان الأحرف العربية والأرقام تظهر صح لو الملف اتفتح في Notepad على ويندوز
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${getSelectedReadyExportFileLabel()}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 // تغيير الحالة لكل الصفوف المحددة دفعة واحدة.
 // لو الحالة الجديدة "مرفوض" بيطلب سبب واحد يتسجل مع الكل، وبيصفّر reviewer_action
 // عشان المراجع يتبلغ ويتصرف من جديد (نفس فكرة التنبيه الفوري).

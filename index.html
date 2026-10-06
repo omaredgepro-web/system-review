@@ -883,6 +883,12 @@
             </select>
             <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkTypeUpdate()">تطبيق النقل</button>
           </div>
+          <div class="bulk-group">
+            <input type="number" id="ready-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
+            <button class="btn btn-secondary btn-sm" onclick="selectNextReadyFromFiltered()">تحديد الأول من النتائج</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportSelectedReadyOrderNumbers()">📥 تصدير (Excel)</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportSelectedReadyOrderNumbersTxt()">📄 تصدير (TXT)</button>
+          </div>
           <div class="bulk-group" style="margin-right: auto; border-left: none;">
             <button id="ready-bulk-delete-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="executeReadyBulkDelete()">🗑️ حذف المحدد</button>
           </div>

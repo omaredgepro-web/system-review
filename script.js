@@ -1140,6 +1140,7 @@ function showReadyToast(row) {
   if (!container) return;
   const toastId = 'ready-toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
   const orderNum = row.order_number || '-';
+  const safeNum = String(orderNum).replace(/'/g, "\\'");
   const reason = row.reason && row.reason !== '-' ? row.reason : 'بدون سبب مكتوب';
   const toast = document.createElement('div');
   toast.id = toastId;
@@ -1268,7 +1269,7 @@ function showReadyNagModal() {
         <div style="font-weight:800; font-size:16px; margin-bottom:10px; color: var(--badge-reject-text);" id="ready-nag-title"></div>
         <div style="font-size:13px; color:var(--text-muted); margin-bottom:16px;" id="ready-nag-body"></div>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-primary" style="flex:1; padding:10px;" onclick="switchTab('ready-print'); closeReadyNagModal();">✅ الذهاب لجاهز على الطباعة</button>
+          <button class="btn btn-primary" style="flex:1; padding:10px;" onclick="goToMyReadyRejections(); closeReadyNagModal();">✅ الذهاب لجاهز على الطباعة</button>
           <button class="btn" style="flex:1; padding:10px;" onclick="closeReadyNagModal();">ذكرني لاحقاً</button>
         </div>
       </div>`;
@@ -1288,6 +1289,53 @@ function showReadyNagModal() {
 function closeReadyNagModal() {
   const overlay = document.getElementById('ready-nag-modal');
   if (overlay) { overlay.classList.remove('active'); overlay.style.display = 'none'; }
+}
+
+// يودي المراجع مباشرة على طلباته المرفوضة المعلقة في تاب الجاهز:
+// بيفتح التاب، يصفّر أي فلتر ممكن يخفيها، يظبط التاريخ على تاريخها
+// (ده اللي كان مخلي الجدول يبان فاضي رغم وصول التنبيه)، ويحددها وينقله
+// لأول صفحة فيها واحد منهم. لو اتبعت رقم طلب معين (من التوست) بيركّز عليه هو بس.
+async function goToMyReadyRejections(orderNum) {
+  switchTab('ready-print');
+  try { await ensureMyPendingReadyRows(); } catch (e) {}
+  let pending = getMyPendingReadyRejections();
+  if (orderNum) pending = pending.filter(o => String(o.order_number) === String(orderNum));
+  if (pending.length === 0) return; // اتصرف فيها خلاص من مكان تاني - التاب مفتوح عادي
+  // switchTab صفّر التحديد، فبنحدد الصفوف المعلقة بعد الفتح
+  selectedReadyNumbers.clear();
+  pending.forEach(o => selectedReadyNumbers.add(getRowKey(o)));
+  updateReadySelectedCount();
+  // صفّر أي فلتر ممكن يخفيها (بحث/حالة/مسؤول/مراجع/حالة مراجع/نوع)
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  setVal('ready-search-input', '');
+  setVal('ready-status-filter', 'ALL');
+  setVal('ready-layout-filter', 'ALL');
+  setVal('ready-reviewer-filter', 'ALL');
+  setVal('ready-action-filter', 'ALL');
+  setVal('ready-type-filter', 'ALL');
+  // اظبط التاريخ على أحدث تاريخ فيه طلب معلق
+  showAllReadyDates = false; updateShowAllReadyDatesBtnLabel();
+  const dates = pending.map(extractDateString).filter(Boolean).sort().reverse();
+  const targetDate = dates[0] || '';
+  if (targetDate) {
+    setVal('ready-date-filter', targetDate);
+    if (!(readyMasterData || []).some(o => extractDateString(o) === targetDate)) {
+      try {
+        const dateRows = await fetchAllRowsFromTable(READY_TABLE_NAME, q => filterByDateVariants(q, targetDate));
+        mergeRowsIntoReadyMasterData(dateRows);
+      } catch (e) {}
+    }
+  } else {
+    setVal('ready-date-filter', '');
+  }
+  applyReadyDateFiltering();
+  // انقل لأول صفحة فيها طلب معلق
+  const pendingKeys = new Set(pending.map(getRowKey));
+  const idx = (readyAllData || []).findIndex(o => pendingKeys.has(getRowKey(o)));
+  if (idx >= 0) readyCurrentPage = Math.floor(idx / readyPageSize) + 1;
+  renderReadyPage();
+  const table = document.querySelector('#tab-ready-print .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // بيشغّل تايمر متكرر - لو لسه فيه طلبات متجاهَلة، يرجّع يورّي النافذة تاني كل فترة.
@@ -10200,7 +10248,35 @@ function openReadyEditModal(orderNum) {
     if (selectedReadyOrder.status !== 'مرفوض') { alert('كمُراجع، تقدر تعدّل بس الطلبات اللي حالتها "مرفوض".'); selectedReadyOrder = null; return; }
   }
   document.getElementById('ready-modal-order-no').value = selectedReadyOrder.order_number || '';
-  document.getElementById('ready-modal-layout').value = selectedReadyOrder.Layout || selectedReadyOrder.layout || '';
+  // نشيل أي خيارات مؤقتة متبقية من فتحة سابقة (حالي/قديمة) عشان القوايم متتراكمش
+  ['ready-modal-layout', 'ready-modal-reviewer', 'ready-modal-status'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    [...sel.options].forEach(o => {
+      if (/\(حالي\)$/.test(o.text) || /\(قديمة\)$/.test(o.text)) sel.removeChild(o);
+    });
+  });
+  // لو المسؤول الحالي مش موجود في القايمة (متسجل باسم عربي أو حد اتشال من البروفايلات)،
+  // نضيفه كخيار مؤقت "(حالي)" عشان يفضل ثابت ظاهر، وميضيعش لو حفظت من غير ما تلمسه
+  const layoutSel = document.getElementById('ready-modal-layout');
+  const curLayout = selectedReadyOrder.Layout || selectedReadyOrder.layout || '';
+  if (layoutSel && curLayout && ![...layoutSel.options].some(o => o.value === curLayout)) {
+    const extraLayoutOpt = document.createElement('option');
+    extraLayoutOpt.value = curLayout;
+    extraLayoutOpt.innerText = getDisplayName(curLayout) + ' (حالي)';
+    layoutSel.appendChild(extraLayoutOpt);
+  }
+  if (layoutSel) layoutSel.value = curLayout;
+  // نفس الفكرة للمراجع: القيمة الحالية تفضل ثابتة حتى لو مش في القايمة
+  const reviewerSel = document.getElementById('ready-modal-reviewer');
+  const curReviewer = selectedReadyOrder.reviewer || '';
+  if (reviewerSel && curReviewer && ![...reviewerSel.options].some(o => o.value === curReviewer)) {
+    const extraReviewerOpt = document.createElement('option');
+    extraReviewerOpt.value = curReviewer;
+    extraReviewerOpt.innerText = getDisplayName(curReviewer) + ' (حالي)';
+    reviewerSel.appendChild(extraReviewerOpt);
+  }
+  if (reviewerSel) reviewerSel.value = curReviewer;
   // لو الحالة الحالية مش من ضمن القايمة الجديدة (صف قديم)، نضيفها كخيار مؤقت عشان متضيعش عند الحفظ
   const statusSel = document.getElementById('ready-modal-status');
   if (statusSel && selectedReadyOrder.status && !READY_STATUSES.includes(selectedReadyOrder.status)) {
@@ -10212,7 +10288,6 @@ function openReadyEditModal(orderNum) {
     }
   }
   if (statusSel) statusSel.value = selectedReadyOrder.status || 'لم يتم المراجعة';
-  document.getElementById('ready-modal-reviewer').value = selectedReadyOrder.reviewer || '';
   document.getElementById('ready-modal-reason').value = (selectedReadyOrder.reason && selectedReadyOrder.reason !== '-') ? selectedReadyOrder.reason : '';
   document.getElementById('ready-modal-date').value = extractDateString(selectedReadyOrder) || '';
   document.getElementById('ready-modal-type').value = selectedReadyOrder.cert_type || 'عادي';

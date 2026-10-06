@@ -30,7 +30,7 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ============ جدول "جاهز على الطباعة" (نسخة أساسية: عرض + فلترة تاريخ + تعديل + تنبيه فوري) ============
 // نفس بنية وصلاحيات جدول layout بالظبط، والتاب بتاعه بره لوحة الأدمن (ظاهر للكل).
 const READY_TABLE_NAME = 'ready_to_print';
-const READY_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
+const READY_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
 const READY_REVIEWER_ACTIONS = ['تم التعديل', 'تم الرفض للشركة', 'معلق'];
 
 // ============ جدول المواقف (مقصور على 5 أدمن بالاسم، والحذف على umar/mondy بس) ============
@@ -238,6 +238,9 @@ let readyTotalRecordsCount = 0;
 let selectedReadyOrder = null;
 window.__readyScope = 'none'; // 'none' | 'date' (تاريخ واحد بس - النسخة الأساسية)
 let _readySearchDebounceTimer = null;
+let selectedReadyNumbers = new Set(); // مفاتيح صفوف (getRowKey) المحددة في تاب جاهز على الطباعة
+let showOnlySelectedReady = false;
+let readyMultiSelectFileRows = [];
 
 // ============ انتهاء الجلسة ومسح الكاش بعد 24 ساعة (مطلوب فقط) ============
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -909,6 +912,11 @@ async function setupUserSession(profile) {
   document.getElementById('certificates-renovation-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('ready-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
+  // شريط الإجراءات الجماعية لتاب "جاهز على الطباعة" للأدمن فقط، وزرار المسح لعمر وموندي فقط
+  const readyBulkBar = document.getElementById('ready-bulk-bar');
+  if (readyBulkBar) readyBulkBar.style.display = isAdmin ? 'flex' : 'none';
+  const readyBulkDeleteBtn = document.getElementById('ready-bulk-delete-btn');
+  if (readyBulkDeleteBtn) readyBulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
   document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   const certMoveGroup = document.getElementById('cert-move-mawaqef-group');
   if (certMoveGroup) certMoveGroup.style.display = canViewMawaqef() ? 'flex' : 'none';
@@ -989,9 +997,9 @@ async function setupUserSession(profile) {
   // مرفوضة قديمة اتجاهلت من قبل - بدل ما يستنى أول تكرار للتايمر (بعد 5 دقايق)
   if (currentUser && currentUser.role !== 'admin') {
     ensureAllRejectedCertRows().then(() => showRejectionNagModal()).catch(() => {});
-    if (typeof ensureMyPendingReadyRows === 'function') ensureMyPendingReadyRows().then(() => showRejectionNagModal()).catch(() => {});
+    if (typeof ensureMyPendingReadyRows === 'function') ensureMyPendingReadyRows().then(() => showReadyNagModal()).catch(() => {});
   }
-  setTimeout(() => showRejectionNagModal(), 3000);
+  setTimeout(() => { showRejectionNagModal(); showReadyNagModal(); }, 3000);
 }
 
 // بيملأ قوايم الحالة الخاصة بتاب المواقف (فلتر الجدول + نافذة التعديل + التعديل الجماعي)
@@ -1123,7 +1131,7 @@ function notifyReadyIfNewlyRejected(eventType, newRow, oldRow) {
   const isForMe = currentUser && (newRow.reviewer === currentUser.username || newRow.reviewer === currentUser.name);
   if (!isForMe) return;
   showReadyToast(newRow);
-  showRejectionNagModal();
+  showReadyNagModal(); // نافذة الجاهز على الطباعة لوحدها (بتودي على تابه)
 }
 function showReadyToast(row) {
   const container = document.getElementById('rejection-toast-container');
@@ -1205,13 +1213,9 @@ function getMyPendingReadyRejections() {
 }
 
 function showRejectionNagModal() {
+  // نافذة المرفوضات لوحدها: بتودي على تاب المرفوضات بس
   const pending = getMyPendingRejections();
-  const pendingReady = (typeof getMyPendingReadyRejections === 'function') ? getMyPendingReadyRejections() : [];
-  const combined = [...pending, ...pendingReady];
-  if (combined.length === 0) { closeRejectionNagModal(); return; }
-  // لو فيه طلبات من الجاهز على الطباعة، الزرار يودي هناك، غير كده يودي المرفوضات
-  const goTarget = pendingReady.length > 0 ? 'ready-print' : 'rejections';
-  const goLabel = pendingReady.length > 0 ? '✅ الذهاب لجاهز على الطباعة' : '📋 الذهاب الي مرفوضاتي';
+  if (pending.length === 0) { closeRejectionNagModal(); return; }
 
   let overlay = document.getElementById('rejection-nag-modal');
   if (!overlay) {
@@ -1231,13 +1235,11 @@ function showRejectionNagModal() {
     document.body.appendChild(overlay);
   }
 
-  const orderList = combined.slice(0, 5).map(o => o.order_number).join('، ');
-  const moreCount = combined.length > 5 ? ` (+${combined.length - 5} كمان)` : '';
+  const orderList = pending.slice(0, 5).map(o => o.order_number).join('، ');
+  const moreCount = pending.length > 5 ? ` (+${pending.length - 5} كمان)` : '';
   document.getElementById('rejection-nag-title').innerText =
-    combined.length === 1 ? 'عندك طلب مرفوض محتاج تعديل' : `عندك ${combined.length} طلبات مرفوضة محتاجة تعديل`;
+    pending.length === 1 ? 'عندك طلب مرفوض محتاج تعديل' : `عندك ${pending.length} طلبات مرفوضة محتاجة تعديل`;
   document.getElementById('rejection-nag-body').innerText = `رقم الطلب: ${orderList}${moreCount}`;
-  const goBtn = overlay.querySelector('.btn-primary');
-  if (goBtn) { goBtn.innerText = goLabel; goBtn.setAttribute('onclick', `switchTab('${goTarget}'); closeRejectionNagModal();`); }
 
   overlay.classList.add('active');
   overlay.style.display = 'flex';
@@ -1248,13 +1250,52 @@ function closeRejectionNagModal() {
   if (overlay) { overlay.classList.remove('active'); overlay.style.display = 'none'; }
 }
 
+// نافذة "جاهز على الطباعة" لوحدها: بتودي على تاب جاهز على الطباعة بس
+function showReadyNagModal() {
+  const pending = (typeof getMyPendingReadyRejections === 'function') ? getMyPendingReadyRejections() : [];
+  if (pending.length === 0) { closeReadyNagModal(); return; }
+
+  let overlay = document.getElementById('ready-nag-modal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'ready-nag-modal';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:420px; text-align:center;">
+        <div style="font-size:38px; margin-bottom:8px;">⚠️</div>
+        <div style="font-weight:800; font-size:16px; margin-bottom:10px; color: var(--badge-reject-text);" id="ready-nag-title"></div>
+        <div style="font-size:13px; color:var(--text-muted); margin-bottom:16px;" id="ready-nag-body"></div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-primary" style="flex:1; padding:10px;" onclick="switchTab('ready-print'); closeReadyNagModal();">✅ الذهاب لجاهز على الطباعة</button>
+          <button class="btn" style="flex:1; padding:10px;" onclick="closeReadyNagModal();">ذكرني لاحقاً</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  const orderList = pending.slice(0, 5).map(o => o.order_number).join('، ');
+  const moreCount = pending.length > 5 ? ` (+${pending.length - 5} كمان)` : '';
+  document.getElementById('ready-nag-title').innerText =
+    pending.length === 1 ? 'عندك طلب مرفوض محتاج تعديل (جاهز على الطباعة)' : `عندك ${pending.length} طلبات مرفوضة محتاجة تعديل (جاهز على الطباعة)`;
+  document.getElementById('ready-nag-body').innerText = `رقم الطلب: ${orderList}${moreCount}`;
+
+  overlay.classList.add('active');
+  overlay.style.display = 'flex';
+}
+
+function closeReadyNagModal() {
+  const overlay = document.getElementById('ready-nag-modal');
+  if (overlay) { overlay.classList.remove('active'); overlay.style.display = 'none'; }
+}
+
 // بيشغّل تايمر متكرر - لو لسه فيه طلبات متجاهَلة، يرجّع يورّي النافذة تاني كل فترة.
 // (getMyPendingRejections بترجع مصفوفة فاضية تلقائيًا للأدمن، فالتايمر مالوش أي تأثير عليه)
 function startRejectionNagTimer() {
   if (rejectionNagTimer) return; // شغال بالفعل، متبدأش تاني
   rejectionNagTimer = setInterval(() => {
-    const hasPending = getMyPendingRejections().length > 0 || (typeof getMyPendingReadyRejections === 'function' && getMyPendingReadyRejections().length > 0);
-    if (hasPending) showRejectionNagModal();
+    // كل نافذة لوحدها: المرفوضات بتودي على تابها، والجاهز على الطباعة بيودي على تابه
+    if (getMyPendingRejections().length > 0) showRejectionNagModal();
+    if (typeof getMyPendingReadyRejections === 'function' && getMyPendingReadyRejections().length > 0) showReadyNagModal();
   }, REJECTION_NAG_INTERVAL_MS);
 }
 
@@ -1944,6 +1985,7 @@ function switchTab(tabName) {
   showOnlySelectedDashboard = false;
   showOnlySelectedCert = false;
   showOnlySelectedMawaqef = false;
+  showOnlySelectedReady = false;
   const dashBtn = document.getElementById('show-selected-only-btn');
   if (dashBtn) dashBtn.innerText = '📌 عرض المحدد فقط';
   const certBtn = document.getElementById('show-selected-only-cert-btn');
@@ -1984,6 +2026,11 @@ function switchTab(tabName) {
     if (readyBtn) readyBtn.classList.add('active');
     const readyTab = document.getElementById('tab-ready-print');
     if (readyTab) readyTab.style.display = 'block';
+    selectedReadyNumbers.clear();
+    showOnlySelectedReady = false;
+    const readyShowBtn = document.getElementById('show-selected-only-ready-btn');
+    if (readyShowBtn) readyShowBtn.innerText = '📌 عرض المحدد فقط';
+    updateReadySelectedCount();
     if (!readyDataLoaded) { loadReadyData().catch(() => {}); }
     else { applyReadyDateFiltering(); }
   } else if (tabName === 'print-distribute') {
@@ -8152,6 +8199,11 @@ document.getElementById('cert-search-input').addEventListener('input', () => {
 });
 document.getElementById('cert-status-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
 document.getElementById('cert-layout-filter').addEventListener('change', () => { certCurrentPage = 1; renderCertPage(); });
+// فلاتر تاب جاهز على الطباعة: أي تغيير يعيد الرسم من أول صفحة
+['ready-layout-filter', 'ready-reviewer-filter', 'ready-status-filter', 'ready-action-filter', 'ready-type-filter'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => { readyCurrentPage = 1; renderReadyPage(); });
+});
 // بحث المواقف عبر السيرفر (رقم الطلب أو رقم التقنين) - سريع حتى مع الجداول الكبيرة
 let _mawaqefSearchDebounceTimer = null;
 (function attachMawaqefSearch() {
@@ -9565,11 +9617,26 @@ function populateReadyDropdowns() {
       ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
     if (curR) reviewerSel.value = curR;
   }
+  // فلاتر الجدول: المسؤول (أدمن بس) + المراجع (الكل) — مع الحفاظ على الاختيار الحالي
+  const layoutFilter = document.getElementById('ready-layout-filter');
+  if (layoutFilter) {
+    const curF = layoutFilter.value || 'ALL';
+    layoutFilter.innerHTML = '<option value="ALL">كل المسؤولين</option><option value="UNASSIGNED">⛔ غير موزع</option>' +
+      ALL_PROFILES.filter(p => p.role === 'admin').map(p => `<option value="${p.username}">${p.name}</option>`).join('');
+    layoutFilter.value = [...layoutFilter.options].some(o => o.value === curF) ? curF : 'ALL';
+  }
+  const reviewerFilter = document.getElementById('ready-reviewer-filter');
+  if (reviewerFilter) {
+    const curRF = reviewerFilter.value || 'ALL';
+    reviewerFilter.innerHTML = '<option value="ALL">كل المراجعين</option>' +
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+    reviewerFilter.value = [...reviewerFilter.options].some(o => o.value === curRF) ? curRF : 'ALL';
+  }
 }
 
 async function loadReadyData() {
   const tbody = document.getElementById('ready-tbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     let targetDate = document.getElementById('ready-date-filter') ? document.getElementById('ready-date-filter').value : '';
     if (!targetDate) targetDate = await findLatestReadyDate();
@@ -9584,7 +9651,7 @@ async function loadReadyData() {
       readyDataLoaded = true;
       populateReadyDropdowns();
       const msg = targetDate ? `لا توجد بيانات لتاريخ ${targetDate}` : 'لا توجد بيانات متاحة';
-      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">${msg}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${msg}</td></tr>`;
       const lbl = document.getElementById('ready-active-date-label');
       if (lbl) lbl.innerText = targetDate ? `يعرض طلبات تاريخ: ${targetDate}` : 'لا يوجد بيانات';
       updateReadyPaginationControls(0, 0);
@@ -9597,7 +9664,7 @@ async function loadReadyData() {
     populateReadyDropdowns();
     applyReadyDateFiltering();
   } catch (err) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
     throw err;
   }
 }
@@ -9638,12 +9705,12 @@ async function onReadyDateFilterChange() {
   const targetDate = document.getElementById('ready-date-filter').value;
   if (targetDate && !(readyMasterData || []).some(o => extractDateString(o) === targetDate)) {
     const tbody = document.getElementById('ready-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
       const dateRows = await fetchAllRowsFromTable(READY_TABLE_NAME, q => filterByDateVariants(q, targetDate));
       mergeRowsIntoReadyMasterData(dateRows);
     } catch (err) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
       return;
     }
   }
@@ -9692,25 +9759,57 @@ function getReadyReviewerActionBadge(action) {
 }
 
 function getReadyStatusBadge(status) {
-  const s = status || 'لم يتم الطباعة';
-  if (s === 'تم الطباعة') return '<span class="badge badge-accepted">تم الطباعة</span>';
-  if (s === 'تم إعادة الطباعة') return '<span class="badge badge-reprint">تم إعادة الطباعة</span>';
+  const s = (status && String(status).trim()) || 'لم يتم المراجعة';
+  if (s === 'لم يتم المراجعة') return '<span class="badge badge-unreviewed">لم يتم المراجعة</span>';
+  if (s === 'جاهز للطباعه') return '<span class="badge badge-accepted">جاهز للطباعه</span>';
+  if (s === 'تم مراجعته سابقا') return '<span class="badge badge-reprint">تم مراجعته سابقا</span>';
+  if (s === 'له جهة ولاية') return '<span class="badge badge-error">له جهة ولاية</span>';
   if (s === 'مرفوض') return '<span class="badge badge-rejected">مرفوض</span>';
   if (s === 'محجوز') return '<span class="badge badge-hold">محجوز</span>';
-  if (s === 'خطأ جهة ولاية' || s === 'خطأ عنوان') return '<span class="badge badge-error">⚠️ ' + s + '</span>';
-  if (s === 'معلق') return '<span class="badge badge-hold">معلق</span>';
+  if (s === 'معلق') return '<span class="badge badge-pending">معلق</span>';
   return '<span class="badge badge-unreviewed">' + s + '</span>';
 }
 
 function renderReadyPage() {
   if (!readyAllData) return;
+  // وضع "عرض المحدد فقط": بيعرض بس الصفوف المتحددة حاليًا بغض النظر عن البحث/التاريخ
+  if (showOnlySelectedReady) {
+    const filtered = (readyMasterData || []).filter(item => selectedReadyNumbers.has(getRowKey(item)));
+    readyTotalRecordsCount = filtered.length;
+    const from = (readyCurrentPage - 1) * readyPageSize;
+    const to = from + readyPageSize;
+    window.readyFilteredData = filtered;
+    renderReadyTable(filtered.slice(from, to));
+    updateReadyPaginationControls(from + 1, Math.min(to, readyTotalRecordsCount));
+    return;
+  }
   const searchEl = document.getElementById('ready-search-input');
   const searchValue = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const layoutValue = (document.getElementById('ready-layout-filter') || {}).value || 'ALL';
+  const reviewerValue = (document.getElementById('ready-reviewer-filter') || {}).value || 'ALL';
+  const statusValue = (document.getElementById('ready-status-filter') || {}).value || 'ALL';
+  const actionValue = (document.getElementById('ready-action-filter') || {}).value || 'ALL';
+  const typeValue = (document.getElementById('ready-type-filter') || {}).value || 'ALL';
   // لو فيه بحث، ندور في كل البيانات المحملة (كل التواريخ المدمجة) مش تاريخ العرض بس
   const baseData = searchValue ? (readyMasterData || []) : (readyAllData || []);
   let filtered = baseData.filter(item => {
-    if (!searchValue) return true;
-    return String(item.order_number || '').toLowerCase().includes(searchValue);
+    const orderNum = String(item.order_number || '').toLowerCase();
+    const matchesSearch = !searchValue || orderNum.includes(searchValue);
+    const layout = item.Layout || item.layout || '';
+    const matchesLayout = (layoutValue === 'ALL')
+      || (layoutValue === 'UNASSIGNED' ? !layout
+        : (layout === layoutValue || getDisplayName(layout) === getDisplayName(layoutValue)));
+    const reviewer = item.reviewer || '';
+    const matchesReviewer = (reviewerValue === 'ALL')
+      || (reviewer === reviewerValue || getDisplayName(reviewer) === getDisplayName(reviewerValue));
+    const status = (item.status && String(item.status).trim()) || 'لم يتم المراجعة';
+    const matchesStatus = (statusValue === 'ALL') || (status === statusValue);
+    const action = item.reviewer_action || '';
+    const matchesAction = (actionValue === 'ALL')
+      || (actionValue === 'PENDING' ? !action : (action === actionValue));
+    const type = item.cert_type || 'عادي';
+    const matchesType = (typeValue === 'ALL') || (type === typeValue);
+    return matchesSearch && matchesLayout && matchesReviewer && matchesStatus && matchesAction && matchesType;
   });
   const dateLabelEl = document.getElementById('ready-active-date-label');
   if (searchValue && dateLabelEl) {
@@ -9729,12 +9828,15 @@ function renderReadyTable(orders) {
   if (!tbody) return;
   tbody.innerHTML = '';
   if (!orders || orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
   orders.forEach(order => {
     const orderNum = order.order_number || '-';
     const safeOrderNum = String(orderNum).replace(/'/g, "\\'");
+    const rowKey = getRowKey(order);
+    const safeRowKey = String(rowKey).replace(/'/g, "\\'");
+    const isChecked = selectedReadyNumbers.has(rowKey) ? 'checked' : '';
     const rawLayout = order.Layout || order.layout || '';
     const layoutLabel = rawLayout ? getDisplayName(rawLayout) : 'غير موزعة';
     const statusBadge = getReadyStatusBadge(order.status);
@@ -9745,6 +9847,7 @@ function renderReadyTable(orders) {
     const dateLabel = rawDate || 'غير محدد';
     tbody.innerHTML += `
       <tr>
+        <td style="text-align:center;"><input type="checkbox" class="ready-row-checkbox" data-rowkey="${rowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleReadyRowSelect(this, '${safeRowKey}')"></td>
         <td class="sticky-action-col"><button class="btn btn-open" onclick="openReadyEditModal('${safeOrderNum}')">تحديث</button></td>
         <td class="order-no-cell">${orderNoCopyHtml(orderNum)}</td>
         <td>${layoutLabel}</td>
@@ -9756,6 +9859,137 @@ function renderReadyTable(orders) {
         <td class="action-time-cell">${formatActionTimestamp(order)}</td>
       </tr>`;
   });
+
+  const selectAllCb = document.getElementById('ready-select-all-checkbox');
+  if (selectAllCb) {
+    const allCurrentChecked = orders.length > 0 && orders.every(o => selectedReadyNumbers.has(getRowKey(o)));
+    selectAllCb.checked = allCurrentChecked;
+  }
+}
+
+// ============ التحديد والإجراءات الجماعية لتاب جاهز على الطباعة (أدمن فقط) ============
+function toggleReadyRowSelect(cb, rowKey) {
+  if (cb.checked) { selectedReadyNumbers.add(rowKey); }
+  else { selectedReadyNumbers.delete(rowKey); }
+  updateReadySelectedCount();
+}
+
+function toggleReadySelectAll(masterCb) {
+  if (!window.readyFilteredData) return;
+  window.readyFilteredData.forEach(o => {
+    const rowKey = getRowKey(o);
+    if (masterCb.checked) { selectedReadyNumbers.add(rowKey); }
+    else { selectedReadyNumbers.delete(rowKey); }
+  });
+  document.querySelectorAll('.ready-row-checkbox').forEach(cb => cb.checked = masterCb.checked);
+  updateReadySelectedCount();
+}
+
+function updateReadySelectedCount() {
+  const countEl = document.getElementById('ready-selected-count');
+  if (countEl) countEl.innerText = selectedReadyNumbers.size;
+}
+
+function clearReadySelection() {
+  selectedReadyNumbers.clear();
+  updateReadySelectedCount();
+  if (showOnlySelectedReady) toggleShowOnlySelectedReady(); else renderReadyPage();
+}
+
+function toggleShowOnlySelectedReady() {
+  showOnlySelectedReady = !showOnlySelectedReady;
+  readyCurrentPage = 1;
+  const btn = document.getElementById('show-selected-only-ready-btn');
+  if (btn) btn.innerText = showOnlySelectedReady ? '↩️ عرض الكل' : '📌 عرض المحدد فقط';
+  renderReadyPage();
+}
+
+// تغيير الحالة لكل الصفوف المحددة دفعة واحدة.
+// لو الحالة الجديدة "مرفوض" بيطلب سبب واحد يتسجل مع الكل، وبيصفّر reviewer_action
+// عشان المراجع يتبلغ ويتصرف من جديد (نفس فكرة التنبيه الفوري).
+async function executeReadyBulkStatusUpdate() {
+  const sel = document.getElementById('ready-bulk-status-select');
+  const newStatus = sel ? sel.value : '';
+  if (!newStatus) { alert('برجاء اختيار الحالة من القائمة أولاً'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  let reason = '-';
+  if (newStatus === 'مرفوض') {
+    const entered = prompt(`اكتب سبب الرفض اللي هيتسجل مع كل الـ (${selectedReadyNumbers.size}) طلب المحدد:`);
+    if (entered === null) return; // ألغى المستخدم
+    if (!entered.trim()) { alert('السبب مطلوب مع حالة "مرفوض"'); return; }
+    reason = entered.trim();
+  }
+
+  if (!confirm(`هل أنت متأكد من تغيير حالة (${selectedReadyNumbers.size}) طلب إلى "${newStatus}"؟`)) return;
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  const updateData = { status: newStatus, reason: reason };
+  if (newStatus === 'مرفوض') updateData.reviewer_action = null;
+
+  try {
+    const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'update', updateData);
+    if (error) { alert('حدث خطأ أثناء تغيير الحالة: ' + error.message); return; }
+    targetOrders.forEach(o => Object.assign(o, updateData));
+    alert(`تم تغيير حالة ${targetOrders.length} طلب بنجاح إلى "${newStatus}"!`);
+    selectedReadyNumbers.clear();
+    if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+    updateReadySelectedCount();
+    if (sel) sel.value = '';
+    applyReadyDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// نقل النوع (عادي ↔ تعمير) لكل الصفوف المحددة دفعة واحدة
+async function executeReadyBulkTypeUpdate() {
+  const sel = document.getElementById('ready-bulk-type-select');
+  const newType = sel ? sel.value : '';
+  if (!newType) { alert('برجاء اختيار النوع من القائمة أولاً'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  if (!confirm(`هل أنت متأكد من تحويل نوع (${selectedReadyNumbers.size}) طلب إلى "${newType}"؟`)) return;
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'update', { cert_type: newType });
+    if (error) { alert('حدث خطأ أثناء تحويل النوع: ' + error.message); return; }
+    targetOrders.forEach(o => { o.cert_type = newType; });
+    alert(`تم تحويل نوع ${targetOrders.length} طلب بنجاح إلى "${newType}"!`);
+    selectedReadyNumbers.clear();
+    if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+    updateReadySelectedCount();
+    if (sel) sel.value = '';
+    applyReadyDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
+// حذف نهائي للصفوف المحددة - متاح لعمر وموندي فقط (حسب canDelete)
+async function executeReadyBulkDelete() {
+  if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }
+  if (!confirm(`هل أنت متأكد من رغبتك في حذف (${selectedReadyNumbers.size}) طلب محدد نهائياً؟`)) return;
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) { alert('لم يتم العثور على الطلبات المحددة.'); return; }
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'delete');
+    if (error) { alert('حدث خطأ أثناء الحذف الجماعي: ' + error.message); return; }
+    const deletedIds = new Set(matchValues);
+    readyMasterData = (readyMasterData || []).filter(o => !deletedIds.has(o.id));
+    alert(`تم حذف ${targetOrders.length} طلب بنجاح!`);
+    selectedReadyNumbers.clear();
+    if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+    updateReadySelectedCount();
+    applyReadyDateFiltering();
+  } catch (err) { alert('خطأ: ' + err.message); }
 }
 
 function updateReadyPaginationControls(from, to) {
@@ -9796,19 +10030,33 @@ function openReadyEditModal(orderNum) {
   }
   document.getElementById('ready-modal-order-no').value = selectedReadyOrder.order_number || '';
   document.getElementById('ready-modal-layout').value = selectedReadyOrder.Layout || selectedReadyOrder.layout || '';
-  document.getElementById('ready-modal-status').value = READY_STATUSES.includes(selectedReadyOrder.status) ? selectedReadyOrder.status : 'معلق';
+  // لو الحالة الحالية مش من ضمن القايمة الجديدة (صف قديم)، نضيفها كخيار مؤقت عشان متضيعش عند الحفظ
+  const statusSel = document.getElementById('ready-modal-status');
+  if (statusSel && selectedReadyOrder.status && !READY_STATUSES.includes(selectedReadyOrder.status)) {
+    if (![...statusSel.options].some(o => o.value === selectedReadyOrder.status)) {
+      const extraOpt = document.createElement('option');
+      extraOpt.value = selectedReadyOrder.status;
+      extraOpt.innerText = selectedReadyOrder.status + ' (قديمة)';
+      statusSel.appendChild(extraOpt);
+    }
+  }
+  if (statusSel) statusSel.value = selectedReadyOrder.status || 'لم يتم المراجعة';
   document.getElementById('ready-modal-reviewer').value = selectedReadyOrder.reviewer || '';
   document.getElementById('ready-modal-reason').value = (selectedReadyOrder.reason && selectedReadyOrder.reason !== '-') ? selectedReadyOrder.reason : '';
   document.getElementById('ready-modal-date').value = extractDateString(selectedReadyOrder) || '';
   document.getElementById('ready-modal-type').value = selectedReadyOrder.cert_type || 'عادي';
   document.getElementById('ready-modal-reviewer-action').value = READY_REVIEWER_ACTIONS.includes(selectedReadyOrder.reviewer_action) ? selectedReadyOrder.reviewer_action : '';
+  document.getElementById('ready-modal-reviewer-reason').value = (selectedReadyOrder.reason && selectedReadyOrder.reason !== '-') ? selectedReadyOrder.reason : '';
   const adminFields = document.getElementById('ready-modal-admin-fields');
+  const reviewerReasonGroup = document.getElementById('ready-reviewer-reason-group');
   const note = document.getElementById('ready-modal-reviewer-note');
   if (isAdmin) {
     if (adminFields) adminFields.style.display = 'block';
+    if (reviewerReasonGroup) reviewerReasonGroup.style.display = 'none';
     if (note) note.style.display = 'none';
   } else {
     if (adminFields) adminFields.style.display = 'none';
+    if (reviewerReasonGroup) reviewerReasonGroup.style.display = 'block';
     if (note) note.style.display = 'block';
   }
   document.getElementById('ready-edit-modal').style.display = 'flex';
@@ -9824,25 +10072,32 @@ async function saveReadyUpdate() {
   const isAdmin = currentUser && currentUser.role === 'admin';
   const saveBtn = document.getElementById('ready-btn-save-modal');
   const newReviewerAction = document.getElementById('ready-modal-reviewer-action').value;
-  // المراجع: reviewer_action بس، ولازم تكون واحدة من الـ 3 قيم المسموحة (نفس شرط التريجر)
+  // المراجع: reviewer_action + السبب (اختياري)، ولازم الحالة تكون من الـ 3 قيم المسموحة (نفس شرط التريجر).
+  // ملحوظة: حفظ السبب للمراجع محتاج تشغيل تعديل التريجر في قاعدة البيانات أولاً (هتلاقيه في رسالة التسليم).
   if (!isAdmin) {
     if (!newReviewerAction || !READY_REVIEWER_ACTIONS.includes(newReviewerAction)) {
       alert('برجاء اختيار حالة المراجعة (تم التعديل / تم الرفض للشركة / معلق).');
       return;
     }
+    const reviewerReasonEl = document.getElementById('ready-modal-reviewer-reason');
+    const newReviewerReason = reviewerReasonEl ? reviewerReasonEl.value.trim() : '';
     saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
     try {
-      const { data, error } = await supabaseClient.from(READY_TABLE_NAME).update({ reviewer_action: newReviewerAction }).eq('id', selectedReadyOrder.id).select();
+      const reviewerUpdate = { reviewer_action: newReviewerAction };
+      if (newReviewerReason) reviewerUpdate.reason = newReviewerReason;
+      const { data, error } = await supabaseClient.from(READY_TABLE_NAME).update(reviewerUpdate).eq('id', selectedReadyOrder.id).select();
       if (error) { alert('فشل التحديث: ' + error.message); return; }
       if (!data || data.length === 0) { alert('التحديث لم يُنفَّذ فعليًا. على الأغلب صلاحياتك على هذا الطلب غير كافية - راجع الأدمن.'); return; }
       selectedReadyOrder.reviewer_action = newReviewerAction;
+      if (newReviewerReason) selectedReadyOrder.reason = newReviewerReason;
       applyReadyDateFiltering();
       closeReadyModal();
     } catch (err) { alert('خطأ: ' + err.message); }
     finally { saveBtn.innerText = 'حفظ'; saveBtn.disabled = false; }
     return;
   }
-  // الأدمن: يعدّل كل حاجة
+  // الأدمن: يعدّل كل حاجة.
+  // لو الحالة الجديدة "مرفوض"، reviewer_action بيتصفّر تلقائيًا عشان المراجع يتبلغ ويتصرف من جديد.
   const newStatus = document.getElementById('ready-modal-status').value;
   const newLayout = document.getElementById('ready-modal-layout').value;
   const newReviewer = document.getElementById('ready-modal-reviewer').value;
@@ -9857,7 +10112,7 @@ async function saveReadyUpdate() {
     reason: newReason || '-',
     date: newDate || null,
     cert_type: newType || 'عادي',
-    reviewer_action: newReviewerAction || null
+    reviewer_action: newStatus === 'مرفوض' ? null : (newReviewerAction || null)
   };
   try {
     const { data, error } = await supabaseClient.from(READY_TABLE_NAME).update(updateData).eq('id', selectedReadyOrder.id).select();
@@ -9882,13 +10137,13 @@ async function saveReadyUpdate() {
       if (_readySearchDebounceTimer) clearTimeout(_readySearchDebounceTimer);
       if (!searchValue) { renderReadyPage(); return; }
       const tbody = document.getElementById('ready-tbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري البحث...</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري البحث...</td></tr>`;
       _readySearchDebounceTimer = setTimeout(async () => {
         if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
         try { await searchReadyAcrossAllDates(searchValue); }
         catch (err) {
           if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
-          if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+          if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
           return;
         }
         if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
@@ -9899,6 +10154,145 @@ async function saveReadyUpdate() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
   else attach();
 })();
+
+// ============ تحديد متعدد عن طريق لصق أرقام طلبات أو رفع ملف (تاب جاهز على الطباعة) ============
+function toggleReadyMultiSelectPanel() {
+  const panel = document.getElementById('ready-multiselect-panel');
+  panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+}
+
+function clearReadyMultiSelectInput() {
+  document.getElementById('ready-multiselect-textarea').value = '';
+  document.getElementById('ready-multiselect-file-name').innerText = '';
+  document.getElementById('ready-multiselect-results').innerHTML = '';
+  readyMultiSelectFileRows = [];
+}
+
+function handleReadyMultiSelectDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('ready-multiselect-dropzone').classList.add('drag-over');
+}
+
+function handleReadyMultiSelectDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('ready-multiselect-dropzone').classList.remove('drag-over');
+}
+
+function handleReadyMultiSelectDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('ready-multiselect-dropzone').classList.remove('drag-over');
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (files && files.length > 0) processReadyMultiSelectFile(files[0]);
+}
+
+function handleReadyMultiSelectFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (file) processReadyMultiSelectFile(file);
+  event.target.value = '';
+}
+
+async function processReadyMultiSelectFile(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+    alert('برجاء رفع ملف CSV أو Excel بس');
+    return;
+  }
+
+  document.getElementById('ready-multiselect-file-name').innerText = `جاري قراءة: ${file.name} ...`;
+
+  try {
+    const rawRows = await parseFileToRows(file);
+    const extracted = extractOrderNumbersFromRows(rawRows);
+    if (extracted.length === 0) {
+      alert('معرفتش ألاقي عمود رقم الطلب في الملف ده. تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.');
+      document.getElementById('ready-multiselect-file-name').innerText = '';
+      return;
+    }
+    readyMultiSelectFileRows = extracted;
+    document.getElementById('ready-multiselect-file-name').innerText = `تم رفع: ${file.name} (${extracted.length} رقم)`;
+  } catch (err) {
+    alert('تعذّر قراءة الملف: ' + err.message);
+  }
+}
+
+// بيدور على أرقام الطلبات (من المربع + الملف) في كل التواريخ عبر السيرفر، ويحددهم تلقائيًا
+async function verifyAndSelectReadyOrders() {
+  const textValue = document.getElementById('ready-multiselect-textarea').value;
+  const fromText = textValue.split(/[\n,،]+/).map(s => extractOrderNumberToken(s)).filter(Boolean);
+  const combined = [...new Set([...fromText, ...readyMultiSelectFileRows])];
+
+  if (combined.length === 0) {
+    alert('برجاء إدخال أرقام طلبات أو رفع ملف أولاً.');
+    return;
+  }
+  const resultsEl0 = document.getElementById('ready-multiselect-results');
+  if (resultsEl0) resultsEl0.innerHTML = `<p style="color: var(--text-muted);">⏳ جاري البحث في كل التواريخ...</p>`;
+  try { await fetchReadyRowsByOrderNumbers(combined); }
+  catch (err) { alert('تعذّر البحث: ' + err.message); return; }
+
+  if (!readyMasterData || readyMasterData.length === 0) {
+    alert('لا يوجد بيانات محمّلة حاليًا.');
+    return;
+  }
+
+  // رقم الطلب ممكن يتكرر على أكتر من صف - بنحدد كل الصفوف اللي بنفس الرقم
+  const readyRowsByNumber = new Map();
+  readyMasterData.forEach(o => {
+    const k = String(o.order_number);
+    if (!readyRowsByNumber.has(k)) readyRowsByNumber.set(k, []);
+    readyRowsByNumber.get(k).push(o);
+  });
+  const found = [];
+  const notFound = [];
+
+  combined.forEach(num => {
+    const rows = readyRowsByNumber.get(String(num));
+    if (rows && rows.length > 0) {
+      found.push(num);
+      rows.forEach(o => selectedReadyNumbers.add(getRowKey(o)));
+    } else {
+      notFound.push(num);
+    }
+  });
+
+  updateReadySelectedCount();
+
+  if (found.length > 0) {
+    // الأرقام المتحددة ممكن تكون منتشرة على تواريخ مختلفة، فبنشيل فلتر التاريخ وأي فلتر تاني
+    // ممكن يخفيهم (بحث/حالة/مسؤول/مراجع/نوع)، عشان نضمن ظهورهم كلهم، وننقل تلقائيًا لأول صفحة فيها
+    // أول رقم اتحدد - عشان تشوفه فورًا من غير ما تدور عليه بنفسك.
+    document.getElementById('ready-date-filter').value = '';
+    document.getElementById('ready-search-input').value = '';
+    document.getElementById('ready-status-filter').value = 'ALL';
+    document.getElementById('ready-layout-filter').value = 'ALL';
+    document.getElementById('ready-reviewer-filter').value = 'ALL';
+    document.getElementById('ready-action-filter').value = 'ALL';
+    document.getElementById('ready-type-filter').value = 'ALL';
+
+    readyAllData = readyMasterData; // كل التواريخ
+    document.getElementById('ready-active-date-label').innerText = `يعرض كل التواريخ (بحث عن ${found.length} رقم محدد)`;
+
+    const foundSet = new Set(found);
+    const firstFoundIndex = readyAllData.findIndex(o => foundSet.has(String(o.order_number)));
+    readyCurrentPage = firstFoundIndex >= 0 ? Math.floor(firstFoundIndex / readyPageSize) + 1 : 1;
+  }
+
+  renderReadyPage(); // بيعيد رسم البيانات بترتيبها، والـ checkboxes بتتظبط تلقائيًا حسب التحديد
+
+  const table = document.querySelector('#tab-ready-print .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const resultsEl = document.getElementById('ready-multiselect-results');
+  let html = `<p style="color: var(--badge-accept-text); font-weight:700;">✅ تم تحديد ${found.length} طلب بنجاح (من أصل ${combined.length} رقم مُدخل) - بحثنا في كل التواريخ ونقلناك على طول لأول صفحة فيها أول رقم متحدد.</p>`;
+  if (notFound.length > 0) {
+    html += `<p style="color: var(--badge-reject-text); font-weight:700; margin-top:8px;">⚠️ ${notFound.length} رقم مش موجود أصلاً (بأي تاريخ):</p>`;
+    html += `<div style="max-height:100px; overflow-y:auto; font-size:12px; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; margin-top:6px;">${notFound.join('، ')}</div>`;
+  }
+  resultsEl.innerHTML = html;
+}
 
 // ============================================================
 // ============ توزيع "جاهز على الطباعة" (تاب إداري) ============
@@ -10390,7 +10784,8 @@ async function uploadReadyDistOrdersToSupabase() {
     const { fresh, allowedDuplicates, skippedCount } = checkReadyDuplicatesAndConfirm(parsedReadyDistNumbers);
 
     const buildRow = (num) => {
-      const row = { order_number: num, date: batchDate, cert_type: certTypeForBatch };
+      // أي طلب جديد بينزل بحالة "لم يتم المراجعة" افتراضيًا
+      const row = { order_number: num, date: batchDate, cert_type: certTypeForBatch, status: 'لم يتم المراجعة' };
       if (readyDistLayoutAssignments[num]) row.Layout = readyDistLayoutAssignments[num];
       if (reviewerForBatch) row.reviewer = reviewerForBatch;
       return row;

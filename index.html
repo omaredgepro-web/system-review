@@ -781,6 +781,8 @@
 
     <!-- TAB: ✅ جاهز على الطباعة (بره لوحة الأدمن - للكل: أدمن + مراجع) -->
     <div id="tab-ready-print" style="display: none;">
+      <div id="ready-kpi-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px;"></div>
+
       <div class="main-content">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -801,6 +803,7 @@
           <label style="font-size: 13px; color: var(--text-muted);">تاريخ الحالة:</label>
           <input type="date" id="ready-date-filter" class="date-input" onchange="onReadyDateFilterChange()">
           <button class="btn btn-secondary" onclick="resetReadyDateToLatest()" style="padding: 6px 12px; font-size: 12px;">أحدث تاريخ</button>
+          <button class="btn btn-secondary" id="ready-view-all-dates-btn" onclick="toggleShowAllReadyDates()" style="padding: 6px 12px; font-size: 12px;">📅 عرض كل التواريخ</button>
           <select id="ready-status-filter" class="filter-select">
             <option value="ALL">كل الحالات</option>
             <option value="لم يتم المراجعة">لم يتم المراجعة</option>
@@ -856,6 +859,10 @@
             <button id="show-selected-only-ready-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedReady()">📌 عرض المحدد فقط</button>
           </div>
           <div class="bulk-group">
+            <input type="number" id="ready-bulk-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 100px;">
+            <button class="btn btn-secondary btn-sm" onclick="selectNextReadyBatch()">تحديد التالي (غير موزع)</button>
+          </div>
+          <div class="bulk-group">
             <select id="ready-bulk-status-select" class="filter-select btn-sm" style="width: 170px;">
               <option value="">تغيير الحالة إلى...</option>
               <option value="لم يتم المراجعة">لم يتم المراجعة</option>
@@ -870,7 +877,7 @@
           </div>
           <div class="bulk-group">
             <select id="ready-bulk-type-select" class="filter-select btn-sm" style="width: 130px;">
-              <option value="">نقل النوع...</option>
+              <option value="">تغيير النوع...</option>
               <option value="عادي">🖨️ عادي</option>
               <option value="تعمير">📠 تعمير</option>
             </select>
@@ -897,11 +904,12 @@
                 <th>حالة الطلب (للمراجع)</th>
                 <th>السبب</th>
                 <th>التاريخ</th>
+                <th>النوع</th>
                 <th id="ready-action-time-header">🕐 آخر إجراء</th>
               </tr>
             </thead>
             <tbody id="ready-tbody">
-              <tr><td colspan="10" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
+              <tr><td colspan="11" style="text-align: center;">جاري الاتصال بـ Supabase...</td></tr>
             </tbody>
           </table>
         </div>

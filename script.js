@@ -10481,7 +10481,12 @@ function openReadyEditModal(orderNum) {
   document.getElementById('ready-modal-date').value = extractDateString(selectedReadyOrder) || '';
   document.getElementById('ready-modal-type').value = selectedReadyOrder.cert_type || 'عادي';
   document.getElementById('ready-modal-reviewer-action').value = READY_REVIEWER_ACTIONS.includes(selectedReadyOrder.reviewer_action) ? selectedReadyOrder.reviewer_action : '';
-  document.getElementById('ready-modal-reviewer-reason').value = (selectedReadyOrder.reason && selectedReadyOrder.reason !== '-') ? selectedReadyOrder.reason : '';
+  // سبب الأدمن يظهر للمراجع للقراءة فقط (مقفول - ميقدرش يغيره)
+  const reviewerReasonEl = document.getElementById('ready-modal-reviewer-reason');
+  if (reviewerReasonEl) {
+    reviewerReasonEl.value = (selectedReadyOrder.reason && selectedReadyOrder.reason !== '-') ? selectedReadyOrder.reason : '';
+    reviewerReasonEl.disabled = true;
+  }
   const adminFields = document.getElementById('ready-modal-admin-fields');
   const reviewerReasonGroup = document.getElementById('ready-reviewer-reason-group');
   const note = document.getElementById('ready-modal-reviewer-note');
@@ -10507,24 +10512,20 @@ async function saveReadyUpdate() {
   const isAdmin = currentUser && currentUser.role === 'admin';
   const saveBtn = document.getElementById('ready-btn-save-modal');
   const newReviewerAction = document.getElementById('ready-modal-reviewer-action').value;
-  // المراجع: reviewer_action + السبب (اختياري)، ولازم الحالة تكون من الـ 3 قيم المسموحة (نفس شرط التريجر).
-  // ملحوظة: حفظ السبب للمراجع محتاج تشغيل تعديل التريجر في قاعدة البيانات أولاً (هتلاقيه في رسالة التسليم).
+  // المراجع: reviewer_action بس — سبب الأدمن مقفول عليه ومبيتبعتش في الحفظ أصلًا،
+  // ولازم الحالة تكون من الـ 3 قيم المسموحة (نفس شرط التريجر).
   if (!isAdmin) {
     if (!newReviewerAction || !READY_REVIEWER_ACTIONS.includes(newReviewerAction)) {
       alert('برجاء اختيار حالة المراجعة (تم التعديل / تم الرفض للشركة / معلق).');
       return;
     }
-    const reviewerReasonEl = document.getElementById('ready-modal-reviewer-reason');
-    const newReviewerReason = reviewerReasonEl ? reviewerReasonEl.value.trim() : '';
     saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
     try {
       const reviewerUpdate = { reviewer_action: newReviewerAction };
-      if (newReviewerReason) reviewerUpdate.reason = newReviewerReason;
       const { data, error } = await supabaseClient.from(READY_TABLE_NAME).update(reviewerUpdate).eq('id', selectedReadyOrder.id).select();
       if (error) { alert('فشل التحديث: ' + error.message); return; }
       if (!data || data.length === 0) { alert('التحديث لم يُنفَّذ فعليًا. على الأغلب صلاحياتك على هذا الطلب غير كافية - راجع الأدمن.'); return; }
       selectedReadyOrder.reviewer_action = newReviewerAction;
-      if (newReviewerReason) selectedReadyOrder.reason = newReviewerReason;
       applyReadyDateFiltering();
       closeReadyModal();
     } catch (err) { alert('خطأ: ' + err.message); }

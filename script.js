@@ -10754,16 +10754,10 @@ async function fetchReadyRowsByOrderNumbers(orderNumbers) {
   return out;
 }
 
-// بيملأ قوايم التوزيع: المراجع (كل البروفايلات) + المسؤول (أدمن بس) + قايمة التوزيع المتوازن.
+// بيملأ قوايم التوزيع: المسؤول (أدمن بس) + قايمة التوزيع المتوازن.
+// التوزيع هنا على المسؤول فقط (مفيش مراجع في شاشة التوزيع).
 // بيحافظ على الاختيارات الحالية لو موجودة.
 function populateReadyDistDropdowns() {
-  const reviewerSel = document.getElementById('ready-dist-reviewer-select');
-  if (reviewerSel) {
-    const cur = reviewerSel.value;
-    reviewerSel.innerHTML = '<option value="">بدون مراجع الآن</option>' +
-      (ALL_PROFILES || []).map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
-    if (cur) reviewerSel.value = cur;
-  }
   const layoutSel = document.getElementById('ready-dist-layout-select');
   if (layoutSel) {
     const curL = layoutSel.value;
@@ -10892,11 +10886,6 @@ function handleReadyDistFileDrop(event) {
 }
 
 // المراجع المختار للدفعة كلها (يتعرض في المعاينة ويتخزن مع كل صف عند الرفع)
-function getReadyDistReviewer() {
-  const sel = document.getElementById('ready-dist-reviewer-select');
-  return sel ? sel.value : '';
-}
-
 function renderReadyDistPreview() {
   const hasData = parsedReadyDistNumbers.length > 0;
   const previewArea = document.getElementById('ready-dist-preview-area');
@@ -10915,38 +10904,15 @@ function renderReadyDistPreview() {
 
   const tbody = document.getElementById('ready-dist-preview-tbody');
   if (!tbody) return;
-  const reviewerVal = getReadyDistReviewer();
-  const reviewerLabel = reviewerVal ? getDisplayName(reviewerVal) : '-';
   const PREVIEW_LIMIT = 500;
   tbody.innerHTML = parsedReadyDistNumbers.slice(0, PREVIEW_LIMIT).map(num => `
     <tr>
       <td class="order-no-cell">${num}</td>
       <td>${readyDistLayoutAssignments[num] ? getDisplayName(readyDistLayoutAssignments[num]) : '-'}</td>
-      <td>${reviewerLabel}</td>
     </tr>
   `).join('');
   if (parsedReadyDistNumbers.length > PREVIEW_LIMIT) {
-    tbody.innerHTML += `<tr><td colspan="3" style="text-align:center; color: var(--text-muted);">... و ${parsedReadyDistNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
-  }
-}
-
-// لو المراجع للدفعة اتغيّر بعد ما المعاينة اترسمت، حدّث عمود المراجع بس من غير إعادة فحص التكرار
-function onReadyDistReviewerChange() {
-  if (!parsedReadyDistNumbers || parsedReadyDistNumbers.length === 0) return;
-  const tbody = document.getElementById('ready-dist-preview-tbody');
-  if (!tbody) return;
-  const reviewerVal = getReadyDistReviewer();
-  const reviewerLabel = reviewerVal ? getDisplayName(reviewerVal) : '-';
-  const PREVIEW_LIMIT = 500;
-  tbody.innerHTML = parsedReadyDistNumbers.slice(0, PREVIEW_LIMIT).map(num => `
-    <tr>
-      <td class="order-no-cell">${num}</td>
-      <td>${readyDistLayoutAssignments[num] ? getDisplayName(readyDistLayoutAssignments[num]) : '-'}</td>
-      <td>${reviewerLabel}</td>
-    </tr>
-  `).join('');
-  if (parsedReadyDistNumbers.length > PREVIEW_LIMIT) {
-    tbody.innerHTML += `<tr><td colspan="3" style="text-align:center; color: var(--text-muted);">... و ${parsedReadyDistNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
+    tbody.innerHTML += `<tr><td colspan="2" style="text-align:center; color: var(--text-muted);">... و ${parsedReadyDistNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
   }
 }
 
@@ -11217,14 +11183,13 @@ async function uploadReadyDistOrdersToSupabase() {
     if (btn) btn.innerText = 'جاري فحص التكرار...';
     try { await fetchReadyRowsByOrderNumbers(parsedReadyDistNumbers); } catch (e) { console.warn('فحص التكرار:', e.message); }
     const certTypeForBatch = (document.getElementById('ready-dist-cert-type-select') || {}).value || 'عادي';
-    const reviewerForBatch = getReadyDistReviewer() || null;
     const { fresh, allowedDuplicates, skippedCount } = checkReadyDuplicatesAndConfirm(parsedReadyDistNumbers);
 
     const buildRow = (num) => {
-      // أي طلب جديد بينزل بحالة "لم يتم المراجعة" افتراضيًا
+      // أي طلب جديد بينزل بحالة "لم يتم المراجعة" افتراضيًا، والتوزيع على المسؤول فقط
+      // (المراجع بيتحدد بعد كده من تاب العرض: نافذة التحديث أو التغيير الجماعي)
       const row = { order_number: num, date: batchDate, cert_type: certTypeForBatch, status: 'لم يتم المراجعة' };
       if (readyDistLayoutAssignments[num]) row.Layout = readyDistLayoutAssignments[num];
-      if (reviewerForBatch) row.reviewer = reviewerForBatch;
       return row;
     };
     const rowsToInsert = fresh.concat(allowedDuplicates).map(buildRow);

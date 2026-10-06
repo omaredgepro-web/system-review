@@ -859,10 +859,6 @@
             <button id="show-selected-only-ready-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedReady()">📌 عرض المحدد فقط</button>
           </div>
           <div class="bulk-group">
-            <input type="number" id="ready-bulk-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 100px;">
-            <button class="btn btn-secondary btn-sm" onclick="selectNextReadyBatch()">تحديد التالي (غير موزع)</button>
-          </div>
-          <div class="bulk-group">
             <select id="ready-bulk-status-select" class="filter-select btn-sm" style="width: 170px;">
               <option value="">تغيير الحالة إلى...</option>
               <option value="لم يتم المراجعة">لم يتم المراجعة</option>
@@ -882,6 +878,14 @@
               <option value="تعمير">📠 تعمير</option>
             </select>
             <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkTypeUpdate()">تطبيق النقل</button>
+          </div>
+          <div class="bulk-group">
+            <select id="ready-bulk-layout-select" class="filter-select btn-sm" style="width: 150px;"><option value="">تغيير إلى المسؤول...</option></select>
+            <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkLayoutUpdate()">تطبيق المسؤول</button>
+          </div>
+          <div class="bulk-group">
+            <select id="ready-bulk-reviewer-select" class="filter-select btn-sm" style="width: 150px;"><option value="">تغيير إلى المراجع...</option></select>
+            <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkReviewerUpdate()">تطبيق المراجع</button>
           </div>
           <div class="bulk-group">
             <input type="number" id="ready-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">

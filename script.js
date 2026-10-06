@@ -27,6 +27,12 @@ const CERT_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 
 const CERT_REASON_REQUIRED_STATUSES = ['مرفوض', 'خطأ جهة ولاية', 'خطأ عنوان'];
 const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 
+// ============ جدول "جاهز على الطباعة" (نسخة أساسية: عرض + فلترة تاريخ + تعديل + تنبيه فوري) ============
+// نفس بنية وصلاحيات جدول layout بالظبط، والتاب بتاعه بره لوحة الأدمن (ظاهر للكل).
+const READY_TABLE_NAME = 'ready_to_print';
+const READY_STATUSES = ['تم الطباعة', 'تم إعادة الطباعة', 'مرفوض', 'محجوز', 'خطأ جهة ولاية', 'خطأ عنوان', 'معلق'];
+const READY_REVIEWER_ACTIONS = ['تم التعديل', 'تم الرفض للشركة', 'معلق'];
+
 // ============ جدول المواقف (مقصور على 5 أدمن بالاسم، والحذف على umar/mondy بس) ============
 const MAWAQEF_TABLE_NAME = 'mawaqef';
 const MAWAQEF_ALLOWED_USERNAMES = ['umar', 'mondy', 'sara', 'momen', 'rawan'];
@@ -158,6 +164,10 @@ let parsedCsvData = [];
 let parsedPrintOrderNumbers = [];
 let printOrderAssignments = {}; // order_number -> اسم الأدمن المخصص ليه (من التوزيع التلقائي)
 let printDistUserSelection = null;
+// ============ حالة تاب توزيع "جاهز على الطباعة" ============
+let parsedReadyDistNumbers = [];
+let readyDistLayoutAssignments = {}; // order_number -> اسم الأدمن (المسؤول) المخصص ليه
+let readyDistLayoutSelection = null;
 // مهم: رقم الطلب ممكن يتكرر (نفس الرقم على أكتر من صف/تاريخ)، فالتحديد والحذف
 // لازم يشتغلوا على مفتاح فريد للصف نفسه - مش على رقم الطلب - عشان:
 //  1) العدّاد ميدمجش الصفوف المكررة ويحسبها صف واحد
@@ -217,6 +227,17 @@ let certTotalRecordsCount = 0;
 let selectedCertOrder = null;
 let certDataLoaded = false;
 let selectedCertOrderNumbers = new Set();
+
+// ============ حالة تاب "جاهز على الطباعة" (نسخة أساسية) ============
+let readyMasterData = [];
+let readyAllData = [];
+let readyDataLoaded = false;
+let readyCurrentPage = 1;
+const readyPageSize = 100;
+let readyTotalRecordsCount = 0;
+let selectedReadyOrder = null;
+window.__readyScope = 'none'; // 'none' | 'date' (تاريخ واحد بس - النسخة الأساسية)
+let _readySearchDebounceTimer = null;
 
 // ============ انتهاء الجلسة ومسح الكاش بعد 24 ساعة (مطلوب فقط) ============
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -887,11 +908,18 @@ async function setupUserSession(profile) {
   document.getElementById('certificates-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('certificates-renovation-tab-btn').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('print-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
+  document.getElementById('ready-distribute-tab-btn').style.display = canDelete() ? 'block' : 'none';
   document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   const certMoveGroup = document.getElementById('cert-move-mawaqef-group');
   if (certMoveGroup) certMoveGroup.style.display = canViewMawaqef() ? 'flex' : 'none';
   document.getElementById('gehat-wlaya-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   document.getElementById('reviewer-stats-tab-btn').style.display = isAdmin ? 'block' : 'none';
+  // تاب "جاهز على الطباعة" بره لوحة الأدمن - ظاهر للكل (أدمن + مراجع) دايمًا
+  // وعمود "آخر إجراء" ظاهر للكل زي تاب الشهادات بالظبط (بدون إخفاء حسب الدور)
+  const readyTabBtn = document.getElementById('ready-print-tab-btn');
+  if (readyTabBtn) readyTabBtn.style.display = 'block';
+  const readyActionTimeHeader = document.getElementById('ready-action-time-header');
+  if (readyActionTimeHeader) readyActionTimeHeader.style.display = 'table-cell';
 
   // زرار "لوحة الأدمن" المنسدل نفسه يظهر بس لو فيه عنصر واحد على الأقل جواه هيظهر للمستخدم ده
   document.getElementById('admin-menu-toggle-btn').style.display = (canDelete() || isAdmin || canViewMawaqef()) ? 'inline-flex' : 'none';
@@ -927,6 +955,8 @@ async function setupUserSession(profile) {
   ALL_PROFILES = _readCache(PROFILES_CACHE_KEY) || [];
   populateReviewerDropdowns();
   populateMawaqefStatusDropdowns();
+  if (typeof populateReadyDropdowns === 'function') populateReadyDropdowns();
+  if (typeof populateReadyDistDropdowns === 'function') populateReadyDistDropdowns();
   const profilesPromise = fetchAllProfiles();
 
   // بعض المتصفحات (Chrome خصوصًا) بترجّع آخر تاريخ اتكتب في الحقل ده من جلسة سابقة حتى بعد
@@ -934,14 +964,24 @@ async function setupUserSession(profile) {
   // مش تاريخ قديم متبقّي من غير قصد.
   const dateFilterEl = document.getElementById('date-filter');
   if (dateFilterEl) dateFilterEl.value = '';
+  const readyDateFilterEl = document.getElementById('ready-date-filter');
+  if (readyDateFilterEl) readyDateFilterEl.value = '';
+  // تاريخ دفعة توزيع "جاهز على الطباعة" يبدأ بتاريخ النهاردة (بتوقيت مصر) افتراضيًا
+  const readyDistDateEl = document.getElementById('ready-dist-date-input');
+  if (readyDistDateEl && !readyDistDateEl.value && typeof getTodayCairoIsoDate === 'function') {
+    try { readyDistDateEl.value = getTodayCairoIsoDate(); } catch (e) {}
+  }
 
   loadData();
   profilesPromise.then(profiles => {
     if (!profiles || profiles.length === 0) return;
     ALL_PROFILES = profiles;
     populateReviewerDropdowns();
+    if (typeof populateReadyDropdowns === 'function') populateReadyDropdowns();
+    if (typeof populateReadyDistDropdowns === 'function') populateReadyDistDropdowns();
     // أسماء المراجعين في الجدول والإحصائيات تتحدّث لو البيانات وصلت قبل البروفايلات
     if (window.masterData && window.masterData.length > 0) applyDateFiltering();
+    if (readyDataLoaded && typeof applyReadyDateFiltering === 'function') applyReadyDateFiltering();
   });
   subscribeToLiveUpdates();
   startRejectionNagTimer();
@@ -949,6 +989,7 @@ async function setupUserSession(profile) {
   // مرفوضة قديمة اتجاهلت من قبل - بدل ما يستنى أول تكرار للتايمر (بعد 5 دقايق)
   if (currentUser && currentUser.role !== 'admin') {
     ensureAllRejectedCertRows().then(() => showRejectionNagModal()).catch(() => {});
+    if (typeof ensureMyPendingReadyRows === 'function') ensureMyPendingReadyRows().then(() => showRejectionNagModal()).catch(() => {});
   }
   setTimeout(() => showRejectionNagModal(), 3000);
 }
@@ -1014,6 +1055,30 @@ function scheduleLiveMawaqefRender() {
   liveMawaqefRenderTimer = setTimeout(() => applyMawaqefDateFiltering(), 250);
 }
 
+let liveReadyRenderTimer = null;
+function scheduleLiveReadyRender() {
+  clearTimeout(liveReadyRenderTimer);
+  liveReadyRenderTimer = setTimeout(() => { if (typeof applyReadyDateFiltering === 'function') applyReadyDateFiltering(); }, 250);
+}
+function mergeRowsIntoReadyMasterData(newRows) {
+  if (!newRows || newRows.length === 0) return;
+  const existingIds = new Set((readyMasterData || []).map(o => o.id));
+  const toAdd = newRows.filter(o => !existingIds.has(o.id));
+  if (toAdd.length > 0) readyMasterData = (readyMasterData || []).concat(toAdd);
+}
+async function findLatestReadyDate() {
+  return findLatestDateRacing(
+    () => supabaseClient.from(READY_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').order('date', { ascending: false }).limit(20),
+    () => supabaseClient.from(READY_TABLE_NAME).select('date').not('date', 'is', null).neq('date', '').order('id', { ascending: false }).limit(300),
+    r => parseToIsoDate(r.date)
+  );
+}
+async function searchReadyAcrossAllDates(searchValue) {
+  const { data, error } = await supabaseClient.from(READY_TABLE_NAME).select('*').ilike('order_number', `%${searchValue}%`).order('id', { ascending: false }).limit(300);
+  if (error) throw error;
+  mergeRowsIntoReadyMasterData(data || []);
+}
+
 function handleLiveChange(tableName, payload) {
   const { eventType, new: newRow, old: oldRow } = payload;
 
@@ -1030,6 +1095,10 @@ function handleLiveChange(tableName, payload) {
   } else if (tableName === MAWAQEF_TABLE_NAME) {
     mawaqefMasterData = patchMasterDataRow(mawaqefMasterData || [], eventType, newRow, oldRow);
     scheduleLiveMawaqefRender();
+  } else if (tableName === READY_TABLE_NAME) {
+    readyMasterData = patchMasterDataRow(readyMasterData || [], eventType, newRow, oldRow);
+    scheduleLiveReadyRender();
+    notifyReadyIfNewlyRejected(eventType, newRow, oldRow);
   }
 }
 
@@ -1044,6 +1113,38 @@ function notifyReviewerIfNewlyRejected(eventType, newRow, oldRow) {
 
   showRejectionToast(newRow);
   showRejectionNagModal(); // ينبه فورًا في نص الشاشة، مش بس التوست الصغير في الزاوية
+}
+
+// نفس التنبيه الفوري لجدول "جاهز على الطباعة" - لو طلب اترفض والمراجع هو الحالي، نبهه فورًا
+// حتى لو مش فاتح التاب وقتها، والزرار يوديه على تاب "جاهز على الطباعة" مش المرفوضات.
+function notifyReadyIfNewlyRejected(eventType, newRow, oldRow) {
+  if (!newRow || newRow.status !== 'مرفوض') return;
+  if (eventType === 'UPDATE' && oldRow && oldRow.status === 'مرفوض') return;
+  const isForMe = currentUser && (newRow.reviewer === currentUser.username || newRow.reviewer === currentUser.name);
+  if (!isForMe) return;
+  showReadyToast(newRow);
+  showRejectionNagModal();
+}
+function showReadyToast(row) {
+  const container = document.getElementById('rejection-toast-container');
+  if (!container) return;
+  const toastId = 'ready-toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+  const orderNum = row.order_number || '-';
+  const reason = row.reason && row.reason !== '-' ? row.reason : 'بدون سبب مكتوب';
+  const toast = document.createElement('div');
+  toast.id = toastId;
+  toast.style.cssText = 'background: var(--card-bg); border: 1px solid var(--badge-reject-text); border-right: 4px solid var(--badge-reject-text); border-radius: 10px; padding: 14px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); animation: none;';
+  toast.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px;">
+      <div style="font-weight:800; font-size:14px; color: var(--badge-reject-text);">⚠️ طلب (جاهز على الطباعة) اترفض ومحتاج تعديل</div>
+      <button onclick="document.getElementById('${toastId}').remove()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px; line-height:1;">&times;</button>
+    </div>
+    <div style="font-size:13px; margin-bottom:4px;"><b>رقم الطلب:</b> ${orderNum}</div>
+    <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><b>السبب:</b> ${reason}</div>
+    <button class="btn btn-primary" style="width:100%; padding:6px; font-size:12px;" onclick="switchTab('ready-print'); document.getElementById('${toastId}').remove();">✅ روح لجاهز على الطباعة</button>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => { const el = document.getElementById(toastId); if (el) el.remove(); }, 60000);
 }
 
 function showRejectionToast(row) {
@@ -1093,10 +1194,24 @@ function getMyPendingRejections() {
     (o.reviewer === currentUser.username || o.reviewer === currentUser.name)
   );
 }
+// نفس الفكرة لجدول "جاهز على الطباعة" - طلبات مرفوضة لسه متصرفش فيها
+function getMyPendingReadyRejections() {
+  if (!currentUser || currentUser.role === 'admin') return [];
+  return (readyMasterData || []).filter(o =>
+    o.status === 'مرفوض' &&
+    !o.reviewer_action &&
+    (o.reviewer === currentUser.username || o.reviewer === currentUser.name)
+  );
+}
 
 function showRejectionNagModal() {
   const pending = getMyPendingRejections();
-  if (pending.length === 0) { closeRejectionNagModal(); return; }
+  const pendingReady = (typeof getMyPendingReadyRejections === 'function') ? getMyPendingReadyRejections() : [];
+  const combined = [...pending, ...pendingReady];
+  if (combined.length === 0) { closeRejectionNagModal(); return; }
+  // لو فيه طلبات من الجاهز على الطباعة، الزرار يودي هناك، غير كده يودي المرفوضات
+  const goTarget = pendingReady.length > 0 ? 'ready-print' : 'rejections';
+  const goLabel = pendingReady.length > 0 ? '✅ الذهاب لجاهز على الطباعة' : '📋 الذهاب الي مرفوضاتي';
 
   let overlay = document.getElementById('rejection-nag-modal');
   if (!overlay) {
@@ -1116,11 +1231,13 @@ function showRejectionNagModal() {
     document.body.appendChild(overlay);
   }
 
-  const orderList = pending.slice(0, 5).map(o => o.order_number).join('، ');
-  const moreCount = pending.length > 5 ? ` (+${pending.length - 5} كمان)` : '';
+  const orderList = combined.slice(0, 5).map(o => o.order_number).join('، ');
+  const moreCount = combined.length > 5 ? ` (+${combined.length - 5} كمان)` : '';
   document.getElementById('rejection-nag-title').innerText =
-    pending.length === 1 ? 'عندك طلب مرفوض محتاج تعديل' : `عندك ${pending.length} طلبات مرفوضة محتاجة تعديل`;
+    combined.length === 1 ? 'عندك طلب مرفوض محتاج تعديل' : `عندك ${combined.length} طلبات مرفوضة محتاجة تعديل`;
   document.getElementById('rejection-nag-body').innerText = `رقم الطلب: ${orderList}${moreCount}`;
+  const goBtn = overlay.querySelector('.btn-primary');
+  if (goBtn) { goBtn.innerText = goLabel; goBtn.setAttribute('onclick', `switchTab('${goTarget}'); closeRejectionNagModal();`); }
 
   overlay.classList.add('active');
   overlay.style.display = 'flex';
@@ -1136,7 +1253,8 @@ function closeRejectionNagModal() {
 function startRejectionNagTimer() {
   if (rejectionNagTimer) return; // شغال بالفعل، متبدأش تاني
   rejectionNagTimer = setInterval(() => {
-    if (getMyPendingRejections().length > 0) showRejectionNagModal();
+    const hasPending = getMyPendingRejections().length > 0 || (typeof getMyPendingReadyRejections === 'function' && getMyPendingReadyRejections().length > 0);
+    if (hasPending) showRejectionNagModal();
   }, REJECTION_NAG_INTERVAL_MS);
 }
 
@@ -1488,12 +1606,16 @@ function subscribeToLiveUpdates() {
     .on('postgres_changes', { event: '*', schema: 'public', table: MAWAQEF_TABLE_NAME }, (payload) => {
       handleLiveChange(MAWAQEF_TABLE_NAME, payload);
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: READY_TABLE_NAME }, (payload) => {
+      handleLiveChange(READY_TABLE_NAME, payload);
+    })
     .subscribe((status) => {
       // بنحدث مؤشر تاب المراجعة ومؤشر تاب الشهادات ومؤشر تاب المواقف مع بعض، لأنهم على نفس قناة الـ Realtime الواحدة
       const indicators = [
         document.getElementById('live-status-indicator'),
         document.getElementById('cert-live-status-indicator'),
-        document.getElementById('mawaqef-live-status-indicator')
+        document.getElementById('mawaqef-live-status-indicator'),
+        document.getElementById('ready-live-status-indicator')
       ].filter(Boolean);
       if (indicators.length === 0) return;
       indicators.forEach(indicator => {
@@ -1802,13 +1924,17 @@ function switchTab(tabName) {
   document.getElementById('tab-admin').style.display = 'none';
   document.getElementById('tab-certificates').style.display = 'none';
   document.getElementById('tab-print-distribute').style.display = 'none';
+  const readyDistTabEl = document.getElementById('tab-ready-distribute');
+  if (readyDistTabEl) readyDistTabEl.style.display = 'none';
   document.getElementById('tab-rejections').style.display = 'none';
   document.getElementById('tab-mawaqef').style.display = 'none';
   document.getElementById('tab-gehat-wlaya').style.display = 'none';
   const reviewerStatsTabEl = document.getElementById('tab-reviewer-stats');
   if (reviewerStatsTabEl) reviewerStatsTabEl.style.display = 'none';
+  const readyTabEl = document.getElementById('tab-ready-print');
+  if (readyTabEl) readyTabEl.style.display = 'none';
 
-  const adminSubTabs = ['admin', 'certificates', 'certificates-renovation', 'print-distribute', 'mawaqef', 'gehat-wlaya', 'reviewer-stats'];
+  const adminSubTabs = ['admin', 'certificates', 'certificates-renovation', 'print-distribute', 'ready-distribute', 'mawaqef', 'gehat-wlaya', 'reviewer-stats'];
   if (adminSubTabs.includes(tabName)) {
     document.getElementById('admin-menu-toggle-btn').classList.add('active');
   }
@@ -1853,11 +1979,24 @@ function switchTab(tabName) {
     document.getElementById('rejections-date-filter').value = '';
     if (!certDataLoaded) { loadCertificatesData().then(applyRejectionsDateFiltering).catch(() => {}); }
     else { applyRejectionsDateFiltering(); }
+  } else if (tabName === 'ready-print') {
+    const readyBtn = document.getElementById('ready-print-tab-btn');
+    if (readyBtn) readyBtn.classList.add('active');
+    const readyTab = document.getElementById('tab-ready-print');
+    if (readyTab) readyTab.style.display = 'block';
+    if (!readyDataLoaded) { loadReadyData().catch(() => {}); }
+    else { applyReadyDateFiltering(); }
   } else if (tabName === 'print-distribute') {
     document.getElementById('print-distribute-tab-btn').classList.add('active');
     document.getElementById('tab-print-distribute').style.display = 'block';
     // نحمّل بيانات جدول الطباعة مقدمًا (لو لسه معملهاش) عشان فحص التكرار يقدر يشتغل فورًا
     if (!certDataLoaded) loadCertificatesData().then(() => renderPrintDuplicatesPanel()).catch(() => {});
+  } else if (tabName === 'ready-distribute') {
+    document.getElementById('ready-distribute-tab-btn').classList.add('active');
+    document.getElementById('tab-ready-distribute').style.display = 'block';
+    populateReadyDistDropdowns();
+    // فحص التكرار يشتغل فورًا على الأرقام الموجودة في المعاينة (لو فيه)
+    if (parsedReadyDistNumbers.length > 0) renderReadyDistDuplicatesPanel();
   } else if (tabName === 'mawaqef') {
     document.getElementById('mawaqef-tab-btn').classList.add('active');
     document.getElementById('tab-mawaqef').style.display = 'block';
@@ -9403,4 +9542,892 @@ function runCertCustomExport() {
   const now = new Date();
   const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   XLSX.writeFile(workbook, `تصدير_شهادات_مخصص_${stamp}.xlsx`);
+}
+
+// ============================================================
+// ============ تاب "جاهز على الطباعة" - نسخة أساسية ============
+// عرض + فلترة بالتاريخ + تعديل الأدمن لكل حاجة + تعديل المراجع
+// لـ reviewer_action بس + تنبيه فوري. بدون CSV وبدون إحصائيات
+// (تتضاف بعد كده لو حبيت).
+// ============================================================
+function populateReadyDropdowns() {
+  const layoutSel = document.getElementById('ready-modal-layout');
+  if (layoutSel) {
+    const cur = layoutSel.value;
+    layoutSel.innerHTML = '<option value="">-- بدون مسؤول --</option>' +
+      ALL_PROFILES.filter(p => p.role === 'admin').map(p => `<option value="${p.username}">${p.name}</option>`).join('');
+    if (cur) layoutSel.value = cur;
+  }
+  const reviewerSel = document.getElementById('ready-modal-reviewer');
+  if (reviewerSel) {
+    const curR = reviewerSel.value;
+    reviewerSel.innerHTML = '<option value="">-- اختر المراجع --</option>' +
+      ALL_PROFILES.map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+    if (curR) reviewerSel.value = curR;
+  }
+}
+
+async function loadReadyData() {
+  const tbody = document.getElementById('ready-tbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  try {
+    let targetDate = document.getElementById('ready-date-filter') ? document.getElementById('ready-date-filter').value : '';
+    if (!targetDate) targetDate = await findLatestReadyDate();
+    let dateRows = [];
+    if (targetDate) {
+      dateRows = await fetchAllRowsFromTable(READY_TABLE_NAME, q => filterByDateVariants(q, targetDate));
+    }
+    if (dateRows.length === 0) {
+      readyMasterData = [];
+      readyAllData = [];
+      window.__readyScope = 'date';
+      readyDataLoaded = true;
+      populateReadyDropdowns();
+      const msg = targetDate ? `لا توجد بيانات لتاريخ ${targetDate}` : 'لا توجد بيانات متاحة';
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">${msg}</td></tr>`;
+      const lbl = document.getElementById('ready-active-date-label');
+      if (lbl) lbl.innerText = targetDate ? `يعرض طلبات تاريخ: ${targetDate}` : 'لا يوجد بيانات';
+      updateReadyPaginationControls(0, 0);
+      return;
+    }
+    readyMasterData = dateRows;
+    window.__readyScope = 'date';
+    readyDataLoaded = true;
+    if (targetDate && document.getElementById('ready-date-filter')) document.getElementById('ready-date-filter').value = targetDate;
+    populateReadyDropdowns();
+    applyReadyDateFiltering();
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    throw err;
+  }
+}
+
+function applyReadyDateFiltering() {
+  if (!readyMasterData || readyMasterData.length === 0) {
+    readyAllData = [];
+    renderReadyPage();
+    const lbl = document.getElementById('ready-active-date-label');
+    if (lbl) lbl.innerText = 'لا يوجد بيانات';
+    return;
+  }
+  const dateInput = document.getElementById('ready-date-filter') ? document.getElementById('ready-date-filter').value : '';
+  let targetDate = dateInput;
+  if (!targetDate) {
+    const todayIso = getTodayCairoIsoDate();
+    const hasToday = readyMasterData.some(item => extractDateString(item) === todayIso);
+    if (hasToday) targetDate = todayIso;
+    else {
+      const dates = readyMasterData.map(extractDateString).filter(Boolean).sort().reverse();
+      targetDate = dates[0] || '';
+    }
+    if (targetDate && document.getElementById('ready-date-filter')) document.getElementById('ready-date-filter').value = targetDate;
+  }
+  readyAllData = readyMasterData.filter(item => {
+    const d = extractDateString(item);
+    return d === targetDate || !d;
+  });
+  const lbl = document.getElementById('ready-active-date-label');
+  if (lbl) lbl.innerText = `يعرض طلبات تاريخ: ${targetDate} (+ بدون تاريخ)`;
+  readyTotalRecordsCount = readyAllData.length;
+  readyCurrentPage = 1;
+  renderReadyPage();
+}
+
+async function onReadyDateFilterChange() {
+  readyCurrentPage = 1;
+  const targetDate = document.getElementById('ready-date-filter').value;
+  if (targetDate && !(readyMasterData || []).some(o => extractDateString(o) === targetDate)) {
+    const tbody = document.getElementById('ready-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
+    try {
+      const dateRows = await fetchAllRowsFromTable(READY_TABLE_NAME, q => filterByDateVariants(q, targetDate));
+      mergeRowsIntoReadyMasterData(dateRows);
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      return;
+    }
+  }
+  applyReadyDateFiltering();
+}
+
+async function resetReadyDateToLatest() {
+  const el = document.getElementById('ready-date-filter');
+  if (el) el.value = '';
+  if (!readyMasterData || readyMasterData.length === 0) { await loadReadyData().catch(() => {}); return; }
+  applyReadyDateFiltering();
+}
+
+async function refreshReadyData() {
+  const btn = document.getElementById('refresh-ready-btn');
+  const originalText = btn ? btn.innerText : '';
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ جاري التحديث...'; }
+  try {
+    readyDataLoaded = false;
+    window.__readyScope = 'none';
+    await loadReadyData();
+  } catch (err) {
+    alert('حصل خطأ أثناء تحديث البيانات: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
+
+// للمراجع بعد تسجيل الدخول: هات طلباته المرفوضة المعلقة من السيرفر مباشرة (كل التواريخ)
+// عشان التنبيه المركزي يشتغل حتى قبل ما يفتح التاب لأول مرة.
+async function ensureMyPendingReadyRows() {
+  if (!currentUser || currentUser.role === 'admin') return [];
+  const owners = [...new Set([currentUser.username, currentUser.name].filter(Boolean))];
+  if (owners.length === 0) return [];
+  const { data, error } = await supabaseClient.from(READY_TABLE_NAME).select('*').eq('status', 'مرفوض').in('reviewer', owners).is('reviewer_action', null).limit(500);
+  if (error) throw error;
+  mergeRowsIntoReadyMasterData(data || []);
+  return data || [];
+}
+
+function getReadyReviewerActionBadge(action) {
+  if (action === 'تم التعديل') return '<span class="badge badge-accepted">تم التعديل</span>';
+  if (action === 'تم الرفض للشركة') return '<span class="badge badge-rejected">تم الرفض للشركة</span>';
+  if (action === 'معلق') return '<span class="badge badge-hold">معلق</span>';
+  return '<span class="badge badge-hold">بانتظار المراجع</span>';
+}
+
+function getReadyStatusBadge(status) {
+  const s = status || 'لم يتم الطباعة';
+  if (s === 'تم الطباعة') return '<span class="badge badge-accepted">تم الطباعة</span>';
+  if (s === 'تم إعادة الطباعة') return '<span class="badge badge-reprint">تم إعادة الطباعة</span>';
+  if (s === 'مرفوض') return '<span class="badge badge-rejected">مرفوض</span>';
+  if (s === 'محجوز') return '<span class="badge badge-hold">محجوز</span>';
+  if (s === 'خطأ جهة ولاية' || s === 'خطأ عنوان') return '<span class="badge badge-error">⚠️ ' + s + '</span>';
+  if (s === 'معلق') return '<span class="badge badge-hold">معلق</span>';
+  return '<span class="badge badge-unreviewed">' + s + '</span>';
+}
+
+function renderReadyPage() {
+  if (!readyAllData) return;
+  const searchEl = document.getElementById('ready-search-input');
+  const searchValue = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  // لو فيه بحث، ندور في كل البيانات المحملة (كل التواريخ المدمجة) مش تاريخ العرض بس
+  const baseData = searchValue ? (readyMasterData || []) : (readyAllData || []);
+  let filtered = baseData.filter(item => {
+    if (!searchValue) return true;
+    return String(item.order_number || '').toLowerCase().includes(searchValue);
+  });
+  const dateLabelEl = document.getElementById('ready-active-date-label');
+  if (searchValue && dateLabelEl) {
+    dateLabelEl.innerText = `🔍 نتائج البحث من كل التواريخ المحملة (${filtered.length} نتيجة)`;
+  }
+  readyTotalRecordsCount = filtered.length;
+  const from = (readyCurrentPage - 1) * readyPageSize;
+  const to = from + readyPageSize;
+  window.readyFilteredData = filtered;
+  renderReadyTable(filtered.slice(from, to));
+  updateReadyPaginationControls(from + 1, Math.min(to, readyTotalRecordsCount));
+}
+
+function renderReadyTable(orders) {
+  const tbody = document.getElementById('ready-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!orders || orders.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    return;
+  }
+  orders.forEach(order => {
+    const orderNum = order.order_number || '-';
+    const safeOrderNum = String(orderNum).replace(/'/g, "\\'");
+    const rawLayout = order.Layout || order.layout || '';
+    const layoutLabel = rawLayout ? getDisplayName(rawLayout) : 'غير موزعة';
+    const statusBadge = getReadyStatusBadge(order.status);
+    const reviewerLabel = getDisplayName(order.reviewer) || '-';
+    const actionBadge = getReadyReviewerActionBadge(order.reviewer_action);
+    const reason = order.reason || '-';
+    const rawDate = order.date || extractDateString(order) || '';
+    const dateLabel = rawDate || 'غير محدد';
+    tbody.innerHTML += `
+      <tr>
+        <td class="sticky-action-col"><button class="btn btn-open" onclick="openReadyEditModal('${safeOrderNum}')">تحديث</button></td>
+        <td class="order-no-cell">${orderNoCopyHtml(orderNum)}</td>
+        <td>${layoutLabel}</td>
+        <td>${statusBadge}</td>
+        <td>${reviewerLabel}</td>
+        <td>${actionBadge}</td>
+        <td>${reason}</td>
+        <td>${dateLabel}</td>
+        <td class="action-time-cell">${formatActionTimestamp(order)}</td>
+      </tr>`;
+  });
+}
+
+function updateReadyPaginationControls(from, to) {
+  const infoEl = document.getElementById('ready-pagination-info');
+  const prevBtn = document.getElementById('ready-btn-prev');
+  const nextBtn = document.getElementById('ready-btn-next');
+  const pageEl = document.getElementById('ready-page-num');
+  if (!infoEl) return;
+  if (!readyTotalRecordsCount || readyTotalRecordsCount === 0) {
+    infoEl.innerText = 'لا توجد نتائج';
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    if (pageEl) pageEl.innerText = 'صفحة 1';
+    return;
+  }
+  infoEl.innerText = `عرض ${from} إلى ${to} من أصل ${readyTotalRecordsCount.toLocaleString('ar-EG')}`;
+  if (pageEl) pageEl.innerText = `صفحة ${readyCurrentPage}`;
+  if (prevBtn) prevBtn.disabled = (readyCurrentPage === 1);
+  if (nextBtn) nextBtn.disabled = (to >= readyTotalRecordsCount);
+}
+
+function changeReadyPage(direction) {
+  readyCurrentPage += direction;
+  if (readyCurrentPage < 1) readyCurrentPage = 1;
+  renderReadyPage();
+}
+
+function openReadyEditModal(orderNum) {
+  selectedReadyOrder = (readyAllData || []).find(o => String(o.order_number) === String(orderNum))
+    || (readyMasterData || []).find(o => String(o.order_number) === String(orderNum));
+  if (!selectedReadyOrder) return;
+  const isAdmin = currentUser && currentUser.role === 'admin';
+  // المراجع يقدر يفتح بس طلباته هو اللي حالتها مرفوض (نفس شرط RLS)
+  if (!isAdmin) {
+    const isMine = currentUser && (selectedReadyOrder.reviewer === currentUser.username || selectedReadyOrder.reviewer === currentUser.name);
+    if (!isMine) { alert('غير مسموح لك بتعديل هذا الطلب، لأنه غير مخصص لك.'); selectedReadyOrder = null; return; }
+    if (selectedReadyOrder.status !== 'مرفوض') { alert('كمُراجع، تقدر تعدّل بس الطلبات اللي حالتها "مرفوض".'); selectedReadyOrder = null; return; }
+  }
+  document.getElementById('ready-modal-order-no').value = selectedReadyOrder.order_number || '';
+  document.getElementById('ready-modal-layout').value = selectedReadyOrder.Layout || selectedReadyOrder.layout || '';
+  document.getElementById('ready-modal-status').value = READY_STATUSES.includes(selectedReadyOrder.status) ? selectedReadyOrder.status : 'معلق';
+  document.getElementById('ready-modal-reviewer').value = selectedReadyOrder.reviewer || '';
+  document.getElementById('ready-modal-reason').value = (selectedReadyOrder.reason && selectedReadyOrder.reason !== '-') ? selectedReadyOrder.reason : '';
+  document.getElementById('ready-modal-date').value = extractDateString(selectedReadyOrder) || '';
+  document.getElementById('ready-modal-type').value = selectedReadyOrder.cert_type || 'عادي';
+  document.getElementById('ready-modal-reviewer-action').value = READY_REVIEWER_ACTIONS.includes(selectedReadyOrder.reviewer_action) ? selectedReadyOrder.reviewer_action : '';
+  const adminFields = document.getElementById('ready-modal-admin-fields');
+  const note = document.getElementById('ready-modal-reviewer-note');
+  if (isAdmin) {
+    if (adminFields) adminFields.style.display = 'block';
+    if (note) note.style.display = 'none';
+  } else {
+    if (adminFields) adminFields.style.display = 'none';
+    if (note) note.style.display = 'block';
+  }
+  document.getElementById('ready-edit-modal').style.display = 'flex';
+}
+
+function closeReadyModal() {
+  document.getElementById('ready-edit-modal').style.display = 'none';
+  selectedReadyOrder = null;
+}
+
+async function saveReadyUpdate() {
+  if (!selectedReadyOrder) return;
+  const isAdmin = currentUser && currentUser.role === 'admin';
+  const saveBtn = document.getElementById('ready-btn-save-modal');
+  const newReviewerAction = document.getElementById('ready-modal-reviewer-action').value;
+  // المراجع: reviewer_action بس، ولازم تكون واحدة من الـ 3 قيم المسموحة (نفس شرط التريجر)
+  if (!isAdmin) {
+    if (!newReviewerAction || !READY_REVIEWER_ACTIONS.includes(newReviewerAction)) {
+      alert('برجاء اختيار حالة المراجعة (تم التعديل / تم الرفض للشركة / معلق).');
+      return;
+    }
+    saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
+    try {
+      const { data, error } = await supabaseClient.from(READY_TABLE_NAME).update({ reviewer_action: newReviewerAction }).eq('id', selectedReadyOrder.id).select();
+      if (error) { alert('فشل التحديث: ' + error.message); return; }
+      if (!data || data.length === 0) { alert('التحديث لم يُنفَّذ فعليًا. على الأغلب صلاحياتك على هذا الطلب غير كافية - راجع الأدمن.'); return; }
+      selectedReadyOrder.reviewer_action = newReviewerAction;
+      applyReadyDateFiltering();
+      closeReadyModal();
+    } catch (err) { alert('خطأ: ' + err.message); }
+    finally { saveBtn.innerText = 'حفظ'; saveBtn.disabled = false; }
+    return;
+  }
+  // الأدمن: يعدّل كل حاجة
+  const newStatus = document.getElementById('ready-modal-status').value;
+  const newLayout = document.getElementById('ready-modal-layout').value;
+  const newReviewer = document.getElementById('ready-modal-reviewer').value;
+  const newReason = document.getElementById('ready-modal-reason').value.trim();
+  const newDate = document.getElementById('ready-modal-date').value;
+  const newType = document.getElementById('ready-modal-type').value;
+  saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
+  const updateData = {
+    status: newStatus || null,
+    Layout: newLayout || null,
+    reviewer: newReviewer || null,
+    reason: newReason || '-',
+    date: newDate || null,
+    cert_type: newType || 'عادي',
+    reviewer_action: newReviewerAction || null
+  };
+  try {
+    const { data, error } = await supabaseClient.from(READY_TABLE_NAME).update(updateData).eq('id', selectedReadyOrder.id).select();
+    if (error) { alert('فشل التحديث: ' + error.message); return; }
+    if (!data || data.length === 0) { alert('التحديث لم يُنفَّذ فعليًا - راجع الصلاحيات.'); return; }
+    Object.assign(selectedReadyOrder, updateData);
+    applyReadyDateFiltering();
+    closeReadyModal();
+  } catch (err) { alert('خطأ: ' + err.message); }
+  finally { saveBtn.innerText = 'حفظ'; saveBtn.disabled = false; }
+}
+
+// بحث برقم الطلب عبر كل التواريخ (Debounce + استعلام سيرفر سريع)، بنفس أسلوب تاب الشهادات
+(function attachReadySearchListener() {
+  function attach() {
+    const inp = document.getElementById('ready-search-input');
+    if (!inp || inp.dataset.readyListenerAttached) return;
+    inp.dataset.readyListenerAttached = '1';
+    inp.addEventListener('input', () => {
+      readyCurrentPage = 1;
+      const searchValue = inp.value.trim();
+      if (_readySearchDebounceTimer) clearTimeout(_readySearchDebounceTimer);
+      if (!searchValue) { renderReadyPage(); return; }
+      const tbody = document.getElementById('ready-tbody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">جاري البحث...</td></tr>`;
+      _readySearchDebounceTimer = setTimeout(async () => {
+        if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
+        try { await searchReadyAcrossAllDates(searchValue); }
+        catch (err) {
+          if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
+          if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+          return;
+        }
+        if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
+        renderReadyPage();
+      }, 400);
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
+  else attach();
+})();
+
+// ============================================================
+// ============ توزيع "جاهز على الطباعة" (تاب إداري) ============
+// رفع أرقام طلبات جديدة لجدول ready_to_print بالتاريخ والمراجع
+// والمسؤول المحددين. متاح لعمر وموندي فقط (نفس شرط canDelete
+// بتاع سياسة الإضافة في قاعدة البيانات).
+// ============================================================
+
+// بيجيب من السيرفر بس الصفوف اللي رقمها ضمن القايمة (للفحص السريع قبل الرفع)،
+// ويدمجها في readyMasterData عشان فحص التكرار والمعاينة يشوفوها.
+async function fetchReadyRowsByOrderNumbers(orderNumbers) {
+  const uniq = [...new Set((orderNumbers || []).filter(Boolean).map(String))];
+  if (uniq.length === 0) return [];
+  let out = [];
+  for (let i = 0; i < uniq.length; i += 200) {
+    const batch = uniq.slice(i, i + 200);
+    const { data, error } = await supabaseClient.from(READY_TABLE_NAME).select('*').in('order_number', batch);
+    if (error) throw error;
+    if (data) out = out.concat(data);
+  }
+  mergeRowsIntoReadyMasterData(out);
+  return out;
+}
+
+// بيملأ قوايم التوزيع: المراجع (كل البروفايلات) + المسؤول (أدمن بس) + قايمة التوزيع المتوازن.
+// بيحافظ على الاختيارات الحالية لو موجودة.
+function populateReadyDistDropdowns() {
+  const reviewerSel = document.getElementById('ready-dist-reviewer-select');
+  if (reviewerSel) {
+    const cur = reviewerSel.value;
+    reviewerSel.innerHTML = '<option value="">بدون مراجع الآن</option>' +
+      (ALL_PROFILES || []).map(p => `<option value="${p.username}">${p.name}${p.role === 'admin' ? ' (أدمن)' : ''}</option>`).join('');
+    if (cur) reviewerSel.value = cur;
+  }
+  const layoutSel = document.getElementById('ready-dist-layout-select');
+  if (layoutSel) {
+    const curL = layoutSel.value;
+    layoutSel.innerHTML = '<option value="">اختر المسؤول...</option>' +
+      (ALL_PROFILES || []).filter(p => p.role === 'admin').map(p => `<option value="${p.username}">${p.name || p.username}</option>`).join('');
+    if (curL) layoutSel.value = curL;
+  }
+  const quickLayoutSel = document.getElementById('ready-dist-quick-layout');
+  if (quickLayoutSel) {
+    const curQ = quickLayoutSel.value;
+    quickLayoutSel.innerHTML = '<option value="">بدون توزيع الآن</option>' +
+      (ALL_PROFILES || []).filter(p => p.role === 'admin').map(p => `<option value="${p.username}">${p.name || p.username}</option>`).join('');
+    if (curQ) quickLayoutSel.value = curQ;
+  }
+  populateReadyDistUsersList();
+  // تاريخ الدفعة يبدأ بالنهاردة لو فاضي
+  const dateEl = document.getElementById('ready-dist-date-input');
+  if (dateEl && !dateEl.value && typeof getTodayCairoIsoDate === 'function') {
+    try { dateEl.value = getTodayCairoIsoDate(); } catch (e) {}
+  }
+}
+
+function toggleReadyDistQuickPanel() {
+  const panel = document.getElementById('ready-dist-quick-panel');
+  const icon = document.getElementById('ready-dist-quick-toggle-icon');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none';
+  panel.style.display = isHidden ? 'block' : 'none';
+  if (icon) icon.innerText = isHidden ? '▲' : '▼';
+  if (isHidden) populateReadyDistDropdowns();
+}
+
+// بياخد الأرقام المكتوبة يدويًا ويضيفها للمعاينة، واختياريًا يوزعها على مسؤول واحد فورًا.
+function submitQuickReadyDistOrders() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
+  const rawEl = document.getElementById('ready-dist-quick-textarea');
+  const layoutEl = document.getElementById('ready-dist-quick-layout');
+  const raw = rawEl ? rawEl.value : '';
+  const layoutValue = layoutEl ? layoutEl.value : '';
+
+  const orderNumbers = [...new Set(raw.split(/[\n,]+/).map(s => extractOrderNumberToken(s)).filter(Boolean))];
+  if (orderNumbers.length === 0) { alert('برجاء إدخال رقم طلب واحد على الأقل'); return; }
+
+  const beforeSet = new Set(parsedReadyDistNumbers);
+  const newOnes = orderNumbers.filter(num => !beforeSet.has(num));
+  const alreadyInBatch = orderNumbers.length - newOnes.length;
+
+  parsedReadyDistNumbers = [...new Set(parsedReadyDistNumbers.concat(orderNumbers))];
+
+  if (layoutValue) {
+    orderNumbers.forEach(num => { readyDistLayoutAssignments[num] = layoutValue; });
+  }
+
+  if (rawEl) rawEl.value = '';
+  const nameEl = document.getElementById('ready-dist-file-name-display');
+  if (nameEl) nameEl.innerText = `تمت الإضافة السريعة (الإجمالي الآن ${parsedReadyDistNumbers.length} رقم طلب)`;
+  renderReadyDistPreview();
+
+  const note = alreadyInBatch > 0 ? `\n(${alreadyInBatch} رقم كان مضاف بالفعل في المعاينة الحالية، اتجاهل التكرار الداخلي)` : '';
+  alert(`تمت إضافة ${newOnes.length} رقم طلب جديد للمعاينة.${layoutValue ? ` تم توزيعهم على ${getDisplayName(layoutValue)}.` : ''}${note}`);
+}
+
+function handleReadyDistFileSelect(event) {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  handleMultipleReadyDistFiles(files);
+  event.target.value = '';
+}
+
+async function handleMultipleReadyDistFiles(fileList) {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
+  const files = Array.from(fileList).filter(f => {
+    const name = f.name.toLowerCase();
+    return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls');
+  });
+
+  if (files.length === 0) {
+    alert('برجاء اختيار ملفات CSV أو Excel (xlsx/xls) بس');
+    return;
+  }
+
+  const namesLabel = files.map(f => f.name).join('، ');
+  document.getElementById('ready-dist-file-name-display').innerText = `جاري قراءة: ${namesLabel} ...`;
+
+  try {
+    let allNewNumbers = [];
+    for (const file of files) {
+      const rawRows = await parseFileToRows(file);
+      const extracted = extractOrderNumbersFromRows(rawRows);
+      if (extracted.length === 0 && rawRows.length > 0) {
+        alert(`معرفتش ألاقي عمود رقم الطلب في الملف "${file.name}". تأكد إن اسم العمود واحد من: رقم الطلب / order_number / requestnumber.`);
+        continue;
+      }
+      allNewNumbers = allNewNumbers.concat(extracted);
+    }
+
+    parsedReadyDistNumbers = [...new Set(parsedReadyDistNumbers.concat(allNewNumbers))];
+    document.getElementById('ready-dist-file-name-display').innerText = `تم إضافة: ${namesLabel} (الإجمالي الآن ${parsedReadyDistNumbers.length} رقم طلب)`;
+    renderReadyDistPreview();
+  } catch (err) {
+    alert('تعذّر قراءة أحد الملفات: ' + err.message);
+  }
+}
+
+function handleReadyDistDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('ready-dist-upload-box').classList.add('drag-over');
+}
+
+function handleReadyDistDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('ready-dist-upload-box').classList.remove('drag-over');
+}
+
+function handleReadyDistFileDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  document.getElementById('ready-dist-upload-box').classList.remove('drag-over');
+
+  const files = event.dataTransfer && event.dataTransfer.files;
+  if (!files || files.length === 0) return;
+
+  handleMultipleReadyDistFiles(files);
+}
+
+// المراجع المختار للدفعة كلها (يتعرض في المعاينة ويتخزن مع كل صف عند الرفع)
+function getReadyDistReviewer() {
+  const sel = document.getElementById('ready-dist-reviewer-select');
+  return sel ? sel.value : '';
+}
+
+function renderReadyDistPreview() {
+  const hasData = parsedReadyDistNumbers.length > 0;
+  const previewArea = document.getElementById('ready-dist-preview-area');
+  const banner = document.getElementById('ready-dist-total-banner');
+  const distPanel = document.getElementById('ready-dist-panel');
+  if (previewArea) previewArea.style.display = hasData ? 'block' : 'none';
+  if (banner) banner.style.display = hasData ? 'block' : 'none';
+  if (distPanel) distPanel.style.display = hasData ? 'block' : 'none';
+  const bannerCount = document.getElementById('ready-dist-total-banner-count');
+  if (bannerCount) bannerCount.innerText = parsedReadyDistNumbers.length;
+  const countEl = document.getElementById('ready-dist-count');
+  if (countEl) countEl.innerText = parsedReadyDistNumbers.length;
+
+  if (hasData) populateReadyDistUsersList();
+  renderReadyDistDuplicatesPanel();
+
+  const tbody = document.getElementById('ready-dist-preview-tbody');
+  if (!tbody) return;
+  const reviewerVal = getReadyDistReviewer();
+  const reviewerLabel = reviewerVal ? getDisplayName(reviewerVal) : '-';
+  const PREVIEW_LIMIT = 500;
+  tbody.innerHTML = parsedReadyDistNumbers.slice(0, PREVIEW_LIMIT).map(num => `
+    <tr>
+      <td class="order-no-cell">${num}</td>
+      <td>${readyDistLayoutAssignments[num] ? getDisplayName(readyDistLayoutAssignments[num]) : '-'}</td>
+      <td>${reviewerLabel}</td>
+    </tr>
+  `).join('');
+  if (parsedReadyDistNumbers.length > PREVIEW_LIMIT) {
+    tbody.innerHTML += `<tr><td colspan="3" style="text-align:center; color: var(--text-muted);">... و ${parsedReadyDistNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
+  }
+}
+
+// لو المراجع للدفعة اتغيّر بعد ما المعاينة اترسمت، حدّث عمود المراجع بس من غير إعادة فحص التكرار
+function onReadyDistReviewerChange() {
+  if (!parsedReadyDistNumbers || parsedReadyDistNumbers.length === 0) return;
+  const tbody = document.getElementById('ready-dist-preview-tbody');
+  if (!tbody) return;
+  const reviewerVal = getReadyDistReviewer();
+  const reviewerLabel = reviewerVal ? getDisplayName(reviewerVal) : '-';
+  const PREVIEW_LIMIT = 500;
+  tbody.innerHTML = parsedReadyDistNumbers.slice(0, PREVIEW_LIMIT).map(num => `
+    <tr>
+      <td class="order-no-cell">${num}</td>
+      <td>${readyDistLayoutAssignments[num] ? getDisplayName(readyDistLayoutAssignments[num]) : '-'}</td>
+      <td>${reviewerLabel}</td>
+    </tr>
+  `).join('');
+  if (parsedReadyDistNumbers.length > PREVIEW_LIMIT) {
+    tbody.innerHTML += `<tr><td colspan="3" style="text-align:center; color: var(--text-muted);">... و ${parsedReadyDistNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
+  }
+}
+
+function populateReadyDistUsersList() {
+  const container = document.getElementById('ready-dist-users-list');
+  if (!container) return;
+  const adminKeys = (ALL_PROFILES || []).filter(p => p.role === 'admin').map(p => p.username);
+
+  if (!readyDistLayoutSelection) {
+    readyDistLayoutSelection = new Set(adminKeys); // أول مرة بس: كل الأدمن متحدد افتراضيًا
+  }
+
+  container.innerHTML = '';
+  adminKeys.forEach(key => {
+    const isChecked = readyDistLayoutSelection.has(key) ? 'checked' : '';
+    container.innerHTML += `
+      <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
+        <input type="checkbox" class="ready-dist-user-checkbox" value="${key}" ${isChecked} onchange="onReadyDistUserToggle(this)">
+        ${getDisplayName(key)}
+      </label>
+    `;
+  });
+}
+
+function onReadyDistUserToggle(checkbox) {
+  const adminKeys = (ALL_PROFILES || []).filter(p => p.role === 'admin').map(p => p.username);
+  if (!readyDistLayoutSelection) readyDistLayoutSelection = new Set(adminKeys);
+  if (checkbox.checked) readyDistLayoutSelection.add(checkbox.value);
+  else readyDistLayoutSelection.delete(checkbox.value);
+}
+
+function selectAllReadyDistUsers(checked) {
+  const adminKeys = (ALL_PROFILES || []).filter(p => p.role === 'admin').map(p => p.username);
+  document.querySelectorAll('.ready-dist-user-checkbox').forEach(cb => { cb.checked = checked; });
+  readyDistLayoutSelection = new Set(checked ? adminKeys : []);
+}
+
+// توزيع الدفعة كلها على مسؤول واحد من القايمة المنفردة
+function applyReadyDistSingleLayout() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
+  const sel = document.getElementById('ready-dist-layout-select');
+  const layoutValue = sel ? sel.value : '';
+  if (!layoutValue) { alert('برجاء اختيار المسؤول من القائمة أولاً'); return; }
+  if (parsedReadyDistNumbers.length === 0) { alert('برجاء رفع ملف أو إضافة أرقام أولاً'); return; }
+  parsedReadyDistNumbers.forEach(num => { readyDistLayoutAssignments[num] = layoutValue; });
+  renderReadyDistPreview();
+  renderReadyDistSummaryFromAssignments();
+}
+
+// توزيع تلقائي متساوي (Round-robin) على الأدمن المختارين، مع وقف عند التارجت لو محدد
+function runReadyDistBalancedDistribution() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
+  if (parsedReadyDistNumbers.length === 0) {
+    alert('برجاء رفع ملف أولاً.');
+    return;
+  }
+
+  const selectedAdmins = Array.from(document.querySelectorAll('.ready-dist-user-checkbox:checked')).map(cb => cb.value);
+  if (selectedAdmins.length === 0) {
+    alert('برجاء اختيار أدمن واحد على الأقل للتوزيع.');
+    return;
+  }
+
+  const targetPerPerson = parseInt(document.getElementById('ready-dist-target-input').value, 10) || 0; // 0 = بدون تارجت
+
+  readyDistLayoutAssignments = {};
+  const counts = {};
+  selectedAdmins.forEach(a => counts[a] = 0);
+
+  let userIndex = 0;
+  let assignedCount = 0;
+
+  for (const num of parsedReadyDistNumbers) {
+    if (targetPerPerson > 0 && selectedAdmins.every(a => counts[a] >= targetPerPerson)) break;
+
+    let attempts = 0;
+    while (targetPerPerson > 0 && counts[selectedAdmins[userIndex]] >= targetPerPerson && attempts < selectedAdmins.length) {
+      userIndex = (userIndex + 1) % selectedAdmins.length;
+      attempts++;
+    }
+    if (targetPerPerson > 0 && attempts >= selectedAdmins.length) break;
+
+    const admin = selectedAdmins[userIndex];
+    readyDistLayoutAssignments[num] = admin;
+    counts[admin]++;
+    assignedCount++;
+    userIndex = (userIndex + 1) % selectedAdmins.length;
+  }
+
+  renderReadyDistPreview();
+  renderReadyDistSummary(counts, parsedReadyDistNumbers.length - assignedCount);
+}
+
+function renderReadyDistSummary(counts, leftoverCount) {
+  const container = document.getElementById('ready-dist-summary');
+  if (!container) return;
+  const rows = Object.keys(counts).map(name => `
+    <div class="reviewer-stat">
+      <div class="reviewer-info"><div class="name">${getDisplayName(name)}</div></div>
+      <div class="reviewer-counts"><div class="count-accepted">${counts[name]} طلب</div></div>
+    </div>
+  `).join('');
+
+  const leftoverHtml = leftoverCount > 0
+    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لم يتم توزيعه، لأن كل الأدمن المختارين وصلوا للعدد المستهدف. زوّد التارجت أو اختار أدمن إضافيين.</p>`
+    : '';
+
+  container.innerHTML = `
+    <h4 style="font-size: 13px; margin-bottom: 8px; color: var(--text-muted);">ملخص التوزيع:</h4>
+    ${rows}
+    ${leftoverHtml}
+  `;
+}
+
+// ملخص من التوزيعات الفردية الحالية (بعد "تطبيق على الكل" أو الإضافة السريعة)
+function renderReadyDistSummaryFromAssignments() {
+  const counts = {};
+  parsedReadyDistNumbers.forEach(num => {
+    const a = readyDistLayoutAssignments[num];
+    if (a) counts[a] = (counts[a] || 0) + 1;
+  });
+  const assigned = Object.values(counts).reduce((s, n) => s + n, 0);
+  renderReadyDistSummary(counts, parsedReadyDistNumbers.length - assigned);
+}
+
+// بيدور على أي رقم من الدفعة الحالية موجود بالفعل في جدول "جاهز على الطباعة"،
+// ويعرضهم في لوحة تحذير مع بياناتهم الحالية (المسؤول/المراجع/الحالة/التاريخ).
+async function renderReadyDistDuplicatesPanel() {
+  const area = document.getElementById('ready-dist-duplicates-area');
+  const container = document.getElementById('ready-dist-duplicates-panel');
+  if (!area || !container) return;
+
+  if (!parsedReadyDistNumbers || parsedReadyDistNumbers.length === 0) {
+    area.style.display = 'none';
+    container.innerHTML = '';
+    window.lastReadyDistDupNums = [];
+    return;
+  }
+  // فحص سريع عبر السيرفر بس للأرقام المرفوعة حاليًا (بدل تحميل الجدول كله)
+  try { await fetchReadyRowsByOrderNumbers(parsedReadyDistNumbers); } catch (e) { console.warn('فحص تكرار جاهز على الطباعة:', e.message); }
+
+  const existingMap = {};
+  (readyMasterData || []).forEach(o => { existingMap[String(o.order_number)] = o; });
+
+  const dupNums = parsedReadyDistNumbers.filter(num => existingMap[String(num)]);
+  window.lastReadyDistDupNums = dupNums;
+  area.style.display = 'block';
+
+  if (dupNums.length === 0) {
+    container.innerHTML = `<p style="color: var(--badge-accept-text);">✅ مفيش أي رقم من اللي دخلتهم موجود قبل كده في جدول "جاهز على الطباعة".</p>`;
+    return;
+  }
+
+  let html = `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚨 ${dupNums.length} رقم طلب موجود بالفعل في جدول "جاهز على الطباعة" من قبل — هيتجاهلوا تلقائيًا عند الرفع (مش هيتضافوا مرة تانية):</p>`;
+  html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
+  html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="removeReadyDistDuplicatesFromBatch()">🗑️ إزالتهم من المعاينة الحالية</button>`;
+  html += `</div>`;
+
+  html += `<div style="max-height:220px; overflow-y:auto; border: 1px solid var(--badge-reject-text); border-radius: 6px;">`;
+  html += `<table style="width:100%; font-size:12px;"><thead><tr>
+    <th style="padding:6px;">رقم الطلب</th><th style="padding:6px;">المسؤول الحالي</th>
+    <th style="padding:6px;">المراجع الحالي</th><th style="padding:6px;">الحالة الحالية</th><th style="padding:6px;">التاريخ الحالي</th>
+  </tr></thead><tbody>`;
+  dupNums.forEach(num => {
+    const o = existingMap[String(num)];
+    html += `<tr>
+      <td style="padding:6px; text-align:center;">${num}</td>
+      <td style="padding:6px; text-align:center;">${getDisplayName(o.Layout || o.layout) || '⛔ غير موزّع'}</td>
+      <td style="padding:6px; text-align:center;">${getDisplayName(o.reviewer) || '-'}</td>
+      <td style="padding:6px; text-align:center;">${o.status || '-'}</td>
+      <td style="padding:6px; text-align:center;">${extractDateString(o) || '-'}</td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+
+  container.innerHTML = html;
+}
+
+function removeReadyDistDuplicatesFromBatch() {
+  const dupNums = window.lastReadyDistDupNums || [];
+  if (dupNums.length === 0) { alert('لا توجد أرقام مكررة لإزالتها.'); return; }
+
+  const confirmRemove = confirm(`هيتم إزالة ${dupNums.length} رقم مكرر من المعاينة الحالية (هما نفسهم لسه موجودين زي ما هم في الجدول، بس مش هيترفعوا تاني). تأكيد؟`);
+  if (!confirmRemove) return;
+
+  const dupSet = new Set(dupNums.map(String));
+  parsedReadyDistNumbers = parsedReadyDistNumbers.filter(num => !dupSet.has(String(num)));
+  renderReadyDistPreview();
+}
+
+function resetReadyDistData() {
+  if (parsedReadyDistNumbers.length > 0 && !confirm('هل تريد مسح كل الأرقام المرفوعة حاليًا والبدء من جديد؟')) return;
+  parsedReadyDistNumbers = [];
+  readyDistLayoutAssignments = {};
+  readyDistLayoutSelection = null;
+  const nameEl = document.getElementById('ready-dist-file-name-display');
+  if (nameEl) nameEl.innerText = '';
+  const previewArea = document.getElementById('ready-dist-preview-area');
+  if (previewArea) previewArea.style.display = 'none';
+  const banner = document.getElementById('ready-dist-total-banner');
+  if (banner) banner.style.display = 'none';
+  const distPanel = document.getElementById('ready-dist-panel');
+  if (distPanel) distPanel.style.display = 'none';
+  const summary = document.getElementById('ready-dist-summary');
+  if (summary) summary.innerHTML = '';
+  const dupArea = document.getElementById('ready-dist-duplicates-area');
+  if (dupArea) dupArea.style.display = 'none';
+  const dupPanel = document.getElementById('ready-dist-duplicates-panel');
+  if (dupPanel) dupPanel.innerHTML = '';
+}
+
+// بيصنّف أرقام الدفعة: جديد تمامًا / مكرر (موجود بالفعل في ready_to_print).
+// لو فيه مكرر، بيوضح عينة منه ويسأل: يتجاهله (افتراضي) ولا يتضاف كصف زيادة؟
+function checkReadyDuplicatesAndConfirm(orderNumbers) {
+  const existingByNumber = {};
+  (readyMasterData || []).forEach(o => {
+    const key = String(o.order_number || '').trim();
+    if (!key) return;
+    if (!existingByNumber[key]) existingByNumber[key] = [];
+    existingByNumber[key].push(o);
+  });
+
+  const fresh = [];
+  const duplicates = [];
+  orderNumbers.forEach(num => {
+    const key = String(num).trim();
+    if (existingByNumber[key]) duplicates.push({ num, existing: existingByNumber[key] });
+    else fresh.push(num);
+  });
+
+  if (duplicates.length === 0) {
+    return { fresh: orderNumbers, allowedDuplicates: [], skippedCount: 0 };
+  }
+
+  const maxShown = 15;
+  const detailsLines = duplicates.slice(0, maxShown).map((d) => {
+    const dates = d.existing.map((o) => extractDateString(o) || 'بدون تاريخ').join('، ');
+    return `• ${d.num} — موجود بتاريخ: ${dates}`;
+  });
+  const moreNote = duplicates.length > maxShown ? `\n... و ${duplicates.length - maxShown} رقم تاني مكرر` : '';
+
+  const allowDuplicates = confirm(
+    `⚠️ فيه ${duplicates.length} رقم طلب موجود بالفعل في جدول "جاهز على الطباعة":\n\n${detailsLines.join('\n')}${moreNote}\n\n` +
+    `عايز تضيفهم برضو كصفوف زيادة؟\n` +
+    `"موافق" = يتضافوا كمان. "إلغاء" = يتجاهلوا ويتم رفع الأرقام الجديدة بس.`
+  );
+
+  if (allowDuplicates) {
+    return { fresh, allowedDuplicates: duplicates.map((d) => d.num), skippedCount: 0 };
+  }
+  return { fresh, allowedDuplicates: [], skippedCount: duplicates.length };
+}
+
+async function uploadReadyDistOrdersToSupabase() {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
+  if (parsedReadyDistNumbers.length === 0) return;
+
+  const dateEl = document.getElementById('ready-dist-date-input');
+  const batchDate = dateEl ? dateEl.value : '';
+  if (!batchDate) { alert('برجاء تحديد تاريخ تسجيل الدفعة أولاً'); if (dateEl) dateEl.focus(); return; }
+
+  const btn = document.getElementById('btn-upload-ready-dist');
+  if (btn) { btn.innerText = 'جاري الرفع...'; btn.disabled = true; }
+
+  try {
+    // فحص التكرار: نجيب بس الصفوف اللي أرقامها مطابقة للأرقام المطلوب رفعها (سريع)،
+    // بدل تحميل الجدول كله - ثم نفصل الجديد عن المكرر
+    if (btn) btn.innerText = 'جاري فحص التكرار...';
+    try { await fetchReadyRowsByOrderNumbers(parsedReadyDistNumbers); } catch (e) { console.warn('فحص التكرار:', e.message); }
+    const certTypeForBatch = (document.getElementById('ready-dist-cert-type-select') || {}).value || 'عادي';
+    const reviewerForBatch = getReadyDistReviewer() || null;
+    const { fresh, allowedDuplicates, skippedCount } = checkReadyDuplicatesAndConfirm(parsedReadyDistNumbers);
+
+    const buildRow = (num) => {
+      const row = { order_number: num, date: batchDate, cert_type: certTypeForBatch };
+      if (readyDistLayoutAssignments[num]) row.Layout = readyDistLayoutAssignments[num];
+      if (reviewerForBatch) row.reviewer = reviewerForBatch;
+      return row;
+    };
+    const rowsToInsert = fresh.concat(allowedDuplicates).map(buildRow);
+
+    if (rowsToInsert.length === 0) {
+      alert('كل أرقام الطلبات دي موجودة بالفعل في جدول "جاهز على الطباعة"، مفيش جديد يتضاف.');
+      if (btn) { btn.innerText = 'تأكيد ورفع الطلبات لجدول جاهز على الطباعة'; btn.disabled = false; }
+      return;
+    }
+
+    let insertedCount = 0;
+    let firstError = null;
+
+    // جدول ready_to_print مفيهوش قيد unique على order_number، فالرفع إدراج مباشر على دفعات
+    for (const batch of chunkArray(rowsToInsert, 150)) {
+      const { data, error } = await supabaseClient.from(READY_TABLE_NAME).insert(batch).select();
+      if (error) { firstError = error; break; }
+      insertedCount += (data || []).length;
+    }
+
+    if (firstError) {
+      alert(`تم رفع ${insertedCount} رقم طلب بنجاح قبل ما يحصل خطأ: ${firstError.message}\nجرب تاني للأرقام الباقية.`);
+    } else {
+      const skippedNote = skippedCount > 0 ? ` (${skippedCount} كانوا مكررين واتجاهلوا)` : '';
+      alert(`تم رفع ${insertedCount} رقم طلب بنجاح لجدول "جاهز على الطباعة"!${skippedNote}`);
+      resetReadyDistData();
+    }
+
+    readyDataLoaded = false;
+    window.__readyScope = 'none';
+    await loadReadyData().catch(() => {});
+    switchTab('ready-print');
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    if (btn) { btn.innerText = 'تأكيد ورفع الطلبات لجدول جاهز على الطباعة'; btn.disabled = false; }
+  }
 }

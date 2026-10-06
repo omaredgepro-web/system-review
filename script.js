@@ -241,6 +241,8 @@ let _readySearchDebounceTimer = null;
 let selectedReadyNumbers = new Set(); // مفاتيح صفوف (getRowKey) المحددة في تاب جاهز على الطباعة
 let showOnlySelectedReady = false;
 let readyMultiSelectFileRows = [];
+// لو true، تاب الجاهز بيعرض كل الطلبات بكل التواريخ مع بعض، بدل تاريخ واحد بس
+let showAllReadyDates = false;
 
 // ============ انتهاء الجلسة ومسح الكاش بعد 24 ساعة (مطلوب فقط) ============
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -2198,6 +2200,18 @@ async function ensureFullMawaqefData(onProgress = null) {
     return mawaqefMasterData;
   })();
   try { return await _fullMawaqefPromise; } finally { _fullMawaqefPromise = null; }
+}
+let _fullReadyPromise = null;
+async function ensureFullReadyData(onProgress = null) {
+  if (window.__readyScope === 'full') return readyMasterData;
+  if (_fullReadyPromise) return _fullReadyPromise;
+  _fullReadyPromise = (async () => {
+    readyMasterData = await fetchAllRowsFromTable(READY_TABLE_NAME, null, onProgress);
+    window.__readyScope = 'full';
+    readyDataLoaded = true;
+    return readyMasterData;
+  })();
+  try { return await _fullReadyPromise; } finally { _fullReadyPromise = null; }
 }
 // أسرع طريقة لأحدث تاريخ: استعلامين بالتوازي - واحد بالـ id (بيمشي على الـ PK، سريع دايمًا) وواحد
 // بالتاريخ نفسه (أدق). لو الأدق اتأخر أكتر من 1.5 ثانية بنكمل بنتيجة الـ id من غير ما نستناه.
@@ -9634,9 +9648,81 @@ function populateReadyDropdowns() {
   }
 }
 
+const READY_KPI_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
+const READY_STATUS_META = {
+  'لم يتم المراجعة': { icon: '⛔', color: '#60a5fa' },
+  'جاهز للطباعه': { icon: '✅', color: '#34d399' },
+  'تم مراجعته سابقا': { icon: '🔁', color: '#38bdf8' },
+  'له جهة ولاية': { icon: '⚠️', color: '#fb923c' },
+  'مرفوض': { icon: '❌', color: '#f87171' },
+  'محجوز': { icon: '🔒', color: '#a78bfa' },
+  'معلق': { icon: '⏸️', color: '#fbbf24' }
+};
+
+// دوسة على أي كارت حالة بتفلتر جدول الجاهز تحت بيها فورًا وتنزلك عليه
+function filterReadyByStatus(status) {
+  const select = document.getElementById('ready-status-filter');
+  if (select) select.value = status;
+  renderReadyPage();
+  const table = document.querySelector('#tab-ready-print .main-content');
+  if (table) table.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearReadyStatusFilter() {
+  const select = document.getElementById('ready-status-filter');
+  if (select) select.value = 'ALL';
+  renderReadyPage();
+}
+
+function renderReadyKpis(data) {
+  const counts = {};
+  data.forEach(o => {
+    const status = (o.status && String(o.status).trim()) || 'لم يتم المراجعة';
+    counts[status] = (counts[status] || 0) + 1;
+  });
+
+  const extraStatuses = Object.keys(counts)
+    .filter(s => !READY_KPI_STATUSES.includes(s))
+    .sort((a, b) => counts[b] - counts[a]);
+  const orderedStatuses = [...READY_KPI_STATUSES, ...extraStatuses];
+
+  const container = document.getElementById('ready-kpi-container');
+  if (!container) return;
+
+  const total = data.length;
+  const activeStatus = (document.getElementById('ready-status-filter') || {}).value || 'ALL';
+
+  let html = `
+    <div class="stat-card" style="cursor:pointer; border-right: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(99,102,241,0.12), var(--bg-dark)); ${activeStatus === 'ALL' ? 'outline: 2px solid var(--accent-purple);' : ''}" onclick="clearReadyStatusFilter()">
+      <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">✅ إجمالي الحالات</div>
+      <div style="font-size:32px; font-weight:800;">${total.toLocaleString('ar-EG')}</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">كل الحالات مع بعض &middot; اضغط لإلغاء الفلترة</div>
+    </div>
+  `;
+
+  orderedStatuses.forEach((status, idx) => {
+    const meta = READY_STATUS_META[status] || { icon: '📍', color: MAWAQEF_FALLBACK_COLORS[idx % MAWAQEF_FALLBACK_COLORS.length] };
+    const count = counts[status] || 0;
+    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const isActive = activeStatus === status;
+    html += `
+      <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterReadyByStatus('${status.replace(/'/g, "\'")}')">
+        <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">${meta.icon} ${status}</div>
+        <div style="font-size:28px; font-weight:800; margin-bottom:10px;">${count.toLocaleString('ar-EG')}</div>
+        <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
 async function loadReadyData() {
   const tbody = document.getElementById('ready-tbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري الاتصال بـ Supabase...</td></tr>`;
   try {
     let targetDate = document.getElementById('ready-date-filter') ? document.getElementById('ready-date-filter').value : '';
     if (!targetDate) targetDate = await findLatestReadyDate();
@@ -9650,8 +9736,9 @@ async function loadReadyData() {
       window.__readyScope = 'date';
       readyDataLoaded = true;
       populateReadyDropdowns();
+      renderReadyKpis([]);
       const msg = targetDate ? `لا توجد بيانات لتاريخ ${targetDate}` : 'لا توجد بيانات متاحة';
-      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">${msg}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">${msg}</td></tr>`;
       const lbl = document.getElementById('ready-active-date-label');
       if (lbl) lbl.innerText = targetDate ? `يعرض طلبات تاريخ: ${targetDate}` : 'لا يوجد بيانات';
       updateReadyPaginationControls(0, 0);
@@ -9664,7 +9751,7 @@ async function loadReadyData() {
     populateReadyDropdowns();
     applyReadyDateFiltering();
   } catch (err) {
-    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">فشل تحميل البيانات: ${err.message}</td></tr>`;
     throw err;
   }
 }
@@ -9672,11 +9759,22 @@ async function loadReadyData() {
 function applyReadyDateFiltering() {
   if (!readyMasterData || readyMasterData.length === 0) {
     readyAllData = [];
+    renderReadyKpis([]);
     renderReadyPage();
     const lbl = document.getElementById('ready-active-date-label');
     if (lbl) lbl.innerText = 'لا يوجد بيانات';
     return;
   }
+
+  if (showAllReadyDates) {
+    readyAllData = readyMasterData;
+    document.getElementById('ready-active-date-label').innerText = `يعرض كل التواريخ (${readyAllData.length.toLocaleString('ar-EG')} طلب من أصل ${(readyMasterData || []).length.toLocaleString('ar-EG')} في الجدول كله)`;
+    readyTotalRecordsCount = readyAllData.length;
+    renderReadyKpis(readyAllData);
+    renderReadyPage();
+    return;
+  }
+
   const dateInput = document.getElementById('ready-date-filter') ? document.getElementById('ready-date-filter').value : '';
   let targetDate = dateInput;
   if (!targetDate) {
@@ -9697,20 +9795,52 @@ function applyReadyDateFiltering() {
   if (lbl) lbl.innerText = `يعرض طلبات تاريخ: ${targetDate} (+ بدون تاريخ)`;
   readyTotalRecordsCount = readyAllData.length;
   readyCurrentPage = 1;
+  renderReadyKpis(readyAllData);
   renderReadyPage();
 }
 
-async function onReadyDateFilterChange() {
+// بتحدّث نص زرار "عرض كل التواريخ" حسب الوضع الحالي (شغّال أو لأ)
+function updateShowAllReadyDatesBtnLabel() {
+  const btn = document.getElementById('ready-view-all-dates-btn');
+  if (btn) btn.innerText = showAllReadyDates ? '📅 عرض تاريخ واحد بس' : '📅 عرض كل التواريخ';
+}
+
+async function toggleShowAllReadyDates() {
+  showAllReadyDates = !showAllReadyDates;
+  updateShowAllReadyDatesBtnLabel();
   readyCurrentPage = 1;
+  selectedReadyNumbers.clear();
+  updateReadySelectedCount();
+  if (showAllReadyDates && window.__readyScope !== 'full') {
+    const tbody = document.getElementById('ready-tbody');
+    const btn = document.getElementById('ready-view-all-dates-btn');
+    const origBtn = btn ? btn.innerText : '';
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل كل التواريخ... (0)</td></tr>`;
+    try {
+      await ensureFullReadyData((n) => {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل كل التواريخ... (${n.toLocaleString('ar-EG')})</td></tr>`;
+        if (btn) btn.innerText = `⏳ جاري التحميل... (${n.toLocaleString('ar-EG')})`;
+      });
+      populateReadyDropdowns();
+    }
+    catch (err) { if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`; return; }
+    finally { if (btn) btn.innerText = origBtn; updateShowAllReadyDatesBtnLabel(); }
+  }
+  applyReadyDateFiltering();
+}
+
+async function onReadyDateFilterChange() {
+  showAllReadyDates = false; updateShowAllReadyDatesBtnLabel(); readyCurrentPage = 1;
+  selectedReadyNumbers.clear(); updateReadySelectedCount();
   const targetDate = document.getElementById('ready-date-filter').value;
   if (targetDate && !(readyMasterData || []).some(o => extractDateString(o) === targetDate)) {
     const tbody = document.getElementById('ready-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري تحميل بيانات هذا التاريخ...</td></tr>`;
     try {
       const dateRows = await fetchAllRowsFromTable(READY_TABLE_NAME, q => filterByDateVariants(q, targetDate));
       mergeRowsIntoReadyMasterData(dateRows);
     } catch (err) {
-      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
       return;
     }
   }
@@ -9718,8 +9848,8 @@ async function onReadyDateFilterChange() {
 }
 
 async function resetReadyDateToLatest() {
-  const el = document.getElementById('ready-date-filter');
-  if (el) el.value = '';
+  showAllReadyDates = false; updateShowAllReadyDatesBtnLabel(); document.getElementById('ready-date-filter').value = '';
+  selectedReadyNumbers.clear(); updateReadySelectedCount();
   if (!readyMasterData || readyMasterData.length === 0) { await loadReadyData().catch(() => {}); return; }
   applyReadyDateFiltering();
 }
@@ -9828,7 +9958,7 @@ function renderReadyTable(orders) {
   if (!tbody) return;
   tbody.innerHTML = '';
   if (!orders || orders.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">لا توجد نتائج مطابقة</td></tr>`;
     return;
   }
   orders.forEach(order => {
@@ -9845,6 +9975,8 @@ function renderReadyTable(orders) {
     const reason = order.reason || '-';
     const rawDate = order.date || extractDateString(order) || '';
     const dateLabel = rawDate || 'غير محدد';
+    const typeRaw = order.cert_type || 'عادي';
+    const typeBadge = typeRaw === 'تعمير' ? '<span class="badge badge-reprint">📠 تعمير</span>' : '<span class="badge badge-pending">🖨️ عادي</span>';
     tbody.innerHTML += `
       <tr>
         <td style="text-align:center;"><input type="checkbox" class="ready-row-checkbox" data-rowkey="${rowKey}" data-ordernum="${orderNum}" ${isChecked} onchange="toggleReadyRowSelect(this, '${safeRowKey}')"></td>
@@ -9856,6 +9988,7 @@ function renderReadyTable(orders) {
         <td>${actionBadge}</td>
         <td>${reason}</td>
         <td>${dateLabel}</td>
+        <td>${typeBadge}</td>
         <td class="action-time-cell">${formatActionTimestamp(order)}</td>
       </tr>`;
   });
@@ -9902,6 +10035,44 @@ function toggleShowOnlySelectedReady() {
   const btn = document.getElementById('show-selected-only-ready-btn');
   if (btn) btn.innerText = showOnlySelectedReady ? '↩️ عرض الكل' : '📌 عرض المحدد فقط';
   renderReadyPage();
+}
+
+// تحديد أول N طلب "غير موزّع" (لسه معندوش مسؤول)، بداية من الصفحة اللي واقف فيها الأدمن دلوقتي
+// (مش من أول نتيجة في الفلتر كله دايمًا) - وبيتخطى أي طلب متحدد بالفعل، فلو دست الزرار تاني
+// هيكمل ياخد اللي بعد كده تلقائيًا (نفس سلوك تاب الطباعة بالظبط).
+function selectNextReadyBatch() {
+  const input = document.getElementById('ready-bulk-count-input');
+  const count = parseInt(input.value, 10);
+
+  if (!count || count <= 0) { alert('برجاء إدخال عدد صحيح أكبر من صفر'); return; }
+  if (!window.readyFilteredData || window.readyFilteredData.length === 0) { alert('لا توجد بيانات لتحديدها ضمن الفلتر الحالي'); return; }
+
+  const startIndex = (readyCurrentPage - 1) * readyPageSize;
+  const poolFromCurrentPage = window.readyFilteredData.slice(startIndex);
+
+  const unassigned = poolFromCurrentPage.filter(o => {
+    const layout = o.Layout || o.layout || '';
+    return !layout && !selectedReadyNumbers.has(getRowKey(o));
+  });
+
+  if (unassigned.length === 0) { alert('لا توجد طلبات غير موزّعة متاحة للتحديد من الصفحة الحالية لآخر النتائج'); return; }
+
+  const batch = unassigned.slice(0, count);
+  batch.forEach(o => selectedReadyNumbers.add(getRowKey(o)));
+
+  // ينقل تلقائيًا لآخر صفحة فيها طلب اتحدد، عشان تشوف نتيجة التحديد على طول، وعشان لو دست
+  // الزرار تاني يكمل من هنا (من غير ما ترجع بنفسك لأول صفحة).
+  const lastSelected = batch[batch.length - 1];
+  const lastIndexInFiltered = window.readyFilteredData.findIndex(o => o.order_number === lastSelected.order_number);
+  if (lastIndexInFiltered >= 0) readyCurrentPage = Math.floor(lastIndexInFiltered / readyPageSize) + 1;
+
+  updateReadySelectedCount();
+  renderReadyPage();
+  input.value = '';
+
+  if (batch.length < count) {
+    alert(`تم تحديد ${batch.length} طلب فقط (هذا كل المتاح غير الموزّع من الصفحة الحالية لآخر النتائج)`);
+  }
 }
 
 // تغيير الحالة لكل الصفوف المحددة دفعة واحدة.
@@ -10137,13 +10308,13 @@ async function saveReadyUpdate() {
       if (_readySearchDebounceTimer) clearTimeout(_readySearchDebounceTimer);
       if (!searchValue) { renderReadyPage(); return; }
       const tbody = document.getElementById('ready-tbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">جاري البحث...</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">جاري البحث...</td></tr>`;
       _readySearchDebounceTimer = setTimeout(async () => {
         if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
         try { await searchReadyAcrossAllDates(searchValue); }
         catch (err) {
           if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
-          if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
+          if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#f87171;">خطأ: ${err.message}</td></tr>`;
           return;
         }
         if (document.getElementById('ready-search-input').value.trim() !== searchValue) return;
@@ -10278,6 +10449,8 @@ async function verifyAndSelectReadyOrders() {
     const foundSet = new Set(found);
     const firstFoundIndex = readyAllData.findIndex(o => foundSet.has(String(o.order_number)));
     readyCurrentPage = firstFoundIndex >= 0 ? Math.floor(firstFoundIndex / readyPageSize) + 1 : 1;
+
+    renderReadyKpis(readyAllData);
   }
 
   renderReadyPage(); // بيعيد رسم البيانات بترتيبها، والـ checkboxes بتتظبط تلقائيًا حسب التحديد

@@ -859,6 +859,10 @@
             <button id="show-selected-only-ready-btn" class="btn btn-secondary btn-sm" onclick="toggleShowOnlySelectedReady()">📌 عرض المحدد فقط</button>
           </div>
           <div class="bulk-group">
+            <input type="date" id="ready-bulk-date-input" class="date-input btn-sm" style="width: 130px;">
+            <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkDateUpdate()">تطبيق التاريخ</button>
+          </div>
+          <div class="bulk-group">
             <select id="ready-bulk-status-select" class="filter-select btn-sm" style="width: 170px;">
               <option value="">تغيير الحالة إلى...</option>
               <option value="لم يتم المراجعة">لم يتم المراجعة</option>

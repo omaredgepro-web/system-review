@@ -10261,6 +10261,34 @@ function exportSelectedReadyOrderNumbersTxt() {
 // تغيير الحالة لكل الصفوف المحددة دفعة واحدة.
 // لو الحالة الجديدة "مرفوض" بيطلب سبب واحد يتسجل مع الكل، وبيصفّر reviewer_action
 // عشان المراجع يتبلغ ويتصرف من جديد (نفس فكرة التنبيه الفوري).
+async function executeReadyBulkDateUpdate() {
+  const dateEl = document.getElementById('ready-bulk-date-input');
+  const newDate = dateEl ? dateEl.value : '';
+  if (!newDate) { alert('برجاء اختيار التاريخ أولاً'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const confirmChange = confirm(`هل أنت تأكد من تحديث تاريخ (${selectedReadyNumbers.size}) طلب إلى "${newDate}"؟`);
+  if (!confirmChange) return;
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) return;
+  const matchValues = targetOrders.map(o => o.id);
+
+  try {
+    const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'update', { date: newDate });
+    if (error) { alert('حدث خطأ أثناء تحديث التاريخ: ' + error.message); }
+    else {
+      alert(`تم تحديث تاريخ ${selectedReadyNumbers.size} طلب بنجاح إلى "${newDate}"!`);
+      targetOrders.forEach(o => { o.date = newDate; });
+      selectedReadyNumbers.clear();
+      if (showOnlySelectedReady) { showOnlySelectedReady = false; const __b = document.getElementById('show-selected-only-ready-btn'); if (__b) __b.innerText = '📌 عرض المحدد فقط'; }
+      updateReadySelectedCount();
+      if (dateEl) dateEl.value = '';
+      applyReadyDateFiltering();
+    }
+  } catch (err) { alert('خطأ: ' + err.message); }
+}
+
 async function executeReadyBulkStatusUpdate() {
   const sel = document.getElementById('ready-bulk-status-select');
   const newStatus = sel ? sel.value : '';

@@ -10295,7 +10295,7 @@ async function executeReadyBulkStatusUpdate() {
   if (!newStatus) { alert('برجاء اختيار الحالة من القائمة أولاً'); return; }
   if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
 
-  let reason = '-';
+  let reason = null;
   if (newStatus === 'مرفوض') {
     const entered = prompt(`اكتب سبب الرفض اللي هيتسجل مع كل الـ (${selectedReadyNumbers.size}) طلب المحدد:`);
     if (entered === null) return; // ألغى المستخدم
@@ -10309,8 +10309,13 @@ async function executeReadyBulkStatusUpdate() {
   if (targetOrders.length === 0) return;
   const matchValues = targetOrders.map(o => o.id);
 
-  const updateData = { status: newStatus, reason: reason };
-  if (newStatus === 'مرفوض') updateData.reviewer_action = null;
+  // مهم: تغيير الحالة لـ "جاهز للطباعه" أو أي حالة غير "مرفوض" ميمسحش السبب القديم -
+  // السبب بيفضل محفوظ زي ما هو للسجل، وبيتغير بس لو الحالة الجديدة "مرفوض" (سبب جديد إجباري).
+  const updateData = { status: newStatus };
+  if (newStatus === 'مرفوض') {
+    updateData.reason = reason;
+    updateData.reviewer_action = null;
+  }
 
   try {
     const error = await runBatchedSupabaseAction(READY_TABLE_NAME, 'id', matchValues, 'update', updateData);
@@ -10568,6 +10573,11 @@ async function saveReadyUpdate() {
   const newReason = document.getElementById('ready-modal-reason').value.trim();
   const newDate = document.getElementById('ready-modal-date').value;
   const newType = document.getElementById('ready-modal-type').value;
+  // السبب إجباري مع "مرفوض" عشان ميتحفظش مرفوض من غير سبب ويمسح القديم بـ '-'
+  if (newStatus === 'مرفوض' && !newReason) {
+    alert('برجاء كتابة سبب الرفض.');
+    return;
+  }
   saveBtn.innerText = 'جاري الحفظ...'; saveBtn.disabled = true;
   const updateData = {
     status: newStatus || null,

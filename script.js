@@ -11257,3 +11257,40 @@ async function uploadReadyDistOrdersToSupabase() {
     if (btn) { btn.innerText = 'تأكيد ورفع الطلبات لجدول جاهز على الطباعة'; btn.disabled = false; }
   }
 }
+
+
+// ============ تصدير Excel لتاب "جاهز على الطباعة" ============
+// بيصدّر بالظبط النتائج المعروضة حاليًا (كل صفحات الفلتر الحالي مش الصفحة الظاهرة بس): لو فيه فلتر
+// (بحث/مسؤول/مراجع/حالة/نوع/تاريخ) بيطبّقه، ولو مفيش فلتر بيصدّر كل النتائج المعروضة.
+// ولو عايز كل التواريخ، دوس "📅 عرض كل التواريخ" الأول.
+function exportReadyFilteredToExcel() {
+  const rows = window.readyFilteredData || [];
+  if (rows.length === 0) { alert('لا توجد نتائج لتصديرها ضمن الفلتر الحالي.'); return; }
+
+  const exportRows = rows.map(o => {
+    const rawLayout = o.Layout || o.layout || '';
+    const action = o.reviewer_action || ((o.status === 'مرفوض') ? 'بانتظار المراجع' : '-');
+    return {
+      'رقم الطلب': o.order_number || '-',
+      'المسؤول': rawLayout ? getDisplayName(rawLayout) : 'غير موزعة',
+      'الحالة': (o.status && String(o.status).trim()) || 'لم يتم المراجعة',
+      'المراجع': getDisplayName(o.reviewer) || '-',
+      'حالة الطلب (للمراجع)': action,
+      'السبب': (o.reason && o.reason !== '-') ? o.reason : '-',
+      'التاريخ': o.date || extractDateString(o) || 'غير محدد',
+      'النوع': o.cert_type || 'عادي',
+      'آخر إجراء': formatActionTimestamp(o)
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 20 }, { wch: 36 }, { wch: 14 }, { wch: 10 }, { wch: 24 }];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'جاهز على الطباعة');
+
+  const statusValue = (document.getElementById('ready-status-filter') || {}).value;
+  const statusSuffix = (statusValue && statusValue !== 'ALL') ? `_${statusValue}` : '';
+  const dateValue = (document.getElementById('ready-date-filter') || {}).value;
+  const dateLabel = dateValue || new Date().toISOString().split('T')[0];
+  XLSX.writeFile(workbook, `جاهز_على_الطباعة${statusSuffix}_${dateLabel}.xlsx`);
+}

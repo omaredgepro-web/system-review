@@ -788,6 +788,7 @@
           <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
             <button class="btn btn-secondary" id="refresh-ready-btn" onclick="refreshReadyData()">🔄 تحديث يدوي</button>
             <button class="btn btn-secondary" onclick="toggleReadyMultiSelectPanel()">📋 تحديد متعدد (نسخ/لصق أو ملف)</button>
+            <button class="btn btn-secondary" onclick="exportReadyFilteredToExcel()">📤 تصدير Excel (النتائج الحالية)</button>
             <span id="ready-live-status-indicator" style="font-size: 11px; color: var(--text-muted);" title="جاري الاتصال بالتحديث اللحظي...">⚪ جاري الاتصال...</span>
             <span id="ready-active-date-label" style="font-size: 12px; color: var(--badge-pending-text); background: var(--badge-pending-bg); padding: 6px 12px; border-radius: 6px;">جاري الفحص...</span>
           </div>

@@ -30,7 +30,7 @@ const CERT_REVIEWER_REQUIRED_STATUSES = ['مرفوض'];
 // ============ جدول "جاهز على الطباعة" (نسخة أساسية: عرض + فلترة تاريخ + تعديل + تنبيه فوري) ============
 // نفس بنية وصلاحيات جدول layout بالظبط، والتاب بتاعه بره لوحة الأدمن (ظاهر للكل).
 const READY_TABLE_NAME = 'ready_to_print';
-const READY_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
+const READY_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'مطبوع مسبقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
 const READY_REVIEWER_ACTIONS = ['تم التعديل', 'تم الرفض للشركة', 'معلق'];
 
 // ============ جدول المواقف (مقصور على 5 أدمن بالاسم، والحذف على umar/mondy بس) ============
@@ -9711,11 +9711,12 @@ function populateReadyDropdowns() {
   }
 }
 
-const READY_KPI_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
+const READY_KPI_STATUSES = ['لم يتم المراجعة', 'جاهز للطباعه', 'تم مراجعته سابقا', 'مطبوع مسبقا', 'له جهة ولاية', 'مرفوض', 'محجوز', 'معلق'];
 const READY_STATUS_META = {
   'لم يتم المراجعة': { icon: '⛔', color: '#60a5fa' },
   'جاهز للطباعه': { icon: '✅', color: '#34d399' },
   'تم مراجعته سابقا': { icon: '🔁', color: '#38bdf8' },
+  'مطبوع مسبقا': { icon: '🖨️', color: '#94a3b8' },
   'له جهة ولاية': { icon: '⚠️', color: '#fb923c' },
   'مرفوض': { icon: '❌', color: '#f87171' },
   'محجوز': { icon: '🔒', color: '#a78bfa' },
@@ -10023,6 +10024,7 @@ function getReadyStatusBadge(status) {
   if (s === 'لم يتم المراجعة') return '<span class="badge badge-unreviewed">لم يتم المراجعة</span>';
   if (s === 'جاهز للطباعه') return '<span class="badge badge-accepted">جاهز للطباعه</span>';
   if (s === 'تم مراجعته سابقا') return '<span class="badge badge-reprint">تم مراجعته سابقا</span>';
+  if (s === 'مطبوع مسبقا') return '<span class="badge badge-pending">مطبوع مسبقا</span>';
   if (s === 'له جهة ولاية') return '<span class="badge badge-error">له جهة ولاية</span>';
   if (s === 'مرفوض') return '<span class="badge badge-rejected">مرفوض</span>';
   if (s === 'محجوز') return '<span class="badge badge-hold">محجوز</span>';

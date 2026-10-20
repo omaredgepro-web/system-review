@@ -894,6 +894,9 @@
             <select id="ready-bulk-reviewer-select" class="filter-select btn-sm" style="width: 150px;"><option value="">تغيير إلى المراجع...</option></select>
             <button class="btn btn-secondary btn-sm" onclick="executeReadyBulkReviewerUpdate()">تطبيق المراجع</button>
           </div>
+          <div class="bulk-group" id="ready-move-layout-group" style="display:none;">
+            <button id="ready-move-layout-btn" class="btn btn-secondary btn-sm" onclick="executeReadyBulkMoveToLayout()" title="ينقل الطلبات المحددة لجدول الطباعة (تاب اللاي اوت) بنفس المسؤول ونفس الحالة، وكل طلب بيروح لتاب نوعه (عادي / تعمير). الطلبات بتفضل كمان في تاب جاهز على الطباعة.">🚚 نقل للاي اوت</button>
+          </div>
           <div class="bulk-group">
             <input type="number" id="ready-export-count-input" class="filter-select btn-sm" min="1" placeholder="عدد..." style="width: 80px;">
             <button class="btn btn-secondary btn-sm" onclick="selectNextReadyFromFiltered()">تحديد الأول من النتائج</button>

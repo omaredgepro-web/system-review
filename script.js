@@ -919,6 +919,9 @@ async function setupUserSession(profile) {
   if (readyBulkBar) readyBulkBar.style.display = isAdmin ? 'flex' : 'none';
   const readyBulkDeleteBtn = document.getElementById('ready-bulk-delete-btn');
   if (readyBulkDeleteBtn) readyBulkDeleteBtn.style.display = canDelete() ? 'inline-flex' : 'none';
+  // نقل الطلبات لجدول الطباعة (layout) = إضافة طلبات جديدة لجدول الطباعة، فمحصور على عمر وموندي زي تاب توزيع الطباعة
+  const readyMoveLayoutGroup = document.getElementById('ready-move-layout-group');
+  if (readyMoveLayoutGroup) readyMoveLayoutGroup.style.display = canDelete() ? 'flex' : 'none';
   document.getElementById('mawaqef-tab-btn').style.display = canViewMawaqef() ? 'block' : 'none';
   const certMoveGroup = document.getElementById('cert-move-mawaqef-group');
   if (certMoveGroup) certMoveGroup.style.display = canViewMawaqef() ? 'flex' : 'none';
@@ -10413,6 +10416,108 @@ async function executeReadyBulkReviewerUpdate() {
 }
 
 // حذف نهائي للصفوف المحددة - متاح لعمر وموندي فقط (حسب canDelete)
+// نقل الطلبات المحددة في تاب "جاهز على الطباعة" لجدول الطباعة (layout = تابي الشهادات عادي/تعمير)
+// بنفس المسؤول (Layout) ونفس الحالة (status) ونفس النوع (cert_type)، فكل طلب بيروح لتاب نوعه.
+// الطلبات بتفضل كمان في تاب الجاهز (زي "نقل للمواقف" في تاب الشهادات بالظبط - مفيش حذف من المصدر).
+// أي رقم طلب موجود بالفعل في جدول الطباعة (بأي تاريخ/نوع) بيتجاهل عشان منكررش نفس الرقم.
+async function executeReadyBulkMoveToLayout() {
+  if (!canDelete()) { alert('نقل الطلبات لجدول الطباعة متاح لعمر وموندي فقط'); return; }
+  if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل'); return; }
+
+  const targetOrders = (readyMasterData || []).filter(o => selectedReadyNumbers.has(getRowKey(o)));
+  if (targetOrders.length === 0) { alert('لم يتم العثور على الطلبات المحددة.'); return; }
+
+  // رقم الطلب ممكن يتكرر على أكتر من صف في الجاهز (تواريخ مختلفة) - جدول الطباعة رقم واحد بس،
+  // فبناخد أحدث صف لكل رقم (بالتاريخ)
+  const byNumber = new Map();
+  let mergedInsideSelection = 0;
+  targetOrders.forEach(o => {
+    const num = String(o.order_number || '').trim();
+    if (!num) return;
+    const prev = byNumber.get(num);
+    if (!prev) { byNumber.set(num, o); return; }
+    mergedInsideSelection++;
+    if ((extractDateString(o) || '') >= (extractDateString(prev) || '')) byNumber.set(num, o);
+  });
+  const orderNumbers = [...byNumber.keys()];
+  if (orderNumbers.length === 0) { alert('مفيش أرقام طلبات صالحة في المحدد'); return; }
+
+  const moveBtn = document.getElementById('ready-move-layout-btn');
+  const originalText = moveBtn ? moveBtn.innerText : '';
+  if (moveBtn) { moveBtn.disabled = true; moveBtn.innerText = '⏳ جاري الفحص...'; }
+
+  try {
+    // فحص التكرار: الأرقام الموجودة بالفعل في جدول الطباعة (فحص مستهدف من السيرفر، مش تحميل الجدول كله)
+    const existingRows = await fetchCertRowsByOrderNumbers(orderNumbers);
+    const existing = new Set((existingRows || []).map(r => String(r.order_number)));
+
+    const today = getTodayCairoIsoDate();
+    const buildLayoutRow = (o) => {
+      const status = o.status || null;
+      const row = {
+        order_number: String(o.order_number).trim(),
+        cert_type: o.cert_type || 'عادي',
+        date: today
+      };
+      const layoutName = o.Layout || o.layout;
+      if (layoutName) row.Layout = layoutName;
+      if (status) row.status = status;
+      // نفس قواعد جدول الطباعة: السبب بس للحالات اللي بتطلبه، والمراجع/علامة "اترفض قبل كده" للمرفوض بس
+      if (CERT_REASON_REQUIRED_STATUSES.includes(status)) row.reason = o.reason || '-';
+      if (status === 'مرفوض') {
+        row.was_rejected = true;
+        if (o.reviewer) row.reviewer = o.reviewer;
+        if (o.reviewer_action) row.reviewer_action = o.reviewer_action;
+      }
+      return row;
+    };
+
+    const newRows = orderNumbers.filter(n => !existing.has(String(n))).map(n => buildLayoutRow(byNumber.get(n)));
+    const skipped = orderNumbers.length - newRows.length;
+
+    if (newRows.length === 0) {
+      alert('كل الطلبات المحددة موجودة بالفعل في جدول الطباعة (تاب اللاي اوت)، مفيش حاجة جديدة تتنقل.');
+      return;
+    }
+
+    const normalCount = newRows.filter(r => r.cert_type !== 'تعمير').length;
+    const renovationCount = newRows.length - normalCount;
+    const notes = [];
+    if (skipped > 0) notes.push(`${skipped} موجود بالفعل في جدول الطباعة هيتجاهل`);
+    if (mergedInsideSelection > 0) notes.push(`${mergedInsideSelection} مكرر جوه التحديد نفسه اتجمع في رقم واحد`);
+    if (!confirm(`هيتم نقل ${newRows.length} طلب لجدول الطباعة (تاب اللاي اوت) بنفس المسؤول ونفس الحالة:\n` +
+                 `🖨️ عادي: ${normalCount}   |   📠 تعمير: ${renovationCount}` +
+                 (notes.length ? `\n(${notes.join(' - ')})` : '') +
+                 `\n\nالطلبات هتفضل كمان في تاب جاهز على الطباعة. تأكيد؟`)) return;
+
+    if (moveBtn) moveBtn.innerText = '⏳ جاري النقل...';
+    let inserted = 0;
+    for (const batch of chunkArray(newRows, 150)) {
+      const { data, error } = await supabaseClient.from(CERT_TABLE_NAME).insert(batch).select();
+      if (error) {
+        alert(`تم نقل ${inserted} طلب قبل ما يحصل خطأ: ${error.message}\nجرب تاني للباقي (اللي اتنقل قبل كده هيتجاهل تلقائي).`);
+        certDataLoaded = false; window.__certScope = 'none';
+        return;
+      }
+      inserted += (data || batch).length;
+    }
+
+    alert(`تم نقل ${inserted} طلب بنجاح لجدول الطباعة (تاب اللاي اوت)!` +
+          (skipped > 0 ? `\n(${skipped} كانوا موجودين بالفعل واتجاهلوا)` : ''));
+    selectedReadyNumbers.clear();
+    if (showOnlySelectedReady) { showOnlySelectedReady = false; const b = document.getElementById('show-selected-only-ready-btn'); if (b) b.innerText = '📌 عرض المحدد فقط'; }
+    updateReadySelectedCount();
+    renderReadyPage();
+    // تابي الشهادات هيتحملوا من جديد أول ما تفتحهم عشان يظهروا فيهم الطلبات المنقولة
+    certDataLoaded = false;
+    window.__certScope = 'none';
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    if (moveBtn) { moveBtn.disabled = false; moveBtn.innerText = originalText; }
+  }
+}
+
 async function executeReadyBulkDelete() {
   if (!canDelete()) { alert('هذا الإجراء متاح لعمر وموندي فقط'); return; }
   if (selectedReadyNumbers.size === 0) { alert('برجاء تحديد طلب واحد على الأقل للحذف'); return; }

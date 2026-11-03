@@ -164,6 +164,10 @@ let parsedCsvData = [];
 let parsedPrintOrderNumbers = [];
 let printOrderAssignments = {}; // order_number -> اسم الأدمن المخصص ليه (من التوزيع التلقائي)
 let printDistUserSelection = null;
+let printExcludedReady = []; // طلبات اتستبعدت لأنها "جاهز للطباعه" بالفعل في جدول جاهز على الطباعة
+let printReadyChecked = new Set(); // أرقام اتفحصت مع جدول جاهز على الطباعة (عشان منفحصش نفس الرقم مرتين)
+let _printReadyCheckChain = Promise.resolve();
+let printDistCounts = {}; // username -> العدد المطلوب توزيعه عليه (توزيع بالترتيب حسب الشيت)
 // ============ حالة تاب توزيع "جاهز على الطباعة" ============
 let parsedReadyDistNumbers = [];
 let readyDistLayoutAssignments = {}; // order_number -> اسم الأدمن (المسؤول) المخصص ليه
@@ -983,6 +987,11 @@ async function setupUserSession(profile) {
   const readyDistDateEl = document.getElementById('ready-dist-date-input');
   if (readyDistDateEl && !readyDistDateEl.value && typeof getTodayCairoIsoDate === 'function') {
     try { readyDistDateEl.value = getTodayCairoIsoDate(); } catch (e) {}
+  }
+  // نفس الكلام لتاريخ دفعة تاب "توزيع طلبات الطباعة"
+  const printBatchDateEl = document.getElementById('print-batch-date-input');
+  if (printBatchDateEl && !printBatchDateEl.value && typeof getTodayCairoIsoDate === 'function') {
+    try { printBatchDateEl.value = getTodayCairoIsoDate(); } catch (e) {}
   }
 
   loadData();
@@ -4202,18 +4211,135 @@ function renderPrintPreview() {
 
   if (hasData) populatePrintDistUsersList();
   renderPrintDuplicatesPanel();
+  renderPrintExcludedPanel();
+  if (hasData) checkPrintAgainstReady();
 
   const tbody = document.getElementById('print-preview-tbody');
   const PREVIEW_LIMIT = 500;
-  tbody.innerHTML = parsedPrintOrderNumbers.slice(0, PREVIEW_LIMIT).map(num => `
+  tbody.innerHTML = parsedPrintOrderNumbers.slice(0, PREVIEW_LIMIT).map((num, i) => `
     <tr>
+      <td style="color: var(--text-muted);">${i + 1}</td>
       <td class="order-no-cell">${num}</td>
-      <td>${printOrderAssignments[num] || '-'}</td>
+      <td>${printOrderAssignments[num] ? getDisplayName(printOrderAssignments[num]) : '-'}</td>
     </tr>
   `).join('');
   if (parsedPrintOrderNumbers.length > PREVIEW_LIMIT) {
-    tbody.innerHTML += `<tr><td colspan="2" style="text-align:center; color: var(--text-muted);">... و ${parsedPrintOrderNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
+    tbody.innerHTML += `<tr><td colspan="3" style="text-align:center; color: var(--text-muted);">... و ${parsedPrintOrderNumbers.length - PREVIEW_LIMIT} رقم إضافي (معروضين جزئيًا هنا بس هيترفعوا كلهم)</td></tr>`;
   }
+}
+
+// ============ استبعاد الطلبات اللي حالتها "جاهز للطباعه" في جدول جاهز على الطباعة ============
+function isReadyToPrintStatus(status) {
+  return String(status || '').trim().replace(/ة/g, 'ه') === 'جاهز للطباعه';
+}
+
+// بيفحص أرقام المعاينة الحالية (اللي لسه متفحصتش) مع جدول ready_to_print، وأي رقم حالته "جاهز للطباعه"
+// بيتشال من المعاينة والتوزيع أوتوماتيك ويتحط في قايمة المستبعد (قابلة للتحميل Excel).
+// الاستدعاءات بتتنفذ ورا بعض (مش بالتوازي) عشان مفيش تضارب.
+function checkPrintAgainstReady() {
+  _printReadyCheckChain = _printReadyCheckChain.then(doPrintReadyCheck).catch(e => console.warn('فحص جاهز للطباعة:', e && e.message));
+  return _printReadyCheckChain;
+}
+
+async function doPrintReadyCheck() {
+  const toCheck = parsedPrintOrderNumbers.filter(n => !printReadyChecked.has(String(n)));
+  if (toCheck.length === 0) return;
+
+  let rows;
+  try {
+    rows = await fetchReadyRowsByOrderNumbers(toCheck);
+  } catch (e) {
+    console.warn('فحص جاهز للطباعة:', e.message);
+    return; // منعلّمهمش متفحصين، عشان يتعاد الفحص بعد كده
+  }
+  toCheck.forEach(n => printReadyChecked.add(String(n)));
+
+  const readyByNum = new Map();
+  (rows || []).forEach(r => {
+    const key = String(r.order_number || '').trim();
+    if (key && isReadyToPrintStatus(r.status) && !readyByNum.has(key)) readyByNum.set(key, r);
+  });
+  if (readyByNum.size === 0) return;
+
+  parsedPrintOrderNumbers = parsedPrintOrderNumbers.filter(n => !readyByNum.has(String(n).trim()));
+  const alreadyListed = new Set(printExcludedReady.map(r => String(r.order_number).trim()));
+  readyByNum.forEach((row, num) => {
+    delete printOrderAssignments[num];
+    if (!alreadyListed.has(num)) printExcludedReady.push(row);
+  });
+
+  renderPrintPreview();
+  renderPrintDistSummary();
+}
+
+function renderPrintExcludedPanel() {
+  const area = document.getElementById('print-ready-excluded-area');
+  const container = document.getElementById('print-ready-excluded-panel');
+  if (!area || !container) return;
+
+  if (printExcludedReady.length === 0) {
+    area.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  area.style.display = 'block';
+
+  const rowsHtml = printExcludedReady.map(o => `
+    <tr>
+      <td style="padding:6px; text-align:center;">${o.order_number}</td>
+      <td style="padding:6px; text-align:center;">${getDisplayName(o.Layout || o.layout) || '⛔ غير موزّع'}</td>
+      <td style="padding:6px; text-align:center;">${extractDateString(o) || '-'}</td>
+      <td style="padding:6px; text-align:center;">${o.cert_type || 'عادي'}</td>
+    </tr>
+  `).join('');
+
+  container.innerHTML = `
+    <p style="color: var(--badge-accept-text); font-weight:800; margin-bottom:6px;">${printExcludedReady.length} رقم طلب حالته "جاهز للطباعه" بالفعل في جدول جاهز على الطباعة — اتستبعدوا تلقائيًا من المعاينة والتوزيع ومش هيترفعوا.</p>
+    <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+      <button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="exportPrintExcludedReadyExcel()">⬇️ تحميل إكسيل بالمستبعد (${printExcludedReady.length})</button>
+      <button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="clearPrintExcludedReady()">🗑️ مسح قايمة المستبعد</button>
+    </div>
+    <div style="max-height:220px; overflow-y:auto; border: 1px solid var(--card-border); border-radius: 6px;">
+      <table style="width:100%; font-size:12px;"><thead><tr>
+        <th style="padding:6px;">رقم الطلب</th><th style="padding:6px;">المسؤول الحالي</th>
+        <th style="padding:6px;">التاريخ</th><th style="padding:6px;">النوع</th>
+      </tr></thead><tbody>${rowsHtml}</tbody></table>
+    </div>
+  `;
+}
+
+function exportPrintExcludedReadyExcel() {
+  if (printExcludedReady.length === 0) { alert('لا توجد طلبات مستبعدة لتحميلها.'); return; }
+
+  const exportRows = printExcludedReady.map(o => ({
+    'رقم الطلب': o.order_number || '-',
+    'الحالة': 'جاهز للطباعه',
+    'المسؤول': getDisplayName(o.Layout || o.layout) || '-',
+    'المراجع': getDisplayName(o.reviewer) || '-',
+    'التاريخ': extractDateString(o) || '-',
+    'النوع': o.cert_type || 'عادي'
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportRows);
+  worksheet['!cols'] = [{ wch: 24 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 10 }];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'مستبعد - جاهز للطباعة');
+
+  const dateLabel = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(workbook, `مستبعد_جاهز_للطباعة_${dateLabel}.xlsx`);
+}
+
+function clearPrintExcludedReady() {
+  if (printExcludedReady.length === 0) return;
+  if (!confirm('هيتم مسح قايمة المستبعد من الشاشة (محمّلتهاش Excel؟ حمّلها الأول). تأكيد؟')) return;
+  printExcludedReady = [];
+  renderPrintExcludedPanel();
+}
+
+function countPrintAssignedTo(admin) {
+  let n = 0;
+  for (const num of parsedPrintOrderNumbers) if (printOrderAssignments[num] === admin) n++;
+  return n;
 }
 
 function populatePrintDistUsersList() {
@@ -4224,16 +4350,28 @@ function populatePrintDistUsersList() {
     printDistUserSelection = new Set(adminKeys); // أول مرة بس: كل الأدمن متحدد افتراضيًا
   }
 
-  container.innerHTML = '';
-  adminKeys.forEach(key => {
+  container.innerHTML = adminKeys.map(key => {
     const isChecked = printDistUserSelection.has(key) ? 'checked' : '';
-    container.innerHTML += `
-      <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px; cursor: pointer;">
-        <input type="checkbox" class="print-dist-user-checkbox" value="${key}" ${isChecked} onchange="onPrintDistUserToggle(this)">
-        ${getDisplayName(key)}
-      </label>
+    const cnt = printDistCounts[key] || '';
+    const assigned = countPrintAssignedTo(key);
+    const assignedTag = assigned > 0
+      ? `<span style="font-size: 11px; color: var(--badge-accept-text); white-space: nowrap;">✅ ${assigned} طلب</span>`
+      : '';
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--bg-dark); border: 1px solid var(--card-border); padding: 6px 10px; border-radius: 6px;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" class="print-dist-user-checkbox" value="${key}" ${isChecked} onchange="onPrintDistUserToggle(this)">
+          ${getDisplayName(key)}
+        </label>
+        <input type="number" min="1" class="filter-select print-dist-count-input" data-user="${key}" value="${cnt}" placeholder="عدد"
+          style="width: 80px; padding: 4px 8px; font-size: 12px;"
+          oninput="printDistCounts[this.dataset.user] = this.value"
+          onkeydown="if (event.key === 'Enter') applyPrintCountForAdmin(this.dataset.user)">
+        <button type="button" class="btn btn-secondary" data-user="${key}" style="padding: 4px 10px; font-size: 12px;" onclick="applyPrintCountForAdmin(this.dataset.user)">وزّع</button>
+        ${assignedTag}
+      </div>
     `;
-  });
+  }).join('');
 }
 
 function onPrintDistUserToggle(checkbox) {
@@ -4249,7 +4387,32 @@ function selectAllPrintDistUsers(checked) {
   printDistUserSelection = new Set(checked ? adminKeys : []);
 }
 
-// توزيع تلقائي متساوي (Round-robin) على الأدمن المختارين، مع وقف عند التارجت لو محدد
+// توزيع بالترتيب (مش عشوائي): بيدّي الأدمن أول N رقم "لسه متوزعوش" بنفس ترتيب نزولهم في الشيت.
+// كل ما تحدد عدد لشخص تاني بياخد اللي بعد كده في الشيت وهكذا.
+function applyPrintCountForAdmin(admin) {
+  if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
+  if (parsedPrintOrderNumbers.length === 0) { alert('برجاء رفع ملف أولاً.'); return; }
+
+  const n = parseInt(printDistCounts[admin], 10);
+  if (!n || n < 1) { alert('اكتب العدد المطلوب قدام اسم ' + getDisplayName(admin) + ' الأول.'); return; }
+
+  const unassigned = parsedPrintOrderNumbers.filter(num => !printOrderAssignments[num]);
+  if (unassigned.length === 0) { alert('كل الطلبات اتوزعت بالفعل. لو عايز تعيد التوزيع دوس "إلغاء كل التوزيع".'); return; }
+
+  const chunk = unassigned.slice(0, n);
+  chunk.forEach(num => { printOrderAssignments[num] = admin; });
+  printDistCounts[admin] = '';
+
+  renderPrintPreview();
+  renderPrintDistSummary();
+
+  if (chunk.length < n) {
+    alert(`المتبقي من الشيت كان ${chunk.length} طلب بس، فاتوزعوا كلهم على ${getDisplayName(admin)}.`);
+  }
+}
+
+// توزيع تلقائي متوازن: بيقسّم الشيت كله (بنفس ترتيبه) لكتل متتالية على الأدمن المختارين.
+// بدون تارجت: تقسيم متساوي (الباقي بيتوزع واحد واحد على أول الأدمن). مع تارجت: كل واحد ياخد كتلة بالعدد ده.
 function runPrintBalancedDistribution() {
   if (!canDelete()) { alert('التوزيع متاح لعمر وموندي فقط'); return; }
   if (parsedPrintOrderNumbers.length === 0) {
@@ -4266,44 +4429,58 @@ function runPrintBalancedDistribution() {
   const targetPerPerson = parseInt(document.getElementById('print-dist-target-input').value, 10) || 0; // 0 = بدون تارجت
 
   printOrderAssignments = {};
-  const counts = {};
-  selectedAdmins.forEach(a => counts[a] = 0);
+  const total = parsedPrintOrderNumbers.length;
+  let cursor = 0;
 
-  let userIndex = 0;
-  let assignedCount = 0;
-
-  for (const num of parsedPrintOrderNumbers) {
-    if (targetPerPerson > 0 && selectedAdmins.every(a => counts[a] >= targetPerPerson)) break;
-
-    let attempts = 0;
-    while (targetPerPerson > 0 && counts[selectedAdmins[userIndex]] >= targetPerPerson && attempts < selectedAdmins.length) {
-      userIndex = (userIndex + 1) % selectedAdmins.length;
-      attempts++;
+  selectedAdmins.forEach((admin, i) => {
+    let take;
+    if (targetPerPerson > 0) {
+      take = targetPerPerson;
+    } else {
+      const base = Math.floor(total / selectedAdmins.length);
+      const extra = total % selectedAdmins.length;
+      take = base + (i < extra ? 1 : 0);
     }
-    if (targetPerPerson > 0 && attempts >= selectedAdmins.length) break;
-
-    const admin = selectedAdmins[userIndex];
-    printOrderAssignments[num] = admin;
-    counts[admin]++;
-    assignedCount++;
-    userIndex = (userIndex + 1) % selectedAdmins.length;
-  }
+    const end = Math.min(cursor + take, total);
+    for (let k = cursor; k < end; k++) printOrderAssignments[parsedPrintOrderNumbers[k]] = admin;
+    cursor = end;
+  });
 
   renderPrintPreview();
-  renderPrintDistSummary(counts, parsedPrintOrderNumbers.length - assignedCount);
+  renderPrintDistSummary();
 }
 
-function renderPrintDistSummary(counts, leftoverCount) {
+function clearPrintAssignments() {
+  if (Object.keys(printOrderAssignments).length === 0) return;
+  if (!confirm('هيتم إلغاء توزيع كل الأرقام في المعاينة الحالية. تأكيد؟')) return;
+  printOrderAssignments = {};
+  renderPrintPreview();
+  renderPrintDistSummary();
+}
+
+function renderPrintDistSummary() {
   const container = document.getElementById('print-dist-summary');
+  if (!container) return;
+
+  const counts = {};
+  let assignedCount = 0;
+  parsedPrintOrderNumbers.forEach(num => {
+    const a = printOrderAssignments[num];
+    if (a) { counts[a] = (counts[a] || 0) + 1; assignedCount++; }
+  });
+  const leftoverCount = parsedPrintOrderNumbers.length - assignedCount;
+
+  if (assignedCount === 0) { container.innerHTML = ''; return; }
+
   const rows = Object.keys(counts).map(name => `
     <div class="reviewer-stat">
-      <div class="reviewer-info"><div class="name">${name}</div></div>
+      <div class="reviewer-info"><div class="name">${getDisplayName(name)}</div></div>
       <div class="reviewer-counts"><div class="count-accepted">${counts[name]} طلب</div></div>
     </div>
   `).join('');
 
   const leftoverHtml = leftoverCount > 0
-    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لم يتم توزيعه، لأن كل الأدمن المختارين وصلوا للعدد المستهدف. زوّد التارجت أو اختار أدمن إضافيين.</p>`
+    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لسه من غير توزيع (هيترفعوا بدون مسؤول). تقدر توزعهم بكتابة عدد قدام أي أدمن، أو تزوّد التارجت.</p>`
     : '';
 
   container.innerHTML = `
@@ -4313,11 +4490,15 @@ function renderPrintDistSummary(counts, leftoverCount) {
   `;
 }
 
-function resetPrintUploadData() {
+function resetPrintUploadData(keepExcluded) {
   if (parsedPrintOrderNumbers.length > 0 && !confirm('هل تريد مسح كل الأرقام المرفوعة حاليًا والبدء من جديد؟')) return;
   parsedPrintOrderNumbers = [];
+  printReadyChecked = new Set();
+  if (keepExcluded !== true) printExcludedReady = [];
+  renderPrintExcludedPanel();
   printOrderAssignments = {};
   printDistUserSelection = null;
+  printDistCounts = {};
   document.getElementById('print-file-name-display').innerText = '';
   document.getElementById('print-preview-area').style.display = 'none';
   document.getElementById('print-total-banner').style.display = 'none';
@@ -4398,11 +4579,23 @@ function checkForDuplicatesAndConfirm(orderNumbers) {
 
 async function uploadPrintOrdersToSupabase() {
   if (parsedPrintOrderNumbers.length === 0) return;
+
+  const printDateEl = document.getElementById('print-batch-date-input');
+  const printBatchDate = printDateEl ? printDateEl.value : '';
+  if (!printBatchDate) { alert('برجاء تحديد تاريخ تسجيل الدفعة أولاً'); if (printDateEl) printDateEl.focus(); return; }
+
   const btn = document.getElementById('btn-upload-print');
   btn.innerText = 'جاري الرفع...';
   btn.disabled = true;
 
   try {
+    // نتأكد إن فحص "جاهز للطباعه" خلص قبل الرفع، عشان المستبعد ميترفعش
+    btn.innerText = 'جاري فحص جاهز للطباعة...';
+    await checkPrintAgainstReady();
+    if (parsedPrintOrderNumbers.length === 0) {
+      alert('كل الأرقام كانت جاهزة للطباعة بالفعل واتستبعدت، مفيش حاجة تترفع. حمّل شيت المستبعد لو عايزه.');
+      return;
+    }
     // فحص التكرار: نجيب بس الصفوف اللي أرقامها مطابقة للأرقام المطلوب رفعها (سريع)،
     // بدل تحميل الجدول كله - ثم نفصل الجديد عن المكرر
     btn.innerText = 'جاري فحص التكرار...';
@@ -4411,7 +4604,7 @@ async function uploadPrintOrdersToSupabase() {
     const { fresh, allowedDuplicates, skippedCount } = checkForDuplicatesAndConfirm(parsedPrintOrderNumbers);
 
     const buildRow = (num) => {
-      const row = { order_number: num, cert_type: certTypeForBatch };
+      const row = { order_number: num, cert_type: certTypeForBatch, date: printBatchDate };
       if (printOrderAssignments[num]) row.Layout = printOrderAssignments[num];
       return row;
     };
@@ -4458,8 +4651,9 @@ async function uploadPrintOrdersToSupabase() {
       if (skippedCount > 0) skippedParts.push(`${skippedCount} كانوا مكررين واتجاهلوا`);
       if (dbConflictCount > 0) skippedParts.push(`${dbConflictCount} اتجاهلوا من الداتابيز مباشرة (كانوا اتضافوا من مكان تاني في نفس الوقت)`);
       const skippedNote = skippedParts.length > 0 ? ` (${skippedParts.join(' و')})` : '';
-      alert(`تم رفع ${insertedCount} رقم طلب بنجاح!${skippedNote}`);
-      resetPrintUploadData();
+      const excludedNote = printExcludedReady.length > 0 ? `\n(${printExcludedReady.length} طلب اتستبعدوا لأنهم جاهزين للطباعة — تقدر تحمّلهم Excel من نفس التاب)` : '';
+      alert(`تم رفع ${insertedCount} رقم طلب بنجاح!${skippedNote}${excludedNote}`);
+      resetPrintUploadData(true);
     }
 
     certDataLoaded = false;

@@ -962,6 +962,10 @@
             <option value="عادي">🖨️ عادي (طباعة الشهادات)</option>
             <option value="تعمير">📠 تعمير</option>
           </select>
+          <div style="margin-top: 16px; min-width: 200px; max-width: 240px;">
+            <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">📅 تاريخ تسجيل الدفعة <span style="color: #f87171;">*</span></label>
+            <input type="date" id="print-batch-date-input" class="date-input" style="width: 100%;">
+          </div>
         </div>
 
         <div class="upload-box" id="print-upload-box" ondragover="handlePrintDragOver(event)" ondragleave="handlePrintDragLeave(event)" ondrop="handlePrintFileDrop(event)">
@@ -1000,6 +1004,11 @@
           <div class="kpi-value" id="print-total-banner-count" style="color: var(--accent-purple);">0</div>
         </div>
 
+        <div id="print-ready-excluded-area" class="admin-container" style="display: none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark); border-color: var(--badge-accept-text);">
+          <h3 style="font-size: 15px; margin-bottom: 6px;">✅ طلبات مستبعدة: جاهزة للطباعة بالفعل</h3>
+          <div id="print-ready-excluded-panel" style="font-size: 13px;"></div>
+        </div>
+
         <div id="print-duplicates-area" class="admin-container" style="display: none; padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
           <h3 style="font-size: 15px; margin-bottom: 6px;">🔁 فحص أرقام الطلبات المكررة</h3>
           <div id="print-duplicates-panel" style="font-size: 13px;"></div>
@@ -1009,7 +1018,7 @@
           <div class="admin-container" style="padding: 18px; margin-bottom: 20px; background: var(--bg-dark);">
             <h3 style="font-size: 15px; margin-bottom: 6px;">⚖️ توزيع تلقائي على الأدمن المسؤول عن المراجعة</h3>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
-              بيوزّع أرقام الطلبات دي بالتساوي على الأدمن المختارين (Round-robin). لو حددت "عدد الطلبات لكل شخص"، التوزيع هيوقف عند الوصول للعدد ده لكل واحد.
+              التوزيع بالترتيب زي ما الأرقام نازلة في الشيت (من غير عشوائية): اكتب عدد قدام اسم أي أدمن واضغط "وزّع" (أو Enter) فياخد أول العدد ده من الأرقام اللي لسه متوزعتش، والشخص اللي بعده ياخد اللي بعدهم وهكذا. أو اختار الأدمن (تحديد الكل مثلًا) واضغط "توزيع تلقائي متوازن" فيقسم الشيت كله لكتل متتالية متساوية على المختارين. لو حددت "عدد الطلبات لكل شخص" الكتلة بتبقى بالعدد ده.
             </p>
 
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
@@ -1017,7 +1026,8 @@
               <input type="number" id="print-dist-target-input" class="filter-select" min="1" placeholder="مثال: 100" style="width: 130px; padding: 6px 10px; font-size: 13px;">
               <button class="btn btn-secondary" onclick="selectAllPrintDistUsers(true)" style="padding: 6px 12px; font-size: 12px;">تحديد الكل</button>
               <button class="btn btn-secondary" onclick="selectAllPrintDistUsers(false)" style="padding: 6px 12px; font-size: 12px;">إلغاء تحديد الكل</button>
-              <button class="btn btn-primary" onclick="runPrintBalancedDistribution()" style="width: auto; padding: 8px 16px;">⚖️ توزيع تلقائي الآن</button>
+              <button class="btn btn-primary" onclick="runPrintBalancedDistribution()" style="width: auto; padding: 8px 16px;">⚖️ توزيع تلقائي متوازن</button>
+              <button class="btn btn-secondary" onclick="clearPrintAssignments()" style="padding: 6px 12px; font-size: 12px;">↩️ إلغاء كل التوزيع</button>
             </div>
 
             <div id="print-dist-users-list" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; max-height: 160px; overflow-y: auto; padding: 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;"></div>
@@ -1030,7 +1040,7 @@
           <h3 style="margin-bottom: 10px; font-size: 16px;">معاينة أرقام الطلبات (<span id="print-count">0</span> طلب)</h3>
           <div style="max-height: 300px; overflow-y: auto; margin-bottom: 20px; border: 1px solid var(--card-border); border-radius: 8px;">
             <table>
-              <thead><tr><th>رقم الطلب</th><th>المسؤول المخصص</th></tr></thead>
+              <thead><tr><th>#</th><th>رقم الطلب</th><th>المسؤول المخصص</th></tr></thead>
               <tbody id="print-preview-tbody"></tbody>
             </table>
           </div>

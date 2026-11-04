@@ -8742,9 +8742,11 @@ function populateMawaqefStatusFilter() {
   const select = document.getElementById('mawaqef-status-filter');
   if (!select) return;
   const currentValue = select.value;
-  const statusesInData = [...new Set((mawaqefMasterData || []).map(o => o.status).filter(Boolean))];
+  rebuildMawaqefStatusCanon(mawaqefMasterData || []);
+  // بنجمع الأسماء المتشابهة تحت اسم واحد (الرسمي أو الأكتر استخدامًا)
+  const statusesInData = [...new Set((mawaqefMasterData || []).map(o => canonMawaqefStatus(o.status)).filter(Boolean))];
   const allStatuses = [...new Set([...MAWAQEF_STATUSES, ...statusesInData])];
-  select.innerHTML = '<option value="ALL">كل الحالات</option>' + allStatuses.map(s => `<option value="${s}">${s}</option>`).join('');
+  select.innerHTML = '<option value="ALL">كل الحالات</option>' + allStatuses.map(s => `<option value="${s.replace(/"/g, '&quot;')}">${s}</option>`).join('');
   if (currentValue) select.value = currentValue;
 }
 
@@ -8941,6 +8943,211 @@ async function showAllMawaqefDates() {
   renderMawaqefPage();
 }
 
+// ============ دمج أسماء المواقف المتشابهة + استثناءات الإجمالي + إصلاح تكرار أرقام الطلبات ============
+// الحالات دي بتتعرض بكروتها عادي، بس مش بتتحسب في كارت "إجمالي المواقف"
+const MAWAQEF_TOTAL_EXCLUDED_STATUSES = ['تم الرفع', 'تم الطباعة', 'جاري التعديل'];
+
+// مفتاح مقارنة للاسم: بيتجاهل (أ/إ/آ/ا) و(ى/ي) و(ة/ه) والتشكيل والمسافات والنقط
+// عشان "اكثر" و"أكثر" و"ق.م" و"ق م" يتحسبوا نفس الموقف.
+function normalizeStatusKey(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFKC')
+    .replace(/[\u064B-\u065F\u0670\u0640\u200c-\u200f]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/[\s.\u066B\u066C]+/g, '')
+    .toLowerCase();
+}
+
+let mawaqefStatusCanon = new Map(); // مفتاح الاسم -> الاسم المعروض (الرسمي لو معروف، وإلا الأكتر استخدامًا)
+
+function rebuildMawaqefStatusCanon(rows) {
+  const canon = new Map();
+  MAWAQEF_STATUSES.forEach(st => canon.set(normalizeStatusKey(st), st));
+  const variants = new Map(); // key -> Map(variant -> count)
+  (rows || []).forEach(o => {
+    const v = String(o.status == null ? '' : o.status).replace(/\s+/g, ' ').trim();
+    if (!v) return;
+    const k = normalizeStatusKey(v);
+    if (canon.has(k)) return;
+    if (!variants.has(k)) variants.set(k, new Map());
+    const vm = variants.get(k);
+    vm.set(v, (vm.get(v) || 0) + 1);
+  });
+  variants.forEach((vm, k) => {
+    let best = null, bestCount = -1;
+    vm.forEach((c, v) => { if (c > bestCount) { best = v; bestCount = c; } });
+    canon.set(k, best);
+  });
+  mawaqefStatusCanon = canon;
+}
+
+function canonMawaqefStatus(status) {
+  const v = String(status == null ? '' : status).replace(/\s+/g, ' ').trim();
+  if (!v) return '';
+  return mawaqefStatusCanon.get(normalizeStatusKey(v)) || v;
+}
+rebuildMawaqefStatusCanon([]);
+
+function normalizeOrderKey(n) { return String(n == null ? '' : n).trim(); }
+
+function findMawaqefDuplicateGroups(rows) {
+  const g = new Map();
+  (rows || []).forEach(o => {
+    const k = normalizeOrderKey(o.order_number);
+    if (!k) return;
+    if (!g.has(k)) g.set(k, []);
+    g.get(k).push(o);
+  });
+  return [...g.entries()].filter(([, arr]) => arr.length > 1);
+}
+
+// ترتيب الأحدث الأول (بالتاريخ ثم بالـ id) - الأحدث هو اللي بيفضل
+function compareMawaqefNewestFirst(a, b) {
+  const da = extractDateString(a) || '', db = extractDateString(b) || '';
+  if (da !== db) return da < db ? 1 : -1;
+  const ia = Number(a.id), ib = Number(b.id);
+  if (Number.isFinite(ia) && Number.isFinite(ib)) return ib - ia;
+  return String(b.id).localeCompare(String(a.id));
+}
+
+// الأرقام الموجودة فعلًا في جدول المواقف (فحص من السيرفر مباشرة، كل التواريخ) - عشان محدش يتضاف مرتين
+async function fetchExistingMawaqefNumbers(orderNumbers) {
+  const uniq = [...new Set((orderNumbers || []).map(normalizeOrderKey).filter(Boolean))];
+  const existing = new Set();
+  for (let i = 0; i < uniq.length; i += 200) {
+    const batch = uniq.slice(i, i + 200);
+    const { data, error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).select('order_number').in('order_number', batch);
+    if (error) throw error;
+    (data || []).forEach(r => existing.add(normalizeOrderKey(r.order_number)));
+  }
+  return existing;
+}
+
+function updateMawaqefDuplicatesBanner() {
+  const el = document.getElementById('mawaqef-duplicates-banner');
+  if (!el) return;
+  const master = mawaqefMasterData || [];
+  const groups = findMawaqefDuplicateGroups(master);
+  const extraRows = groups.reduce((n, [, arr]) => n + arr.length - 1, 0);
+  let variantRows = 0;
+  master.forEach(o => {
+    const v = String(o.status == null ? '' : o.status).replace(/\s+/g, ' ').trim();
+    if (v && canonMawaqefStatus(v) !== String(o.status)) variantRows++;
+  });
+  if (groups.length === 0 && variantRows === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+  const parts = [];
+  if (groups.length > 0) parts.push(`<b>${groups.length}</b> رقم طلب مكرر (<b>${extraRows}</b> صف زيادة)`);
+  if (variantRows > 0) parts.push(`<b>${variantRows}</b> صف باسم موقف مكتوب بصيغة مختلفة`);
+  el.innerHTML = `⚠️ فيه ${parts.join(' و ')} في البيانات المحملة. ` +
+    (canDeleteMawaqef()
+      ? `<button type="button" class="btn btn-secondary" style="padding:4px 12px; font-size:12px; margin-right:8px;" onclick="fixMawaqefDuplicates()">🧹 إصلاح الآن</button>`
+      : 'محتاج أدمن بصلاحية الحذف يصلحها.');
+  el.style.display = 'block';
+}
+
+async function fixMawaqefDuplicates() {
+  if (!canDeleteMawaqef()) { alert('إصلاح التكرار متاح للأدمن اللي عنده صلاحية الحذف فقط'); return; }
+  const btn = document.getElementById('mawaqef-fix-dups-btn');
+  const originalText = btn ? btn.innerText : '';
+  const setBtn = (t) => { if (btn) { btn.disabled = true; btn.innerText = t; } };
+
+  try {
+    setBtn('⏳ جاري تحميل كل المواقف...');
+    window.__mawaqefScope = 'none';
+    await ensureFullMawaqefData(n => setBtn(`⏳ جاري التحميل... (${n.toLocaleString('ar-EG')})`));
+
+    const master = mawaqefMasterData || [];
+    rebuildMawaqefStatusCanon(master);
+    const groups = findMawaqefDuplicateGroups(master);
+
+    // ترتيب كل مجموعة مكررة: الأحدث بيفضل، والباقي بيتمسح (بعد ما نكمّل بياناته الفاضية من النسخ القديمة)
+    const FILL_FIELDS = ['taqneen_number', 'governorate', 'coordination_body', 'city', 'comment'];
+    const isBlank = v => v === null || v === undefined || String(v).trim() === '';
+    const toDelete = [];
+    const fills = [];
+    groups.forEach(([, arr]) => {
+      const sorted = arr.slice().sort(compareMawaqefNewestFirst);
+      const keeper = sorted[0];
+      const others = sorted.slice(1);
+      const fill = {};
+      FILL_FIELDS.forEach(f => {
+        if (isBlank(keeper[f])) {
+          const src = others.find(x => !isBlank(x[f]));
+          if (src) fill[f] = src[f];
+        }
+      });
+      if (Object.keys(fill).length > 0) fills.push({ id: keeper.id, data: fill });
+      others.forEach(x => toDelete.push(x.id));
+    });
+
+    // توحيد أسماء المواقف المتشابهة (الصفوف اللي هتتمسح مش بتتحسب)
+    const deleteSet = new Set(toDelete.map(String));
+    const statusIdsByCanon = new Map();
+    master.forEach(o => {
+      if (deleteSet.has(String(o.id))) return;
+      const raw = String(o.status == null ? '' : o.status);
+      if (!raw.trim()) return;
+      const canon = canonMawaqefStatus(raw);
+      if (canon && canon !== raw) {
+        if (!statusIdsByCanon.has(canon)) statusIdsByCanon.set(canon, []);
+        statusIdsByCanon.get(canon).push(o.id);
+      }
+    });
+    const statusFixCount = [...statusIdsByCanon.values()].reduce((n, a) => n + a.length, 0);
+
+    if (toDelete.length === 0 && statusFixCount === 0) {
+      alert('✅ مفيش أي رقم طلب مكرر ولا أسماء مواقف متكررة في جدول المواقف كله.');
+      applyMawaqefDateFiltering();
+      return;
+    }
+
+    const msg = [
+      toDelete.length > 0 ? `• ${groups.length} رقم طلب مكرر: هيتمسح ${toDelete.length} صف زيادة ويفضل الأحدث (بعد ما بياناته الفاضية تتكمل من القديم).` : '',
+      statusFixCount > 0 ? `• ${statusFixCount} صف هيتوحد اسم الموقف فيه (دمج الأسماء المتشابهة زي "اكثر/أكثر" و"اراضي/أراضي").` : ''
+    ].filter(Boolean).join('\n');
+    if (!confirm(`هيتم تنفيذ التالي على جدول المواقف:\n${msg}\n\nالمسح نهائي. تأكيد؟`)) return;
+
+    setBtn('⏳ جاري الإصلاح...');
+
+    for (const f of fills) {
+      const { error } = await supabaseClient.from(MAWAQEF_TABLE_NAME).update(f.data).eq('id', f.id);
+      if (error) { alert('حصل خطأ أثناء تكميل البيانات (ماتمسحش حاجة): ' + error.message); return; }
+    }
+    if (toDelete.length > 0) {
+      const err = await runBatchedSupabaseAction(MAWAQEF_TABLE_NAME, 'id', toDelete, 'delete');
+      if (err) { alert('حصل خطأ أثناء مسح المكرر: ' + err.message); return; }
+      toDelete.forEach(id => selectedMawaqefOrderNumbers.delete('id:' + id));
+    }
+    for (const [canon, ids] of statusIdsByCanon) {
+      const err = await runBatchedSupabaseAction(MAWAQEF_TABLE_NAME, 'id', ids, 'update', { status: canon });
+      if (err) { alert('حصل خطأ أثناء توحيد أسماء المواقف: ' + err.message); return; }
+    }
+
+    // إعادة تحميل كل البيانات والتأكد إن مفيش تكرار فاضل
+    setBtn('⏳ جاري التحقق...');
+    window.__mawaqefScope = 'none';
+    await ensureFullMawaqefData();
+    rebuildMawaqefStatusCanon(mawaqefMasterData);
+    populateMawaqefStatusFilter();
+    const remaining = findMawaqefDuplicateGroups(mawaqefMasterData).length;
+    updateMawaqefSelectedCount();
+    applyMawaqefDateFiltering();
+
+    if (remaining > 0) {
+      alert(`⚠️ لسه فيه ${remaining} رقم طلب مكرر ماتمسحوش. غالبًا صلاحيات الحذف في Supabase (RLS) بتمنع المسح. راجع الصلاحيات وجرّب تاني.`);
+    } else {
+      alert(`✅ تم الإصلاح: اتمسح ${toDelete.length} صف مكرر، واتوحد اسم الموقف في ${statusFixCount} صف. مفيش أي رقم طلب مكرر دلوقتي.`);
+    }
+  } catch (err) {
+    alert('خطأ: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = originalText; }
+  }
+}
+
 // شكل/لون/أيقونة كل حالة موقف - عشان الكروت تبقى واضحة ومفهومة بنظرة واحدة
 const MAWAQEF_STATUS_META = {
   'تم الرفع': { icon: '✅', color: '#34d399' },
@@ -8973,9 +9180,11 @@ const MAWAQEF_FALLBACK_COLORS = ['#38bdf8', '#f472b6', '#facc15', '#4ade80', '#c
 function renderMawaqefKpis(rows) {
   // بنجمع حسب القيمة الفعلية لعمود status في الداتا - أي حالة موجودة بالفعل بتاخد كارت لوحدها،
   // مش بس الـ 7 حالات المعروفة عندنا مسبقًا (MAWAQEF_STATUSES). الفاضي/الغير محدد بيتحسب "بدون موقف".
+  // بنوحّد الأسماء المتشابهة (أ/ا، ة/ه، ى/ي، مسافات...) فتظهر كارت واحد بدل كارتين
+  rebuildMawaqefStatusCanon(mawaqefMasterData && mawaqefMasterData.length ? mawaqefMasterData : rows);
   const counts = {};
   rows.forEach(o => {
-    const status = (o.status && String(o.status).trim()) || 'بدون موقف';
+    const status = canonMawaqefStatus(o.status) || 'بدون موقف';
     counts[status] = (counts[status] || 0) + 1;
   });
 
@@ -8989,21 +9198,25 @@ function renderMawaqefKpis(rows) {
   const container = document.getElementById('mawaqef-kpi-container');
   if (!container) return;
 
-  const total = rows.length;
+  // الإجمالي بيستثني: تم الرفع + تم الطباعة + جاري التعديل
+  const total = orderedStatuses
+    .filter(st => !MAWAQEF_TOTAL_EXCLUDED_STATUSES.includes(st))
+    .reduce((n, st) => n + (counts[st] || 0), 0);
   const activeStatus = (document.getElementById('mawaqef-status-filter') || {}).value || 'ALL';
 
   let html = `
     <div class="stat-card" style="cursor:pointer; border-right: 4px solid var(--accent-purple); background: linear-gradient(135deg, rgba(99,102,241,0.12), var(--bg-dark)); ${activeStatus === 'ALL' ? 'outline: 2px solid var(--accent-purple);' : ''}" onclick="clearMawaqefStatusFilter()">
       <div style="font-size:13px; color:var(--text-muted); font-weight:700; margin-bottom:10px;">🅿️ إجمالي المواقف</div>
       <div style="font-size:32px; font-weight:800;">${total.toLocaleString('ar-EG')}</div>
-      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">كل الحالات مع بعض &middot; اضغط لإلغاء الفلترة</div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">بدون تم الرفع / تم الطباعة / جاري التعديل &middot; اضغط لإلغاء الفلترة</div>
     </div>
   `;
 
   orderedStatuses.forEach((status, idx) => {
     const meta = MAWAQEF_STATUS_META[status] || { icon: '📍', color: MAWAQEF_FALLBACK_COLORS[idx % MAWAQEF_FALLBACK_COLORS.length] };
     const count = counts[status] || 0;
-    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const isExcludedFromTotal = MAWAQEF_TOTAL_EXCLUDED_STATUSES.includes(status);
+    const pct = (!isExcludedFromTotal && total > 0) ? Math.round((count / total) * 100) : 0;
     const isActive = activeStatus === status;
     html += `
       <div class="stat-card" style="cursor:pointer; border-right: 4px solid ${meta.color}; ${isActive ? `outline: 2px solid ${meta.color};` : ''}" onclick="filterMawaqefByStatus('${status.replace(/'/g, "\\'")}')">
@@ -9012,12 +9225,13 @@ function renderMawaqefKpis(rows) {
         <div style="height:6px; border-radius:4px; background:var(--card-border); overflow:hidden; margin-bottom:6px;">
           <div style="height:100%; width:${pct}%; background:${meta.color};"></div>
         </div>
-        <div style="font-size:11px; color:var(--text-muted);">${pct}% من الإجمالي</div>
+        <div style="font-size:11px; color:var(--text-muted);">${isExcludedFromTotal ? 'غير محسوب في الإجمالي' : pct + '% من الإجمالي'}</div>
       </div>
     `;
   });
 
   container.innerHTML = html;
+  updateMawaqefDuplicatesBanner();
 }
 
 let showOnlySelectedMawaqef = false;
@@ -9042,7 +9256,7 @@ function getFilteredMawaqefRows() {
 
   // لو فيه بحث، ندور في كل البيانات المحملة (كل التواريخ المدمجة من السيرفر) مش بس التاريخ المعروض
   let rows = searchValue ? (mawaqefMasterData || []) : (mawaqefAllData || []);
-  if (statusValue && statusValue !== 'ALL') rows = rows.filter(o => o.status === statusValue);
+  if (statusValue && statusValue !== 'ALL') rows = rows.filter(o => canonMawaqefStatus(o.status) === statusValue || (statusValue === 'بدون موقف' && !canonMawaqefStatus(o.status)));
   if (searchValue) {
     rows = rows.filter(o =>
       String(o.order_number || '').toLowerCase().includes(searchValue) ||
@@ -9480,8 +9694,10 @@ async function exportGehatWlayaToMawaqef() {
   const filteredRows = parsedGehatWlayaRows.filter(r => selectedTypes.has(r.gehat_wlaya));
   if (filteredRows.length === 0) { alert('لا توجد صفوف مطابقة للتصدير'); return; }
 
-  if (!mawaqefDataLoaded) await loadMawaqefData();
-  const existingNumbers = new Set((mawaqefMasterData || []).map(o => String(o.order_number)));
+  // فحص مباشر من السيرفر (كل التواريخ) عشان نضمن إن مفيش رقم طلب يتكرر في جدول المواقف
+  let existingNumbers;
+  try { existingNumbers = await fetchExistingMawaqefNumbers(filteredRows.map(r => r.order_number)); }
+  catch (err) { alert('حصل خطأ أثناء فحص التكرار: ' + err.message); return; }
 
   // بنشيل أي رقم طلب مكرر جوه الملف المرفوع نفسه (نسيب أول ظهور بس) قبل ما نقارنه بالداتا الموجودة أصلاً،
   // عشان مايتسجلش نفس الرقم مرتين في نفس عملية التصدير
@@ -9499,7 +9715,7 @@ async function exportGehatWlayaToMawaqef() {
     .filter(r => !existingNumbers.has(String(r.order_number)))
     .map(r => ({
       order_number: r.order_number,
-      status: r.gehat_wlaya,
+      status: canonMawaqefStatus(r.gehat_wlaya) || r.gehat_wlaya,
       governorate: r.gov_name || null,
       city: r.city || null,
       date: new Date().toISOString().split('T')[0]
@@ -9662,10 +9878,13 @@ async function submitGehatQuickAdd() {
     if (!statusValue) { alert('اكتب الموقف/الحالة الأول'); return; }
 
     if (!mawaqefDataLoaded) await loadMawaqefData();
-    const existingNumbers = new Set((mawaqefMasterData || []).map(o => String(o.order_number)));
+    let existingNumbers;
+    try { existingNumbers = await fetchExistingMawaqefNumbers(orderNumbers); }
+    catch (err) { alert('حصل خطأ أثناء فحص التكرار: ' + err.message); return; }
+    const statusCanon = canonMawaqefStatus(statusValue) || statusValue;
     const newRows = orderNumbers
-      .filter(n => !existingNumbers.has(String(n)))
-      .map(n => ({ order_number: n, status: statusValue, date: new Date().toISOString().split('T')[0] }));
+      .filter(n => !existingNumbers.has(normalizeOrderKey(n)))
+      .map(n => ({ order_number: n, status: statusCanon, date: new Date().toISOString().split('T')[0] }));
     const skipped = orderNumbers.length - newRows.length;
 
     if (newRows.length === 0) { alert('كل الأرقام دي موجودة بالفعل في جدول المواقف.'); return; }

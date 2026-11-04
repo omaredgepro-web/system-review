@@ -8335,8 +8335,11 @@ async function deleteSingleCertOrder(rowKey) {
 }
 
 function openCertEditModal(orderNum) {
-  selectedCertOrder = certAllData.find(o => String(o.order_number) === String(orderNum));
-  if (!selectedCertOrder) return;
+  // تاب المرفوضات بيعرض طلبات من كل التواريخ (certMasterData)، أما certAllData فمحدودة بتاريخ تاب الشهادات الحالي،
+  // فلازم نبحث في الاتنين وإلا الزرار مايشتغلش لأي طلب خارج التاريخ المفتوح.
+  const sameOrder = o => String(o.order_number) === String(orderNum);
+  selectedCertOrder = (certAllData || []).find(sameOrder) || (certMasterData || []).find(sameOrder);
+  if (!selectedCertOrder) { alert('مش لاقي بيانات الطلب ' + orderNum + ' - جرّب تحدّث الصفحة.'); return; }
 
   document.getElementById('cert-modal-order-no').value = orderNum;
   document.getElementById('cert-modal-date').value = extractDateString(selectedCertOrder) || '';

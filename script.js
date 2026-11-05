@@ -172,6 +172,7 @@ let printDistCounts = {}; // username -> العدد المطلوب توزيعه 
 let parsedReadyDistNumbers = [];
 let readyDistLayoutAssignments = {}; // order_number -> اسم الأدمن (المسؤول) المخصص ليه
 let readyDistLayoutSelection = null;
+let readyDistExcludedRows = []; // صفوف الأرقام اللي اتشالت من المعاينة لأنها موجودة بالفعل في جاهز على الطباعة
 // مهم: رقم الطلب ممكن يتكرر (نفس الرقم على أكتر من صف/تاريخ)، فالتحديد والحذف
 // لازم يشتغلوا على مفتاح فريد للصف نفسه - مش على رقم الطلب - عشان:
 //  1) العدّاد ميدمجش الصفوف المكررة ويحسبها صف واحد
@@ -4336,6 +4337,24 @@ function clearPrintExcludedReady() {
   renderPrintExcludedPanel();
 }
 
+// تحميل قايمة أرقام طلبات (عمود واحد) كملف Excel
+function exportNumbersToSimpleExcel(numbers, sheetName, fileLabel) {
+  if (!numbers || numbers.length === 0) { alert('لا توجد أرقام لتحميلها.'); return; }
+  const ws = XLSX.utils.json_to_sheet(numbers.map(n => ({ 'رقم الطلب': n })));
+  ws['!cols'] = [{ wch: 28 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.writeFile(wb, `${fileLabel}_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
+function getPrintDistLeftoverMode() {
+  const el = document.getElementById('print-dist-leftover-mode');
+  return el ? el.value : 'store';
+}
+function exportPrintDistLeftoverExcel() {
+  exportNumbersToSimpleExcel(parsedPrintOrderNumbers.filter(n => !printOrderAssignments[n]), 'الباقي بدون توزيع', 'باقي_توزيع_الطباعة');
+}
+
 function countPrintAssignedTo(admin) {
   let n = 0;
   for (const num of parsedPrintOrderNumbers) if (printOrderAssignments[num] === admin) n++;
@@ -4479,8 +4498,10 @@ function renderPrintDistSummary() {
     </div>
   `).join('');
 
+  const leftoverModeIgnore = getPrintDistLeftoverMode() === 'ignore';
   const leftoverHtml = leftoverCount > 0
-    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لسه من غير توزيع (هيترفعوا بدون مسؤول). تقدر توزعهم بكتابة عدد قدام أي أدمن، أو تزوّد التارجت.</p>`
+    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لسه من غير توزيع — ${leftoverModeIgnore ? '<b>هيتجاهلوا ومش هيترفعوا</b>' : '<b>هيتخزنوا بدون مسؤول</b>'} (غيّر ده من "الباقي بعد التوزيع"). تقدر توزعهم بكتابة عدد قدام أي أدمن، أو تزوّد التارجت.
+         <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:11px; margin-right:6px;" onclick="exportPrintDistLeftoverExcel()">⬇️ تحميل الباقي Excel</button></p>`
     : '';
 
   container.innerHTML = `
@@ -4608,15 +4629,24 @@ async function uploadPrintOrdersToSupabase() {
       if (printOrderAssignments[num]) row.Layout = printOrderAssignments[num];
       return row;
     };
-    const freshRows = fresh.map(buildRow);
-    const allowedDuplicateRows = allowedDuplicates.map(buildRow);
-
-    if (freshRows.length === 0 && allowedDuplicateRows.length === 0) {
-      alert('كل أرقام الطلبات دي موجودة بالفعل في جدول الطباعة، مفيش جديد يتضاف.');
-      btn.innerText = 'تأكيد ورفع الطلبات لجدول الطباعة';
-      btn.disabled = false;
+    // "الباقي بعد التوزيع": لو اخترت التجاهل، أي رقم ملوش مسؤول مش هيترفع
+    const leftoverIgnore = getPrintDistLeftoverMode() === 'ignore';
+    if (leftoverIgnore && Object.keys(printOrderAssignments).length === 0) {
+      alert('اخترت "تجاهل الباقي" بس لسه ماعملتش توزيع، فكل الأرقام هتتجاهل. وزّع الأول أو غيّر الاختيار لـ "يتخزن بدون مسؤول".');
       return;
     }
+    const keepNum = n => !leftoverIgnore || !!printOrderAssignments[n];
+    const freshRows = fresh.filter(keepNum).map(buildRow);
+    const allowedDuplicateRows = allowedDuplicates.filter(keepNum).map(buildRow);
+    const ignoredLeftoverCount = (fresh.length + allowedDuplicates.length) - (freshRows.length + allowedDuplicateRows.length);
+
+    if (freshRows.length === 0 && allowedDuplicateRows.length === 0) {
+      alert(ignoredLeftoverCount > 0
+        ? 'مفيش أرقام موزّعة تترفع (الباقي بدون مسؤول اتجاهل حسب اختيارك).'
+        : 'كل أرقام الطلبات دي موجودة بالفعل في جدول الطباعة، مفيش جديد يتضاف.');
+      return;
+    }
+    if (ignoredLeftoverCount > 0 && !confirm(`${ignoredLeftoverCount} رقم طلب ملوش مسؤول هيتجاهلوا ومش هيترفعوا. (لو عايزهم، دوس "إلغاء" وحمّلهم Excel الأول من ملخص التوزيع). متابعة؟`)) return;
 
     let insertedCount = 0;
     let dbConflictCount = 0;
@@ -4650,6 +4680,7 @@ async function uploadPrintOrdersToSupabase() {
       const skippedParts = [];
       if (skippedCount > 0) skippedParts.push(`${skippedCount} كانوا مكررين واتجاهلوا`);
       if (dbConflictCount > 0) skippedParts.push(`${dbConflictCount} اتجاهلوا من الداتابيز مباشرة (كانوا اتضافوا من مكان تاني في نفس الوقت)`);
+      if (ignoredLeftoverCount > 0) skippedParts.push(`${ignoredLeftoverCount} من غير مسؤول اتجاهلوا`);
       const skippedNote = skippedParts.length > 0 ? ` (${skippedParts.join(' و')})` : '';
       const excludedNote = printExcludedReady.length > 0 ? `\n(${printExcludedReady.length} طلب اتستبعدوا لأنهم جاهزين للطباعة — تقدر تحمّلهم Excel من نفس التاب)` : '';
       alert(`تم رفع ${insertedCount} رقم طلب بنجاح!${skippedNote}${excludedNote}`);
@@ -11578,8 +11609,10 @@ function renderReadyDistSummary(counts, leftoverCount) {
     </div>
   `).join('');
 
+  const leftoverIgnore = getReadyDistLeftoverMode() === 'ignore';
   const leftoverHtml = leftoverCount > 0
-    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لم يتم توزيعه، لأن كل الأدمن المختارين وصلوا للعدد المستهدف. زوّد التارجت أو اختار أدمن إضافيين.</p>`
+    ? `<p style="font-size: 12px; color: var(--badge-hold-text); margin-top: 10px;">⚠️ ${leftoverCount} طلب لم يتم توزيعه (وصل الأدمن المختارين للعدد المستهدف) — ${leftoverIgnore ? '<b>هيتجاهلوا ومش هيترفعوا</b>' : '<b>هيتخزنوا بدون مسؤول</b>'} (غيّر ده من "الباقي بعد التوزيع"). أو زوّد التارجت / اختار أدمن إضافيين.
+         <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:11px; margin-right:6px;" onclick="exportReadyDistLeftoverExcel()">⬇️ تحميل الباقي Excel</button></p>`
     : '';
 
   container.innerHTML = `
@@ -11602,6 +11635,40 @@ function renderReadyDistSummaryFromAssignments() {
 
 // بيدور على أي رقم من الدفعة الحالية موجود بالفعل في جدول "جاهز على الطباعة"،
 // ويعرضهم في لوحة تحذير مع بياناتهم الحالية (المسؤول/المراجع/الحالة/التاريخ).
+function getReadyDistLeftoverMode() {
+  const el = document.getElementById('ready-dist-leftover-mode');
+  return el ? el.value : 'store';
+}
+function exportReadyDistLeftoverExcel() {
+  exportNumbersToSimpleExcel(parsedReadyDistNumbers.filter(n => !readyDistLayoutAssignments[n]), 'الباقي بدون توزيع', 'باقي_توزيع_جاهز_على_الطباعة');
+}
+
+// كل الأرقام المستبعدة (الموجودة بالفعل في جاهز على الطباعة): الظاهرة في المعاينة + اللي اتشالت قبل كده
+function getReadyDistDuplicateRowsForExport() {
+  const byNum = new Map();
+  (readyDistExcludedRows || []).forEach(o => byNum.set(String(o.order_number), o));
+  (window.lastReadyDistDupRows || []).forEach(o => byNum.set(String(o.order_number), o));
+  return [...byNum.values()];
+}
+
+function exportReadyDistDuplicatesExcel() {
+  const rows = getReadyDistDuplicateRowsForExport();
+  if (rows.length === 0) { alert('لا توجد طلبات مستبعدة لتحميلها.'); return; }
+  const exportRows = rows.map(o => ({
+    'رقم الطلب': o.order_number || '-',
+    'المسؤول الحالي': getDisplayName(o.Layout || o.layout) || 'غير موزّع',
+    'المراجع الحالي': getDisplayName(o.reviewer) || '-',
+    'الحالة الحالية': (o.status && String(o.status).trim()) || 'لم يتم المراجعة',
+    'التاريخ الحالي': extractDateString(o) || '-',
+    'النوع': o.cert_type || 'عادي'
+  }));
+  const ws = XLSX.utils.json_to_sheet(exportRows);
+  ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'مستبعد - موجود بالفعل');
+  XLSX.writeFile(wb, `مستبعد_موجود_في_جاهز_على_الطباعة_${new Date().toISOString().split('T')[0]}.xlsx`);
+}
+
 async function renderReadyDistDuplicatesPanel() {
   const area = document.getElementById('ready-dist-duplicates-area');
   const container = document.getElementById('ready-dist-duplicates-panel');
@@ -11621,15 +11688,22 @@ async function renderReadyDistDuplicatesPanel() {
 
   const dupNums = parsedReadyDistNumbers.filter(num => existingMap[String(num)]);
   window.lastReadyDistDupNums = dupNums;
+  window.lastReadyDistDupRows = dupNums.map(num => existingMap[String(num)]);
   area.style.display = 'block';
 
   if (dupNums.length === 0) {
-    container.innerHTML = `<p style="color: var(--badge-accept-text);">✅ مفيش أي رقم من اللي دخلتهم موجود قبل كده في جدول "جاهز على الطباعة".</p>`;
+    const removedCount = (readyDistExcludedRows || []).length;
+    container.innerHTML = `<p style="color: var(--badge-accept-text);">✅ مفيش أي رقم من اللي دخلتهم موجود قبل كده في جدول "جاهز على الطباعة".</p>` +
+      (removedCount > 0
+        ? `<p style="font-size:12px; color: var(--text-muted); margin-top:6px;">(${removedCount} رقم اتشالوا من المعاينة قبل كده لأنهم موجودين بالفعل)</p>
+           <button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px; margin-top:6px;" onclick="exportReadyDistDuplicatesExcel()">⬇️ تحميل إكسيل بالمستبعد (${removedCount})</button>`
+        : '');
     return;
   }
 
   let html = `<p style="color: var(--badge-reject-text); font-weight:800; margin-bottom:6px;">🚨 ${dupNums.length} رقم طلب موجود بالفعل في جدول "جاهز على الطباعة" من قبل — هيتجاهلوا تلقائيًا عند الرفع (مش هيتضافوا مرة تانية):</p>`;
   html += `<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">`;
+  html += `<button type="button" class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="exportReadyDistDuplicatesExcel()">⬇️ تحميل إكسيل بالمستبعد (${getReadyDistDuplicateRowsForExport().length})</button>`;
   html += `<button type="button" class="btn-delete-row" style="padding:6px 12px; font-size:12px;" onclick="removeReadyDistDuplicatesFromBatch()">🗑️ إزالتهم من المعاينة الحالية</button>`;
   html += `</div>`;
 
@@ -11661,7 +11735,12 @@ function removeReadyDistDuplicatesFromBatch() {
   if (!confirmRemove) return;
 
   const dupSet = new Set(dupNums.map(String));
+  // نحتفظ ببياناتهم عشان زرار تحميل Excel يفضل شغال حتى بعد الإزالة
+  const keepMap = new Map((readyDistExcludedRows || []).map(o => [String(o.order_number), o]));
+  (window.lastReadyDistDupRows || []).forEach(o => keepMap.set(String(o.order_number), o));
+  readyDistExcludedRows = [...keepMap.values()];
   parsedReadyDistNumbers = parsedReadyDistNumbers.filter(num => !dupSet.has(String(num)));
+  dupSet.forEach(n => { delete readyDistLayoutAssignments[n]; });
   renderReadyDistPreview();
 }
 
@@ -11670,6 +11749,8 @@ function resetReadyDistData() {
   parsedReadyDistNumbers = [];
   readyDistLayoutAssignments = {};
   readyDistLayoutSelection = null;
+  readyDistExcludedRows = [];
+  window.lastReadyDistDupRows = [];
   const nameEl = document.getElementById('ready-dist-file-name-display');
   if (nameEl) nameEl.innerText = '';
   const previewArea = document.getElementById('ready-dist-preview-area');
@@ -11754,13 +11835,24 @@ async function uploadReadyDistOrdersToSupabase() {
       if (readyDistLayoutAssignments[num]) row.Layout = readyDistLayoutAssignments[num];
       return row;
     };
-    const rowsToInsert = fresh.concat(allowedDuplicates).map(buildRow);
-
-    if (rowsToInsert.length === 0) {
-      alert('كل أرقام الطلبات دي موجودة بالفعل في جدول "جاهز على الطباعة"، مفيش جديد يتضاف.');
-      if (btn) { btn.innerText = 'تأكيد ورفع الطلبات لجدول جاهز على الطباعة'; btn.disabled = false; }
+    // "الباقي بعد التوزيع": لو اخترت التجاهل، أي رقم ملوش مسؤول مش هيترفع
+    const leftoverIgnore = getReadyDistLeftoverMode() === 'ignore';
+    if (leftoverIgnore && Object.keys(readyDistLayoutAssignments).length === 0) {
+      alert('اخترت "تجاهل الباقي" بس لسه ماعملتش توزيع، فكل الأرقام هتتجاهل. وزّع الأول أو غيّر الاختيار لـ "يتخزن بدون مسؤول".');
       return;
     }
+    const allNums = fresh.concat(allowedDuplicates);
+    const numsToInsert = leftoverIgnore ? allNums.filter(n => readyDistLayoutAssignments[n]) : allNums;
+    const ignoredLeftoverCount = allNums.length - numsToInsert.length;
+    const rowsToInsert = numsToInsert.map(buildRow);
+
+    if (rowsToInsert.length === 0) {
+      alert(ignoredLeftoverCount > 0
+        ? 'مفيش أرقام موزّعة تترفع (الباقي بدون مسؤول اتجاهل حسب اختيارك).'
+        : 'كل أرقام الطلبات دي موجودة بالفعل في جدول "جاهز على الطباعة"، مفيش جديد يتضاف.');
+      return;
+    }
+    if (ignoredLeftoverCount > 0 && !confirm(`${ignoredLeftoverCount} رقم طلب ملوش مسؤول هيتجاهلوا ومش هيترفعوا. (لو عايزهم، دوس "إلغاء" وحمّلهم Excel الأول من ملخص التوزيع). متابعة؟`)) return;
 
     let insertedCount = 0;
     let firstError = null;
@@ -11775,7 +11867,10 @@ async function uploadReadyDistOrdersToSupabase() {
     if (firstError) {
       alert(`تم رفع ${insertedCount} رقم طلب بنجاح قبل ما يحصل خطأ: ${firstError.message}\nجرب تاني للأرقام الباقية.`);
     } else {
-      const skippedNote = skippedCount > 0 ? ` (${skippedCount} كانوا مكررين واتجاهلوا)` : '';
+      const skippedParts = [];
+      if (skippedCount > 0) skippedParts.push(`${skippedCount} كانوا مكررين واتجاهلوا`);
+      if (ignoredLeftoverCount > 0) skippedParts.push(`${ignoredLeftoverCount} من غير مسؤول اتجاهلوا`);
+      const skippedNote = skippedParts.length > 0 ? ` (${skippedParts.join(' و')})` : '';
       alert(`تم رفع ${insertedCount} رقم طلب بنجاح لجدول "جاهز على الطباعة"!${skippedNote}`);
       resetReadyDistData();
     }

@@ -1030,6 +1030,14 @@
               <button class="btn btn-secondary" onclick="clearPrintAssignments()" style="padding: 6px 12px; font-size: 12px;">↩️ إلغاء كل التوزيع</button>
             </div>
 
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+              <label style="font-size: 13px; color: var(--text-muted);">الباقي بعد التوزيع (اللي ملوش مسؤول):</label>
+              <select id="print-dist-leftover-mode" class="filter-select" style="width: 240px; padding: 6px 10px; font-size: 13px;" onchange="renderPrintDistSummary()">
+                <option value="store">💾 يتخزن بدون مسؤول</option>
+                <option value="ignore">🚫 يتجاهل (مش هيترفع)</option>
+              </select>
+            </div>
+
             <div id="print-dist-users-list" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; max-height: 160px; overflow-y: auto; padding: 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;"></div>
 
             <div id="print-dist-summary"></div>
@@ -1133,6 +1141,14 @@
               <button class="btn btn-secondary" onclick="selectAllReadyDistUsers(true)" style="padding: 6px 12px; font-size: 12px;">تحديد الكل</button>
               <button class="btn btn-secondary" onclick="selectAllReadyDistUsers(false)" style="padding: 6px 12px; font-size: 12px;">إلغاء تحديد الكل</button>
               <button class="btn btn-primary" onclick="runReadyDistBalancedDistribution()" style="width: auto; padding: 8px 16px;">⚖️ توزيع تلقائي الآن</button>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+              <label style="font-size: 13px; color: var(--text-muted);">الباقي بعد التوزيع (اللي ملوش مسؤول):</label>
+              <select id="ready-dist-leftover-mode" class="filter-select" style="width: 240px; padding: 6px 10px; font-size: 13px;" onchange="renderReadyDistSummaryFromAssignments()">
+                <option value="store">💾 يتخزن بدون مسؤول</option>
+                <option value="ignore">🚫 يتجاهل (مش هيترفع)</option>
+              </select>
             </div>
 
             <div id="ready-dist-users-list" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; max-height: 160px; overflow-y: auto; padding: 10px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px;"></div>
